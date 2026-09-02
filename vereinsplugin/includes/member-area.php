@@ -132,11 +132,13 @@ function vp_member_sections() {
 			'need_sc'   => true,
 		),
 		'schichtplaene' => array(
-			'label'     => __( 'Schichtpläne', 'vereinsplugin' ),
-			'group'     => 'mitglied',
-			'cap'       => 'wl_manage_wishes',
-			'shortcode' => 'schichtplan_verwaltung',
-			'need_sc'   => true,
+			'label'    => __( 'Schichtpläne', 'vereinsplugin' ),
+			'group'    => 'mitglied',
+			'cap'      => 'read',
+			'render'   => 'vp_render_schichtplaene_section',
+			// Nur anzeigen, wenn das Schichtplan-Modul (Wunschliste) aktiv ist.
+			'need_sc'  => true,
+			'shortcode' => 'schichtplan',
 		),
 		'protokolle' => array(
 			'label'     => __( 'Sitzungen & Protokolle', 'vereinsplugin' ),
@@ -447,6 +449,61 @@ function vp_render_profile_section() {
 		<a class="vp-btn" href="<?php echo esc_url( admin_url( 'profile.php' ) ); ?>"><?php esc_html_e( 'Passwort ändern', 'vereinsplugin' ); ?></a></p>
 	</form>
 	<?php
+	return ob_get_clean();
+}
+
+/* ---- Schichtpläne: ansehen + eintragen + verwalten ---- */
+
+function vp_render_schichtplaene_section() {
+	if ( ! shortcode_exists( 'schichtplan' ) ) {
+		return '<div class="vp-note vp-note-error">' . esc_html__( 'Das Schichtplan-Modul ist nicht aktiv.', 'vereinsplugin' ) . '</div>';
+	}
+
+	$can_manage = current_user_can( 'wl_manage_wishes' ) && shortcode_exists( 'schichtplan_verwaltung' );
+	$view       = isset( $_GET['vp_sp'] ) ? sanitize_key( wp_unslash( $_GET['vp_sp'] ) ) : 'ansehen';
+	if ( 'verwalten' === $view && ! $can_manage ) {
+		$view = 'ansehen';
+	}
+
+	$base = get_permalink();
+	if ( ! $base ) {
+		$base = remove_query_arg( array( 'vp_sp', 'event', 'wl_abmelden', 'wl_abgemeldet' ) );
+	}
+	$url_ansehen   = add_query_arg( array( 'vp_tab' => 'schichtplaene', 'vp_sp' => 'ansehen' ), $base );
+	$url_verwalten = add_query_arg( array( 'vp_tab' => 'schichtplaene', 'vp_sp' => 'verwalten' ), $base );
+
+	ob_start();
+	echo '<h2>' . esc_html__( 'Schichtpläne', 'vereinsplugin' ) . '</h2>';
+
+	if ( $can_manage ) {
+		echo '<nav class="vp-subnav">';
+		printf( '<a class="%s" href="%s">%s</a>', 'ansehen' === $view ? 'is-active' : '', esc_url( $url_ansehen ), esc_html__( 'Ansehen & Eintragen', 'vereinsplugin' ) );
+		printf( '<a class="%s" href="%s">%s</a>', 'verwalten' === $view ? 'is-active' : '', esc_url( $url_verwalten ), esc_html__( 'Verwalten', 'vereinsplugin' ) );
+		echo '</nav>';
+	}
+
+	if ( 'verwalten' === $view ) {
+		echo do_shortcode( '[schichtplan_verwaltung]' ); // phpcs:ignore WordPress.Security.EscapeOutput
+		return ob_get_clean();
+	}
+
+	// Ansehen & Eintragen. Das Modul liest den Event nur aus dem Shortcode-
+	// Attribut – hier den ?event=<slug> aus der URL nachreichen.
+	$slug  = isset( $_GET['event'] ) ? sanitize_title( wp_unslash( $_GET['event'] ) ) : '';
+	$event = ( $slug && function_exists( 'wl_get_event_by_slug' ) ) ? wl_get_event_by_slug( $slug ) : null;
+
+	if ( $event && function_exists( 'wl_render_schichtplan' ) ) {
+		printf(
+			'<p><a class="vp-btn" href="%s">%s</a></p>',
+			esc_url( $url_ansehen ),
+			esc_html__( '← Alle Schichtpläne', 'vereinsplugin' )
+		);
+		echo wl_render_schichtplan( $event->id ); // phpcs:ignore WordPress.Security.EscapeOutput
+	} else {
+		// Übersicht aller aktiven Veranstaltungen (verlinkt jeweils auf ?event=slug).
+		echo do_shortcode( '[schichtplan]' ); // phpcs:ignore WordPress.Security.EscapeOutput
+	}
+
 	return ob_get_clean();
 }
 
