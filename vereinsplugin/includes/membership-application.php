@@ -502,6 +502,13 @@ function vp_antrag_create_user( $a ) {
 	);
 	wp_mail( $a->email, sprintf( '[%s] %s', get_bloginfo( 'name' ), __( 'Willkommen – dein Zugang', 'vereinsplugin' ) ), $body );
 
+	/**
+	 * Neues Vereinsmitglied wurde angelegt (z. B. für den Nextcloud-Sync).
+	 *
+	 * @param int $user_id
+	 */
+	do_action( 'vp_member_created', $user_id );
+
 	return $user_id;
 }
 

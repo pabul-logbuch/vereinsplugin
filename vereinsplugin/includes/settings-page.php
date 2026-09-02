@@ -50,6 +50,16 @@ function vp_settings_save() {
 	}
 	delete_transient( 'vp_antrag_page_lookup' );
 
+	// Nextcloud-Sync.
+	update_option( 'vp_nc_url', esc_url_raw( trim( (string) wp_unslash( $_POST['vp_nc_url'] ?? '' ) ) ) );
+	update_option( 'vp_nc_admin_user', sanitize_text_field( wp_unslash( $_POST['vp_nc_admin_user'] ?? '' ) ) );
+	if ( '' !== trim( (string) ( $_POST['vp_nc_admin_pass'] ?? '' ) ) ) {
+		update_option( 'vp_nc_admin_pass', trim( (string) wp_unslash( $_POST['vp_nc_admin_pass'] ) ) );
+	}
+	update_option( 'vp_nc_group_map', sanitize_textarea_field( wp_unslash( $_POST['vp_nc_group_map'] ?? '' ) ) );
+	update_option( 'vp_nc_sync_enabled', isset( $_POST['vp_nc_sync_enabled'] ) ? '1' : '0' );
+	update_option( 'vp_nc_sso', isset( $_POST['vp_nc_sso'] ) ? '1' : '0' );
+
 	// SEPA / Beitrag.
 	update_option( 'vp_sepa_glaeubiger', sanitize_text_field( wp_unslash( $_POST['vp_sepa_glaeubiger'] ?? '' ) ) );
 	update_option( 'vp_sepa_glaeubiger_id', sanitize_text_field( wp_unslash( $_POST['vp_sepa_glaeubiger_id'] ?? '' ) ) );
@@ -144,6 +154,42 @@ function vp_render_settings_page() {
 				<tr>
 					<th scope="row"><label for="vp_app_theme_color"><?php esc_html_e( 'App-Farbe', 'vereinsplugin' ); ?></label></th>
 					<td><input name="vp_app_theme_color" id="vp_app_theme_color" type="text" placeholder="#1f2937" value="<?php echo esc_attr( get_option( 'vp_app_theme_color', '#1f2937' ) ); ?>"></td>
+				</tr>
+			</table>
+
+			<h2><?php esc_html_e( 'Nextcloud-Sync', 'vereinsplugin' ); ?></h2>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="vp_nc_url"><?php esc_html_e( 'Nextcloud-URL', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_nc_url" id="vp_nc_url" type="url" class="regular-text" placeholder="https://cloud.verein.de" value="<?php echo esc_attr( get_option( 'vp_nc_url', get_option( 'jb_nc_url', '' ) ) ); ?>">
+						<p class="description"><?php esc_html_e( 'Leer lassen, um die URL aus der Buchhaltung (Belege) zu übernehmen.', 'vereinsplugin' ); ?></p></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_nc_admin_user"><?php esc_html_e( 'Admin-/Gruppenadmin-Benutzer', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_nc_admin_user" id="vp_nc_admin_user" type="text" class="regular-text" value="<?php echo esc_attr( get_option( 'vp_nc_admin_user', '' ) ); ?>">
+						<p class="description"><?php esc_html_e( 'Braucht Rechte, um in Nextcloud Benutzer und Gruppen zu verwalten. Leer = der Buchhaltungs-Zugang.', 'vereinsplugin' ); ?></p></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_nc_admin_pass"><?php esc_html_e( 'App-Passwort dieses Kontos', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_nc_admin_pass" id="vp_nc_admin_pass" type="password" class="regular-text" placeholder="<?php echo get_option( 'vp_nc_admin_pass' ) ? '••••••• (gespeichert)' : ''; ?>" autocomplete="new-password"></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_nc_group_map"><?php esc_html_e( 'Gruppen → Rollen', 'vereinsplugin' ); ?></label></th>
+					<td>
+						<textarea name="vp_nc_group_map" id="vp_nc_group_map" rows="6" class="large-text code" placeholder="Vorstand = editor&#10;Mitglieder = wl_mitglied&#10;Kassier = editor"><?php echo esc_textarea( get_option( 'vp_nc_group_map', "Vorstand = editor\nMitglieder = wl_mitglied" ) ); ?></textarea>
+						<p class="description"><?php esc_html_e( 'Je Zeile „NC-Gruppenname = WP-Rolle“. Reihenfolge = Priorität (obere gewinnt, wenn jemand in mehreren Gruppen ist). WP-Rollen u. a.: administrator, editor, wl_mitglied.', 'vereinsplugin' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Automatik', 'vereinsplugin' ); ?></th>
+					<td><label><input type="checkbox" name="vp_nc_sync_enabled" value="1" <?php checked( get_option( 'vp_nc_sync_enabled' ) === '1' ); ?>>
+						<?php esc_html_e( 'Stündlich automatisch synchronisieren (zusätzlich zum Button im Vorstandsbereich).', 'vereinsplugin' ); ?></label></td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Nextcloud-Login', 'vereinsplugin' ); ?></th>
+					<td><label><input type="checkbox" name="vp_nc_sso" value="1" <?php checked( get_option( 'vp_nc_sso' ) === '1' ); ?>>
+						<?php esc_html_e( 'Mitglieder dürfen sich in WordPress mit ihrem Nextcloud-Benutzernamen + Nextcloud-Passwort anmelden.', 'vereinsplugin' ); ?></label>
+						<p class="description"><?php esc_html_e( 'Kein Server- oder Admin-Zugriff nötig. Das Passwort wird bei der Anmeldung direkt bei Nextcloud geprüft. Funktioniert nicht mit reiner 2-Faktor-Pflicht.', 'vereinsplugin' ); ?></p></td>
 				</tr>
 			</table>
 

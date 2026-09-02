@@ -182,6 +182,12 @@ function vp_member_sections() {
 			'cap'    => 'vp_manage_members',
 			'render' => 'vp_render_members_section',
 		),
+		'nextcloud' => array(
+			'label'  => __( 'Nextcloud-Sync', 'vereinsplugin' ),
+			'group'  => 'vorstand',
+			'cap'    => 'vp_manage_members',
+			'render' => 'vp_render_nextcloud_section',
+		),
 		'auslagen_pruefen' => array(
 			'label'  => __( 'Auslagen prüfen', 'vereinsplugin' ),
 			'group'  => 'vorstand',
