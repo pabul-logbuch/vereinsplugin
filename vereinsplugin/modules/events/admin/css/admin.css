@@ -1,0 +1,21 @@
+.jbf-image-field { margin-bottom: 12px; }
+.jbf-image-preview img { max-width: 200px; height: auto; display: block; margin-bottom: 6px; border: 1px solid #ccd0d4; }
+#jbf-publish-log { margin-top: 10px; }
+.jbf-last-log ul { margin-left: 0; }
+.jbf-last-log li { list-style: none; padding: 2px 6px; border-radius: 3px; margin-bottom: 3px; }
+.jbf-last-log li.jbf-ok { background: #d7f5d7; }
+.jbf-last-log li.jbf-fail { background: #f9d6d6; }
+.jbf-log-entry { padding: 2px 6px; border-radius: 3px; margin-bottom: 3px; }
+.jbf-log-entry.jbf-ok { background: #d7f5d7; }
+.jbf-log-entry.jbf-fail { background: #f9d6d6; }
+
+.jbf-checklist-item { border: 1px solid #dcdcde; border-radius: 4px; padding: 12px 14px; margin-bottom: 10px; background: #fff; }
+.jbf-checklist-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.jbf-checklist-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; display: inline-block; }
+.jbf-badge-open { background: #f9d6d6; color: #7a1c1c; }
+.jbf-badge-done { background: #d7f5d7; color: #1c5c1c; }
+.jbf-badge-optional { background: #f0f0f1; color: #555; }
+.jbf-field-label { display: block; font-weight: 600; margin-bottom: 3px; font-size: 12px; }
+#jbf-checklist-progress { font-weight: 600; }
+.jbf-campaign-table th, .jbf-campaign-table td { vertical-align: top; padding: 8px; }
+template#jbf-campaign-row-template { display: none; }

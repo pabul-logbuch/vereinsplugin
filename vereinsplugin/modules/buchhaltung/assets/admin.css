@@ -1,0 +1,19 @@
+/* JuFo Buchhaltung – Admin Styles */
+.jb-admin h1 { font-size: 1.6rem; margin-bottom: 1.2rem; }
+.jb-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr));
+    gap: 1rem; margin-bottom: 1.8rem; }
+.jb-kpi { background: #fff; border: 1.5px solid #e5e7eb; border-radius: 10px;
+    padding: 1rem 1.2rem; }
+.jb-kpi-label { font-size: .8rem; color: #6b7280; margin-bottom: .4rem; }
+.jb-kpi-val { font-size: 1.6rem; font-weight: 700; }
+.jb-kpi-green { border-color: #6ee7b7; } .jb-kpi-green .jb-kpi-val { color: #065f46; }
+.jb-kpi-red   { border-color: #fca5a5; } .jb-kpi-red   .jb-kpi-val { color: #991b1b; }
+.jb-kpi-orange{ border-color: #fcd34d; } .jb-kpi-orange .jb-kpi-val { color: #92400e; }
+.jb-kpi-grey  { border-color: #e5e7eb; } .jb-kpi-grey  .jb-kpi-val { color: #374151; }
+.jb-badge-count { background:#ef4444; color:#fff; font-size:.75rem;
+    padding:.1rem .5rem; border-radius:20px; margin-left:.4rem; }
+.jb-action-row { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+.jb-export-card { background: #f9fafb; border: 1.5px solid #e5e7eb;
+    border-radius: 10px; padding: 1.2rem; }
+.jb-export-card h3 { margin: 0 0 .5rem; }
+.jb-export-card p { color: #6b7280; font-size: .9rem; margin-bottom: 1rem; }

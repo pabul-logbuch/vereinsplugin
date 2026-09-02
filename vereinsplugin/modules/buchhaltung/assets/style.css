@@ -1,0 +1,57 @@
+/* JuFo Buchhaltung – Frontend Styles */
+.jb-wrap { max-width: 680px; margin: 1.5rem auto; font-family: system-ui, sans-serif; }
+.jb-wrap h3 { font-size: 1.4rem; margin-bottom: .5rem; }
+.jb-info { color: #555; margin-bottom: 1.2rem; }
+
+/* Fields */
+.jb-field { margin-bottom: 1.1rem; }
+.jb-field label { display: block; font-weight: 600; margin-bottom: .3rem; font-size: .9rem; }
+.jb-field input, .jb-field select, .jb-field textarea {
+    width: 100%; padding: .6rem .8rem; border: 1.5px solid #d1d5db;
+    border-radius: 8px; font-size: 1rem; box-sizing: border-box;
+    transition: border-color .15s;
+}
+.jb-field input:focus, .jb-field select:focus, .jb-field textarea:focus {
+    outline: none; border-color: #1F4E78; box-shadow: 0 0 0 3px rgba(31,78,120,.12);
+}
+
+/* Upload area */
+.jb-upload-area {
+    border: 2px dashed #d1d5db; border-radius: 10px; padding: 1.5rem;
+    text-align: center; cursor: pointer; position: relative; transition: border-color .15s;
+}
+.jb-upload-area:hover { border-color: #1F4E78; }
+.jb-upload-area input[type=file] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+}
+.jb-upload-icon { font-size: 2rem; display: block; margin-bottom: .3rem; }
+.jb-upload-sub { display: block; font-size: .8rem; color: #999; margin-top: .2rem; }
+#jb-upload-preview { font-size: .9rem; color: #1F4E78; font-weight: 500; margin-top: .5rem; }
+
+/* Buttons */
+.jb-btn { display: inline-block; padding: .65rem 1.4rem; border-radius: 8px;
+    font-weight: 600; font-size: .95rem; cursor: pointer; border: none; text-decoration: none; }
+.jb-btn-primary { background: #1F4E78; color: #fff; }
+.jb-btn-primary:hover { background: #163a5e; color: #fff; }
+.jb-btn-sm { font-size: .8rem; padding: .3rem .8rem; }
+
+/* Messages */
+.jb-msg { padding: .9rem 1.1rem; border-radius: 8px; margin-bottom: 1rem; }
+.jb-msg-success { background: #ecfdf5; color: #065f46; border: 1px solid #6ee7b7; }
+.jb-msg-error   { background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; }
+
+/* Table */
+.jb-table-wrap { overflow-x: auto; }
+.jb-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.jb-table th { background: #f3f4f6; padding: .6rem .8rem; text-align: left; font-weight: 600; }
+.jb-table td { padding: .6rem .8rem; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+.jb-table tr:last-child td { border-bottom: none; }
+
+/* Badges */
+.jb-badge { display: inline-block; color: #fff; font-size: .75rem; font-weight: 600;
+    padding: .2rem .6rem; border-radius: 20px; }
+.jb-muted { color: #9ca3af; font-size: .85rem; }
+.jb-summary { color: #555; font-size: .9rem; margin-top: .8rem; }
+.jb-box { padding: .9rem 1.1rem; border-radius: 8px; margin: 1rem 0; }
+.jb-box.jb-warn { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; }
+.jb-box.jb-info { background: #eff6ff; border: 1px solid #93c5fd; color: #1e40af; }

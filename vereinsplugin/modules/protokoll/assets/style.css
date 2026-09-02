@@ -1,0 +1,485 @@
+/* ProtokollPro – Admin & Frontend Styles */
+
+.pp-wrap .pp-columns {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    margin-top: 16px;
+}
+.pp-wrap .pp-col-list { flex: 1 1 55%; }
+.pp-wrap .pp-col-form { flex: 1 1 45%; background: #fff; padding: 16px 20px; border: 1px solid #ccd0d4; border-radius: 4px; }
+
+.pp-wrap .pp-row-active { background: #eef6ff; }
+.pp-wrap .pp-link-danger { color: #b32d2e; }
+.pp-wrap .pp-link-danger:hover { color: #dc3232; }
+
+.pp-dashboard-cards {
+    display: flex;
+    gap: 16px;
+    margin: 20px 0;
+    flex-wrap: wrap;
+}
+.pp-card {
+    display: block;
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 6px;
+    padding: 16px 20px;
+    min-width: 180px;
+    text-decoration: none;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+}
+.pp-card-num { display: block; font-size: 28px; font-weight: 600; color: #1d2327; }
+.pp-card-label { display: block; color: #646970; font-size: 13px; margin-top: 4px; }
+
+.pp-hint {
+    background: #fff8e5;
+    border-left: 4px solid #dba617;
+    padding: 12px 16px;
+    margin: 16px 0;
+}
+
+.pp-top-card {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-left: 4px solid #8c8f94;
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+}
+.pp-top-status-vorstellung,
+.pp-top-status-verstaendnisfragen,
+.pp-top-status-meinungsrunde { border-left-color: #2271b1; }
+.pp-top-status-konsentrunde { border-left-color: #dba617; }
+.pp-top-status-einwand_offen { border-left-color: #dc3232; background: #fff8f8; }
+.pp-top-status-beschlossen { border-left-color: #00a32a; background: #f7fff9; }
+
+.pp-top-head { margin-bottom: 6px; }
+.pp-badge {
+    display: inline-block;
+    background: #f0f0f1;
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 11px;
+    margin-left: 6px;
+    color: #3c434a;
+}
+.pp-badge-status { background: #dbeafe; color: #1d4ed8; }
+
+.pp-einwand-box {
+    background: #fef2f2;
+    border: 1px solid #f2b8b5;
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin-top: 8px;
+}
+.pp-beschluss { background: #f7fff9; padding: 8px 12px; border-radius: 4px; }
+
+.pp-top-actions form { margin-right: 8px; }
+.pp-inline-form { margin: 12px 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* Öffentliche Frontend-Ansicht */
+.pp-public-item {
+    border-bottom: 1px solid #e2e2e2;
+    padding: 16px 0;
+}
+.pp-public-meta { color: #666; font-size: 13px; }
+.pp-public-tops { margin-top: 8px; }
+
+/* Rollenvorlagen (Zuständigkeiten, Fähigkeiten, Aufgaben je Rolle) */
+.pp-rollenvorlage-card {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+    padding: 14px 18px;
+    margin-bottom: 14px;
+}
+.pp-rollenvorlage-head { margin-bottom: 10px; }
+.pp-rollenvorlage-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+.pp-rollenvorlage-grid h4 { margin: 0 0 4px; font-size: 13px; color: #3c434a; }
+.pp-rollenvorlage-grid ul { margin: 0 0 0 18px; }
+.pp-aufgaben-vorlagen-table { margin-bottom: 8px; }
+.pp-aufgabe-vorlage-form summary { cursor: pointer; color: #2271b1; margin: 6px 0; }
+
+/* Organigramm (radial / mindmap-artig, nicht hierarchisch von oben nach unten) */
+.pp-organigramm-wrap { max-width: 900px; margin: 0 auto; }
+.pp-organigramm-svg { width: 100%; height: auto; display: block; }
+.pp-org-line { stroke: #d0d5dd; stroke-width: 2; }
+.pp-org-node circle { stroke: #fff; stroke-width: 2; }
+.pp-org-label { pointer-events: none; font-family: inherit; }
+.pp-org-legende { max-width: 700px; margin: 16px auto 0; text-align: center; }
+.pp-org-legende-intro { font-size: 13px; color: #646970; margin: 0 0 10px; }
+.pp-org-legende-items { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+.pp-org-legende-item { font-size: 13px; color: #3c434a; display: inline-flex; align-items: center; gap: 6px; }
+.pp-org-legende-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+
+/* Öffentlicher Kreis-Steckbrief ([protokollpro_kreis]) */
+.pp-kreis-steckbrief { max-width: 700px; }
+.pp-kreis-rolle {
+    border-top: 1px solid #e2e2e2;
+    padding: 14px 0;
+}
+.pp-kreis-rolle h3 { margin: 0 0 6px; }
+
+/* ─── Mitgliederbereich: Sidebar-Layout über volle Breite ─────────────── */
+
+.pp-app {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    width: 100%;
+    max-width: none;
+    /* Aus einem zentrierten Theme-Container ausbrechen, damit der Bereich
+       wirklich die volle Fensterbreite nutzt. */
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    background: #fff;
+    border-top: 1px solid #e6e6e6;
+    min-height: 80vh;
+    font-size: 15px;
+}
+
+.pp-sidebar {
+    flex: 0 0 260px;
+    align-self: stretch;
+    background: #fafafa;
+    border-right: 1px solid #e6e6e6;
+    padding: 20px 0;
+    position: sticky;
+    top: 0;
+    max-height: 100vh;
+    overflow-y: auto;
+}
+.pp-sidebar-head { padding: 0 20px 18px; }
+.pp-sidebar-head strong { display: block; font-size: 17px; }
+.pp-sidebar-head span { color: #8a8f98; font-size: 12px; }
+
+.pp-sidebar-section {
+    padding: 18px 20px 6px;
+    font-size: 11px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: #8a8f98;
+}
+.pp-sidebar-nav { display: flex; flex-direction: column; }
+.pp-sidebar-link {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 20px;
+    text-decoration: none;
+    color: #2c2c2a;
+    border-left: 3px solid transparent;
+}
+.pp-sidebar-link:hover { background: #f0f0f0; color: #2c2c2a; }
+.pp-sidebar-link.is-active { background: #eef4fd; border-left-color: #2271b1; color: #1a4f80; }
+.pp-sidebar-link-sub { font-size: 14px; color: #5f5e5a; }
+.pp-sidebar-badge {
+    background: #e4e6e8;
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-size: 11px;
+    color: #444;
+}
+
+.pp-app-main { flex: 1 1 auto; padding: 24px 32px 60px; min-width: 0; }
+.pp-app-main h2 { margin-top: 0; }
+.pp-app-main h3 { margin: 28px 0 10px; }
+
+.pp-page-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.pp-meta { color: #8a8f98; font-size: 12px; }
+.pp-empty { color: #8a8f98; font-style: italic; }
+
+.pp-front-notice { padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; }
+.pp-front-notice-success { background: #edfaef; border: 1px solid #b7e4bd; }
+.pp-front-notice-error { background: #fdeceb; border: 1px solid #f2b8b5; }
+
+.pp-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 16px; }
+.pp-card { border: 1px solid #e6e6e6; border-radius: 10px; padding: 16px 18px; }
+.pp-card h3 { margin: 0 0 10px; font-size: 15px; }
+
+.pp-list { list-style: none; margin: 0; padding: 0; }
+.pp-list li { padding: 7px 0; border-bottom: 1px solid #f2f2f2; }
+.pp-list li:last-child { border-bottom: none; }
+.pp-list .pp-meta { display: block; }
+
+.pp-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+.pp-table th, .pp-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #f0f0f1; font-size: 14px; }
+.pp-table th { color: #5f5e5a; font-weight: 500; }
+
+.pp-session { border: 1px solid #e6e6e6; border-radius: 10px; padding: 14px 18px; margin-bottom: 14px; }
+.pp-session-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+.pp-session-actions { display: flex; gap: 8px; align-items: center; }
+.pp-agenda { margin: 10px 0; padding-left: 20px; }
+.pp-agenda li { padding: 5px 0; border-bottom: 1px solid #f4f4f4; }
+.pp-agenda-title { font-weight: 500; }
+.pp-agenda-detail li { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.pp-agenda-desc { color: #5f5e5a; font-size: 14px; margin-top: 2px; }
+.pp-beschluss-line { background: #f4fbf5; border-radius: 4px; padding: 6px 10px; margin-top: 6px; font-size: 14px; }
+
+.pp-form { display: flex; flex-direction: column; gap: 12px; max-width: 720px; }
+.pp-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 500; }
+.pp-form input, .pp-form select, .pp-form textarea { font-weight: 400; padding: 7px 9px; border: 1px solid #d5d5d5; border-radius: 5px; }
+.pp-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 16px; max-width: 900px; }
+.pp-form-grid .pp-span-2 { grid-column: span 2; }
+.pp-form-actions { display: flex; align-items: center; gap: 12px; grid-column: 1 / -1; }
+
+.pp-inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+.pp-inline-form input, .pp-inline-form select { padding: 6px 9px; border: 1px solid #d5d5d5; border-radius: 5px; }
+.pp-inline { display: inline; }
+
+.pp-btn {
+    display: inline-block;
+    background: #f1f1f1;
+    color: #2c2c2a;
+    border: 1px solid #d5d5d5;
+    border-radius: 5px;
+    padding: 7px 14px;
+    cursor: pointer;
+    text-decoration: none;
+    font-size: 14px;
+}
+.pp-btn:hover { background: #e8e8e8; color: #2c2c2a; }
+.pp-btn-primary { background: #2271b1; border-color: #2271b1; color: #fff; }
+.pp-btn-primary:hover { background: #185f96; color: #fff; }
+.pp-btn-small { padding: 5px 10px; font-size: 13px; }
+.pp-link-danger { background: none; border: none; color: #b32d2e; cursor: pointer; font-size: 12px; padding: 0 0 0 8px; }
+.pp-checkbox { background: none; border: none; cursor: pointer; font-size: 16px; padding: 0 6px 0 0; }
+
+.pp-kommentare { list-style: none; margin: 0; padding: 0; }
+.pp-kommentare li { background: #f7f7f7; border-radius: 5px; padding: 7px 11px; margin-bottom: 6px; font-size: 14px; }
+.pp-themen-block { margin-bottom: 20px; }
+
+/* ─── Live-Modus ──────────────────────────────────────────────────────── */
+
+.pp-sidebar-live { background: #1f2430; border-right-color: #1f2430; color: #e8e8e8; flex-basis: 300px; }
+.pp-sidebar-live .pp-sidebar-section { color: #9aa3b2; }
+.pp-sidebar-live .pp-meta { color: #9aa3b2; }
+.pp-sidebar-live a { color: #cfe0f5; }
+
+.pp-live-clock { padding: 4px 20px 14px; border-bottom: 1px solid #2f3646; }
+.pp-live-time { font-size: 30px; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+
+.pp-live-agenda { list-style: decimal; margin: 6px 0 12px; padding-left: 38px; }
+.pp-live-agenda li { padding: 6px 14px 6px 0; border-bottom: 1px solid #2f3646; }
+.pp-live-agenda li a { text-decoration: none; display: block; }
+.pp-live-agenda .pp-live-rest { display: block; }
+.pp-live-agenda li.is-current { background: #2b3448; }
+.pp-live-agenda li.is-current .pp-live-rest { color: #7fd39b; }
+.pp-live-agenda li.is-over .pp-live-rest { color: #f0a35e; }
+.pp-live-agenda li.is-done { opacity: .5; }
+
+.pp-live-form { display: flex; flex-direction: column; gap: 6px; padding: 0 20px 14px; }
+.pp-live-form input, .pp-live-form select {
+    padding: 6px 8px;
+    border: 1px solid #39415360;
+    border-radius: 5px;
+    background: #2b3243;
+    color: #e8e8e8;
+    font-size: 13px;
+}
+.pp-live-form .pp-btn { background: #39415a; border-color: #39415a; color: #e8e8e8; }
+.pp-live-form .pp-btn:hover { background: #454f6d; color: #fff; }
+.pp-live-exit { margin: 8px 20px 0; display: inline-block; }
+
+.pp-live-main { background: #fff; }
+.pp-live-top { border: 1px solid #e6e6e6; border-left: 4px solid #b9bcc2; border-radius: 0 8px 8px 0; padding: 14px 18px; margin-bottom: 16px; }
+.pp-live-top-head { margin-bottom: 10px; }
+.pp-live-top.pp-top-status-konsentrunde { border-left-color: #dba617; }
+.pp-live-top.pp-top-status-einwand_offen { border-left-color: #dc3232; background: #fff8f8; }
+.pp-live-top.pp-top-status-beschlossen { border-left-color: #00a32a; background: #f8fdf9; }
+.pp-konsent-actions { display: flex; gap: 16px; flex-wrap: wrap; }
+.pp-konsent-actions form { display: flex; gap: 6px; align-items: center; }
+.pp-konsent-actions input[type="text"] { padding: 6px 9px; border: 1px solid #d5d5d5; border-radius: 5px; }
+.pp-einwand-box { background: #fef3f2; border: 1px solid #f2b8b5; border-radius: 6px; padding: 10px 14px; margin-top: 8px; }
+.pp-abschluss { margin-top: 28px; padding-top: 20px; border-top: 1px solid #e6e6e6; }
+
+@media (max-width: 782px) {
+    .pp-app { flex-direction: column; margin-left: 0; margin-right: 0; }
+    .pp-sidebar { flex-basis: auto; width: 100%; position: static; max-height: none; border-right: none; border-bottom: 1px solid #e6e6e6; }
+    .pp-app-main { padding: 20px 16px 40px; }
+}
+
+/* ─── Kreise & Rollen im Mitgliederbereich ────────────────────────────── */
+
+.pp-rolle-card {
+    border: 1px solid #e6e6e6;
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 14px;
+}
+.pp-rolle-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+.pp-rolle-head > span { display: flex; align-items: center; gap: 10px; }
+.pp-rolle-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 18px;
+}
+.pp-rolle-grid h4 { margin: 0 0 6px; font-size: 13px; color: #5f5e5a; }
+.pp-rolle-grid ul { margin: 0 0 0 18px; padding: 0; font-size: 14px; }
+.pp-rolle-grid li { margin-bottom: 3px; }
+.pp-rolle-edit {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid #eee;
+}
+.pp-rolle-edit h4 { margin: 0 0 10px; }
+
+/* ─── Zeitbudget & Tagesordnung mit Uhrzeiten ─────────────────────────── */
+
+.pp-budget { margin: 10px 0 14px; }
+.pp-budget-bar {
+    display: flex;
+    height: 10px;
+    border-radius: 5px;
+    background: #ececec;
+    overflow: hidden;
+}
+.pp-budget-fill { background: #3a9c5c; }
+.pp-budget.is-over .pp-budget-fill { background: #d38b2f; }
+.pp-budget-over { background: #c0392b; }
+.pp-budget-text { font-size: 13px; margin-top: 5px; color: #5f5e5a; }
+.pp-budget-ok { color: #2e7d46; }
+.pp-budget-warn { color: #b32d2e; font-weight: 500; }
+
+.pp-agenda-zeit {
+    display: inline-block;
+    min-width: 96px;
+    font-variant-numeric: tabular-nums;
+    color: #2c2c2a;
+    font-weight: 500;
+}
+.pp-agenda-main { flex: 1; min-width: 0; }
+.pp-agenda-tools { display: flex; align-items: flex-start; gap: 4px; flex-shrink: 0; }
+.pp-icon-btn {
+    background: #f1f1f1;
+    border: 1px solid #d5d5d5;
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 2px 7px;
+    font-size: 11px;
+    line-height: 1.4;
+}
+.pp-icon-btn:hover { background: #e4e4e4; }
+.pp-top-edit { margin-top: 6px; }
+
+/* Live-Sidebar: geplante Uhrzeit + Live-Restzeit untereinander */
+.pp-live-plan {
+    display: block;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    color: #b9c2d0;
+}
+.pp-live-hinweis {
+    padding: 0 20px;
+    font-size: 12px;
+    color: #9aa3b2;
+    margin: 0 0 8px;
+}
+.pp-to-feld { display: block; }
+.pp-to-feld input, .pp-to-feld select { width: 100%; }
+
+/* In der Live-Sitzung bereits erfasste Aufgaben */
+.pp-live-erfasst { list-style: none; margin: 0 0 8px; padding: 0 20px; }
+.pp-live-erfasst li { font-size: 13px; padding: 4px 0; border-bottom: 1px solid #2f3646; color: #cfe0f5; }
+.pp-live-erfasst .pp-meta { display: block; }
+
+/* ─── PWA: Installationshinweis & App-Kacheln ─────────────────────────── */
+
+.pp-install-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #eef4fd;
+    border: 1px solid #c5d9f1;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+}
+.pp-install-text { flex: 1; font-size: 14px; }
+.pp-install-text strong { display: block; }
+.pp-install-text span { color: #5f5e5a; font-size: 13px; }
+.pp-install-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    color: #8a8f98;
+    padding: 0 4px;
+}
+
+.pp-app-leiste { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+.pp-app-kachel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid #e6e6e6;
+    border-radius: 8px;
+    padding: 8px 14px;
+    text-decoration: none;
+    color: #2c2c2a;
+    font-size: 14px;
+}
+.pp-app-kachel:hover { background: #f6f7f7; color: #2c2c2a; }
+.pp-app-icon { font-size: 17px; }
+
+/* In der installierten App die Kacheln etwas prominenter zeigen */
+@media (display-mode: standalone) {
+    .pp-app-leiste { gap: 12px; }
+    .pp-app-kachel { flex: 1 1 30%; justify-content: center; padding: 14px; }
+}
+
+/* ─── Kreismitglieder, Rollen-Aufgaben, Aufgaben-Sets ─────────────────── */
+
+.pp-kreis-mitglieder li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pp-kreis-beitritt {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+    margin: 12px 0 4px;
+    padding: 12px 0;
+    border-top: 1px solid #f0f0f1;
+}
+
+.pp-rolle-aufgaben {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid #f0f0f1;
+}
+.pp-rolle-aufgaben h4 { margin: 0 0 8px; font-size: 13px; color: #5f5e5a; }
+.pp-rolle-aufgaben .pp-list li { padding: 6px 0; }
+.pp-rollen-aufgabe-form { margin-top: 10px; max-width: 520px; }
+.pp-details-summary {
+    cursor: pointer;
+    color: #2271b1;
+    font-size: 14px;
+    margin: 8px 0;
+}
+
+.pp-set-card {
+    border: 1px solid #e6e6e6;
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+}
+.pp-set-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 10px;
+}

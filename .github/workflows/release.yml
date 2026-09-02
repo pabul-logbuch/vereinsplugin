@@ -1,0 +1,55 @@
+name: Release
+
+# Baut bei jedem Versions-Tag (z. B. v0.2.0) ein sauberes Plugin-ZIP und
+# hängt es an ein GitHub-Release. Genau dieses ZIP zieht sich die
+# Update-Prüfung im WordPress-Backend (plugin-update-checker).
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Version aus Tag ableiten
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Plugin-Header-Version mit Tag abgleichen
+        run: |
+          HDR=$(grep -oE '^\s*\*\s*Version:\s*.+' vereinsplugin/vereinsplugin.php | head -1 | sed -E 's/.*Version:\s*//' | tr -d ' \r')
+          echo "Header: $HDR – Tag: ${{ steps.version.outputs.version }}"
+          if [ "$HDR" != "${{ steps.version.outputs.version }}" ]; then
+            echo "::error::Version im Plugin-Header ($HDR) passt nicht zum Tag (${{ steps.version.outputs.version }}). Bitte 'Version:' in vereinsplugin/vereinsplugin.php und 'VP_VERSION' anpassen."
+            exit 1
+          fi
+
+      - name: ZIP bauen
+        run: |
+          mkdir -p build
+          rsync -a --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'node_modules' \
+            --exclude 'tests' \
+            --exclude '*.zip' \
+            vereinsplugin/ build/vereinsplugin/
+          cd build
+          zip -qr "../vereinsplugin.zip" vereinsplugin
+          cd ..
+          unzip -l vereinsplugin.zip | tail -5
+
+      - name: Release veröffentlichen
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Vereinsplugin ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: vereinsplugin.zip

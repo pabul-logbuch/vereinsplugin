@@ -1,0 +1,14 @@
+# Build-Artefakte
+/vereinsplugin.zip
+/build/
+
+# Meine lokale Entpackung der vier Ausgangs-Plugins (nicht Teil des Repos)
+/_extracted/
+/*.zip
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
