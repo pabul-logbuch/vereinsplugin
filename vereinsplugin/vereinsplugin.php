@@ -123,23 +123,70 @@ function vp_modules() {
 			'label' => __( 'Wunschliste & Spenden', 'vereinsplugin' ),
 			'file'  => 'wunschliste/wunschliste.php',
 			'menus' => array( 'wunschliste' ), // Top-Level-Slugs, die versteckt werden.
+			// Sentinel: existiert diese Funktion schon, ist das Alt-Plugin aktiv
+			// → Modul NICHT laden (sonst „Cannot redeclare function“ = Fatal).
+			'guard' => 'wl_create_tables',
+			'legacy_plugins' => array( 'wunschliste-plugin/wunschliste.php' ),
 		),
 		'protokoll' => array(
 			'label' => __( 'Sitzungen & Protokolle', 'vereinsplugin' ),
 			'file'  => 'protokoll/protokollpro.php',
 			'menus' => array( 'protokollpro' ),
+			'guard' => 'pp_create_tables',
+			'legacy_plugins' => array( 'protokollpro/protokollpro.php' ),
 		),
 		'buchhaltung' => array(
 			'label' => __( 'Buchhaltung & Auslagen', 'vereinsplugin' ),
 			'file'  => 'buchhaltung/jufo-buchhaltung.php',
 			'menus' => array( 'jb_kassenbericht' ),
+			'guard' => 'jb_create_tables',
+			'legacy_plugins' => array( 'jufo-buchhaltung-v2/jufo-buchhaltung.php', 'jufo-buchhaltung/jufo-buchhaltung.php' ),
 		),
 		'events' => array(
 			'label' => __( 'Veranstaltungs-Publisher', 'vereinsplugin' ),
 			'file'  => 'events/jufobleibt-event-publisher.php',
 			'menus' => array( 'jufobleibt-event-publisher-settings', 'edit.php?post_type=veranstaltung' ),
+			'guard' => 'jbf_init_plugin',
+			'legacy_plugins' => array( 'jufobleibt-event-publisher/jufobleibt-event-publisher.php' ),
 		),
 	);
+}
+
+/**
+ * Darf/kann ein Modul geladen werden? Nein, wenn es abgeschaltet ist ODER wenn
+ * seine Kernfunktion schon existiert (= das gleichnamige Alt-Plugin ist noch
+ * aktiv). Verhindert den „Cannot redeclare“-Fatal.
+ */
+function vp_module_loadable( $key, $mod ) {
+	if ( ! vp_module_enabled( $key ) ) {
+		return false;
+	}
+	if ( ! empty( $mod['guard'] ) && function_exists( $mod['guard'] ) ) {
+		return false;
+	}
+	$path = VP_MODULES_PATH . $mod['file'];
+	return is_readable( $path );
+}
+
+/**
+ * Lädt eine Modul-Hauptdatei defensiv. Ein Parse-/Fatal-Fehler in einem Modul
+ * (ParseError/Error sind seit PHP 7 fangbar) legt dann nicht das ganze Plugin
+ * lahm, sondern nur dieses eine Modul.
+ */
+function vp_safe_require( $path, $key ) {
+	try {
+		require_once $path;
+		return true;
+	} catch ( \Throwable $e ) {
+		vp_note_module_error( $key, $e->getMessage() );
+		return false;
+	}
+}
+
+function vp_note_module_error( $key, $message ) {
+	$errors         = get_option( 'vp_module_errors', array() );
+	$errors[ $key ] = $message;
+	update_option( 'vp_module_errors', $errors );
 }
 
 /**
@@ -153,14 +200,59 @@ function vp_modules() {
 add_action( 'plugins_loaded', 'vp_load_modules', 1 );
 function vp_load_modules() {
 	foreach ( vp_modules() as $key => $mod ) {
-		if ( vp_module_enabled( $key ) ) {
-			$path = VP_MODULES_PATH . $mod['file'];
-			if ( is_readable( $path ) ) {
-				require_once $path;
-			}
+		if ( vp_module_loadable( $key, $mod ) ) {
+			vp_safe_require( VP_MODULES_PATH . $mod['file'], $key );
 		}
 	}
 	do_action( 'vp_modules_loaded' );
+}
+
+/**
+ * Admin-Hinweis, wenn ein Modul wegen eines noch aktiven Alt-Plugins oder wegen
+ * eines Fehlers nicht geladen wurde.
+ */
+add_action( 'admin_notices', 'vp_admin_notices' );
+function vp_admin_notices() {
+	if ( ! current_user_can( 'activate_plugins' ) ) {
+		return;
+	}
+
+	$conflicts = array();
+	foreach ( vp_modules() as $key => $mod ) {
+		if ( ! empty( $mod['guard'] ) && function_exists( $mod['guard'] ) && ! vp_self_provided( $mod['guard'] ) ) {
+			$conflicts[] = $mod['label'];
+		}
+	}
+	if ( $conflicts ) {
+		echo '<div class="notice notice-error"><p><strong>Vereinsplugin:</strong> '
+			. esc_html( sprintf(
+				/* translators: %s = module list */
+				__( 'Diese Alt-Plugins sind noch aktiv und blockieren die zugehörigen Module: %s. Bitte unter „Plugins“ deaktivieren – die Daten bleiben erhalten.', 'vereinsplugin' ),
+				implode( ', ', $conflicts )
+			) )
+			. '</p></div>';
+	}
+
+	$errors = get_option( 'vp_module_errors', array() );
+	if ( $errors ) {
+		foreach ( $errors as $key => $msg ) {
+			echo '<div class="notice notice-warning"><p><strong>Vereinsplugin – Modul „' . esc_html( $key ) . '“:</strong> ' . esc_html( $msg ) . '</p></div>';
+		}
+	}
+}
+
+/**
+ * Grobe Heuristik: Stammt die Guard-Funktion aus unserem modules/-Ordner
+ * (dann ist alles ok) oder aus einem fremden Pfad (Alt-Plugin aktiv)?
+ */
+function vp_self_provided( $function_name ) {
+	try {
+		$ref  = new ReflectionFunction( $function_name );
+		$file = $ref->getFileName();
+		return $file && strpos( $file, VP_MODULES_PATH ) === 0;
+	} catch ( \Throwable $e ) {
+		return false;
+	}
 }
 
 /**
@@ -185,22 +277,27 @@ require_once VP_PATH . 'includes/settings-page.php';
  */
 register_activation_hook( __FILE__, 'vp_activate' );
 function vp_activate() {
+	delete_option( 'vp_module_errors' );
+
 	// Module einbinden (plugins_loaded ist beim Aktivieren noch nicht gelaufen).
+	// Guard: ein noch aktives Alt-Plugin würde denselben Code ein zweites Mal
+	// laden → Fatal. Solche Module hier überspringen.
 	foreach ( vp_modules() as $key => $mod ) {
-		$path = VP_MODULES_PATH . $mod['file'];
-		if ( is_readable( $path ) ) {
-			require_once $path;
+		if ( vp_module_loadable( $key, $mod ) ) {
+			vp_safe_require( VP_MODULES_PATH . $mod['file'], $key );
 		}
 	}
 
-	// Wunschliste.
-	if ( function_exists( 'wl_activate' ) ) { wl_activate(); }
-	// ProtokollPro.
-	if ( function_exists( 'pp_activate' ) ) { pp_activate(); }
-	// Buchhaltung.
-	if ( function_exists( 'jb_activate' ) ) { jb_activate(); }
-	// Event-Publisher.
-	if ( function_exists( 'jbf_activate_plugin' ) ) { jbf_activate_plugin(); }
+	// Aktivierungsroutinen der geladenen Module – einzeln abgesichert.
+	foreach ( array( 'wl_activate', 'pp_activate', 'jb_activate', 'jbf_activate_plugin' ) as $fn ) {
+		if ( function_exists( $fn ) && vp_self_provided( $fn ) ) {
+			try {
+				call_user_func( $fn );
+			} catch ( \Throwable $e ) {
+				vp_note_module_error( $fn, $e->getMessage() );
+			}
+		}
+	}
 
 	vp_core_setup_roles();
 	flush_rewrite_rules();
@@ -208,9 +305,14 @@ function vp_activate() {
 
 register_deactivation_hook( __FILE__, 'vp_deactivate' );
 function vp_deactivate() {
-	if ( function_exists( 'wl_deactivate' ) ) { wl_deactivate(); }
-	if ( function_exists( 'pp_deactivate' ) ) { pp_deactivate(); }
-	if ( function_exists( 'jb_deactivate' ) ) { jb_deactivate(); }
-	if ( function_exists( 'jbf_deactivate_plugin' ) ) { jbf_deactivate_plugin(); }
+	foreach ( array( 'wl_deactivate', 'pp_deactivate', 'jb_deactivate', 'jbf_deactivate_plugin' ) as $fn ) {
+		if ( function_exists( $fn ) && vp_self_provided( $fn ) ) {
+			try {
+				call_user_func( $fn );
+			} catch ( \Throwable $e ) {
+				// Beim Deaktivieren Fehler schlucken – Hauptsache es geht durch.
+			}
+		}
+	}
 	flush_rewrite_rules();
 }
