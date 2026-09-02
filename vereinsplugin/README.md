@@ -53,6 +53,14 @@ wieder einblenden“** reaktivieren.
 - Vorstand = WordPress-Rollen **Administrator/Redakteur**: zusätzlich Kassen-
   und Versand-Rechte (`jbf_send_external`, `jb_approve_auslagen` …).
 
+## Updates über GitHub
+
+Das Plugin bringt einen Update-Checker mit (`vendor/plugin-update-checker/`,
+YahnisElsts, MIT-Lizenz). Ist in `vereinsplugin.php` bzw. der `wp-config.php`
+das GitHub-Repo gesetzt (`VP_GITHUB_REPO`), erscheinen neue Versionen ganz normal
+unter **Plugins → Aktualisieren** – kein Löschen/Neu-Hochladen. Einrichtung und
+Release-Ablauf: siehe [`../RELEASING.md`](../RELEASING.md).
+
 ## Aufbau / Weiterentwicklung
 
 Siehe [`../PLAN.md`](../PLAN.md). Kurz:

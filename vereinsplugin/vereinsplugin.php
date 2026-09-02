@@ -68,8 +68,10 @@ if ( ! defined( 'VP_GITHUB_REPO' ) ) {
  */
 add_action( 'plugins_loaded', 'vp_bootstrap_update_checker', 0 );
 function vp_bootstrap_update_checker() {
-	if ( ! is_admin() && ! ( defined( 'WP_CLI' ) && WP_CLI ) ) {
-		return; // Update-Prüfung nur im Backend / per WP-CLI.
+	$is_cli  = defined( 'WP_CLI' ) && WP_CLI;
+	$is_cron = defined( 'DOING_CRON' ) && DOING_CRON;
+	if ( ! is_admin() && ! $is_cli && ! $is_cron ) {
+		return; // Update-Prüfung nur im Backend / per Cron / WP-CLI.
 	}
 	if ( empty( VP_GITHUB_REPO ) || strpos( VP_GITHUB_REPO, 'DEIN-GITHUB-NAME' ) === 0 ) {
 		return; // Noch kein Repo konfiguriert – still nichts tun.
