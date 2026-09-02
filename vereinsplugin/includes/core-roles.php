@@ -93,11 +93,19 @@ function vp_core_setup_roles() {
 		}
 	}
 
+	// „Antrag offen“: rechtelose Warterolle (nur lesen). Wird nur benutzt, wenn
+	// in den Einstellungen „Sofort wartender Zugang“ gewählt ist – standardmäßig
+	// legt der Vorstand den Zugang erst bei Annahme an.
+	if ( ! get_role( 'vp_antrag_offen' ) ) {
+		add_role( 'vp_antrag_offen', __( 'Antrag offen', 'vereinsplugin' ), array( 'read' => true ) );
+	}
+
 	// administrator + editor: alles inkl. der „Vorstand“-Caps.
 	$vorstand_extra = array(
 		'jb_view_auslagen', 'jb_approve_auslagen', 'jb_mark_paid',
 		'jb_view_journal', 'jb_edit_journal', 'jb_export', 'jb_manage_settings',
 		'jbf_send_external',
+		'vp_manage_members',
 	);
 	foreach ( array( 'administrator', 'editor' ) as $role_name ) {
 		$r = get_role( $role_name );
@@ -152,8 +160,12 @@ function vp_only_member() {
 	if ( current_user_can( 'manage_options' ) || current_user_can( 'editor' ) ) {
 		return false;
 	}
-	return in_array( VP_MEMBER_ROLE, (array) $u->roles, true )
-		|| in_array( 'pp_mitglied', (array) $u->roles, true );
+	foreach ( array( VP_MEMBER_ROLE, 'pp_mitglied', 'vp_antrag_offen' ) as $r ) {
+		if ( in_array( $r, (array) $u->roles, true ) ) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /**

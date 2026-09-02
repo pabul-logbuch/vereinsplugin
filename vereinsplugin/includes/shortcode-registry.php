@@ -21,14 +21,20 @@ function vp_shortcode_catalog() {
 		__( 'Kern', 'vereinsplugin' ) => array(
 			array(
 				'tag'   => 'verein_mitgliederbereich',
-				'attrs' => 'start="wuensche"',
-				'desc'  => __( 'Der gemeinsame Mitgliederbereich mit Tab-Navigation über alle Module (Wünsche, Protokolle, Aufgaben, Termine, Auslagen, Veranstaltungen, Schichtpläne). Diese eine Seite ersetzt die bisherigen Einzel-Mitgliederbereiche. Attribut start= wählt den zuerst geöffneten Tab.', 'vereinsplugin' ),
+				'attrs' => 'start="start"',
+				'desc'  => __( 'Der gemeinsame Mitglieder- UND Vorstandsbereich als installierbare WebApp. Zeigt je nach Berechtigung: Wünsche, Abstimmung, Schichtpläne, Protokolle, Auslage einreichen, Mein Profil – und für den Vorstand zusätzlich Anträge, Mitglieder, Auslagen prüfen, Kassenbericht, Buchhaltung, Veranstaltungen. Ersetzt die bisherigen Einzel-Mitgliederbereiche. start= wählt den Start-Bereich.', 'vereinsplugin' ),
 				'scope' => 'member',
 			),
 			array(
 				'tag'   => 'verein_login',
 				'attrs' => 'redirect="/mitglieder"',
-				'desc'  => __( 'Login-Formular für Mitglieder. Bereits eingeloggte sehen einen Abmelde-Hinweis.', 'vereinsplugin' ),
+				'desc'  => __( 'Login-Formular für Mitglieder, darunter „Passwort vergessen?“ und ein Link zum Mitgliedsantrag. Bereits eingeloggte sehen einen Button zum Mitgliederbereich.', 'vereinsplugin' ),
+				'scope' => 'public',
+			),
+			array(
+				'tag'   => 'verein_mitgliedsantrag',
+				'attrs' => '',
+				'desc'  => __( 'Öffentliches Aufnahmeformular (Anschrift, Geburtsdatum, Beitrag, SEPA-Lastschriftmandat, Datenschutz-Zustimmung). Nach dem Absenden: E-Mail an den Vorstand + Eingangsbestätigung an die antragstellende Person. Der Vorstand prüft den Antrag im Mitgliederbereich unter „Anträge“ und legt beim Annehmen automatisch das Benutzerkonto an.', 'vereinsplugin' ),
 				'scope' => 'public',
 			),
 		),

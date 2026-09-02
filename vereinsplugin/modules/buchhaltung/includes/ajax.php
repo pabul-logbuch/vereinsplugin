@@ -137,6 +137,9 @@ add_action('wp_ajax_jb_save_produkt', function() {
     $id = jb_produkt_save($_POST);
     $id ? wp_send_json_success(['id' => $id]) : wp_send_json_error('Fehler.');
 });
+
+// Nextcloud-Verbindung testen
+add_action('wp_ajax_jb_test_nc', function() {
     check_ajax_referer('jb_nonce', 'nonce');
     if (!current_user_can('jb_manage_settings')) wp_send_json_error('Keine Berechtigung.');
     wp_send_json(jb_nc()->test_connection());
