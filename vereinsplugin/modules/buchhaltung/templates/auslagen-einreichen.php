@@ -1,12 +1,23 @@
 <?php defined('ABSPATH') || exit; ?>
 <div class="jb-wrap" id="jb-auslage-form-wrap">
-    <h3>Auslage einreichen</h3>
-    <p class="jb-info">Fülle das Formular aus und lade deinen Kassenbon / deine Rechnung als Foto oder PDF hoch. Der Kassier wird per E-Mail benachrichtigt.</p>
+    <h3>Beleg / Auslage einreichen</h3>
 
     <div id="jb-msg" class="jb-msg" style="display:none"></div>
 
     <form id="jb-auslage-form" enctype="multipart/form-data">
         <?php wp_nonce_field('jb_nonce', 'nonce'); ?>
+
+        <div class="jb-field">
+            <label>Was möchtest du tun? *</label>
+            <label style="font-weight:400;display:block;margin:4px 0">
+                <input type="radio" name="modus" value="erstattung" checked>
+                <strong>Erstattung beantragen</strong> – ich habe privat ausgelegt und möchte das Geld zurück
+            </label>
+            <label style="font-weight:400;display:block;margin:4px 0">
+                <input type="radio" name="modus" value="beleg">
+                <strong>Nur Beleg abgeben</strong> – bezahlt hat der Verein (Karte/Bar), ich reiche nur den Beleg ein
+            </label>
+        </div>
 
         <div class="jb-field">
             <label for="jb-datum">Datum des Einkaufs *</label>

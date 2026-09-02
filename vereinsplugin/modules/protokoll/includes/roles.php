@@ -19,16 +19,12 @@ function pp_create_roles() {
         }
     }
 
-    // Synergie: Wunschliste-Mitgliedsrolle, falls vorhanden, ebenfalls berechtigen
+    // Im Kombi-Plugin garantiert der Kern die Rolle wl_mitglied. Deshalb KEINE
+    // zweite Fallback-Rolle „pp_mitglied“ mehr anlegen (der Kern würde sie
+    // ohnehin wieder entfernen und die User auf wl_mitglied migrieren).
     $wl_role = get_role('wl_mitglied');
     if ($wl_role) {
         $wl_role->add_cap('pp_manage');
-    } else {
-        // Fallback: eigene Mitglied-Rolle, falls die Wunschliste (noch) nicht aktiv ist
-        add_role('pp_mitglied', 'Vereinsmitglied (ProtokollPro)', [
-            'read'      => true,
-            'pp_manage' => true,
-        ]);
     }
 }
 

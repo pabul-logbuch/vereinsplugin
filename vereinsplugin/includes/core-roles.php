@@ -93,11 +93,28 @@ function vp_core_setup_roles() {
 		}
 	}
 
-	// „Antrag offen“: rechtelose Warterolle (nur lesen). Wird nur benutzt, wenn
-	// in den Einstellungen „Sofort wartender Zugang“ gewählt ist – standardmäßig
-	// legt der Vorstand den Zugang erst bei Annahme an.
-	if ( ! get_role( 'vp_antrag_offen' ) ) {
-		add_role( 'vp_antrag_offen', __( 'Antrag offen', 'vereinsplugin' ), array( 'read' => true ) );
+	// Es soll GENAU EINE Mitgliederrolle geben (wl_mitglied). ProtokollPro legt
+	// als Fallback eine zweite Rolle „pp_mitglied“ an, wenn wl_mitglied im
+	// falschen Moment noch fehlte. Die hier einsammeln und entfernen.
+	$pp = get_role( 'pp_mitglied' );
+	if ( $pp ) {
+		foreach ( get_users( array( 'role' => 'pp_mitglied', 'fields' => array( 'ID' ) ) ) as $u ) {
+			$wpu = new WP_User( $u->ID );
+			$wpu->add_role( VP_MEMBER_ROLE );
+			$wpu->remove_role( 'pp_mitglied' );
+		}
+		remove_role( 'pp_mitglied' );
+	}
+
+	// „Antrag offen“: rechtelose Warterolle. Nur anlegen, wenn der Vorstand in
+	// den Einstellungen den Ablauf „Sofort wartender Zugang“ gewählt hat.
+	$antrag_flow = get_option( 'vp_antrag_flow', 'pruefen' );
+	if ( 'wartend' === $antrag_flow ) {
+		if ( ! get_role( 'vp_antrag_offen' ) ) {
+			add_role( 'vp_antrag_offen', __( 'Antrag offen', 'vereinsplugin' ), array( 'read' => true ) );
+		}
+	} elseif ( get_role( 'vp_antrag_offen' ) && ! get_users( array( 'role' => 'vp_antrag_offen', 'number' => 1, 'fields' => 'ID' ) ) ) {
+		remove_role( 'vp_antrag_offen' );
 	}
 
 	// administrator + editor: alles inkl. der „Vorstand“-Caps.

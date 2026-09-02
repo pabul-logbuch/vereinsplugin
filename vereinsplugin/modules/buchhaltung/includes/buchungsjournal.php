@@ -24,6 +24,14 @@ function jb_journal_add(array $data): int {
         $row['konto']       = sanitize_text_field($data['konto'] ?? '');
         $row['sphaere']     = sanitize_text_field($data['sphaere'] ?? '');
         $row['gegenpartei'] = sanitize_text_field($data['gegenpartei'] ?? '');
+        $beleg_nr = sanitize_text_field($data['beleg_nr'] ?? '');
+        if ($beleg_nr === '' && function_exists('jb_next_beleg_nr')) {
+            $beleg_nr = jb_next_beleg_nr(substr((string) $row['buchung_datum'], 0, 4));
+        }
+        $row['beleg_nr'] = $beleg_nr;
+        if (empty($row['beleg_referenz']) && $beleg_nr !== '') {
+            $row['beleg_referenz'] = $beleg_nr;
+        }
     }
     $wpdb->insert(jb_table_journal(), $row);
     return (int) $wpdb->insert_id;

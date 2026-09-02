@@ -17,6 +17,8 @@ function jb_submit_auslage(array $data, array $file): int|WP_Error {
     $beschr   = sanitize_textarea_field($data['beschreibung'] ?? '');
     $budget_id = (int) ($data['budget_id'] ?? 0) ?: null;
     $konto     = sanitize_text_field($data['konto'] ?? '');
+    // 'erstattung' = Auslage mit Rückzahlung, 'beleg' = nur Beleg archivieren.
+    $modus     = ($data['modus'] ?? 'erstattung') === 'beleg' ? 'beleg' : 'erstattung';
 
     if ($betrag <= 0)    return new WP_Error('invalid_betrag', 'Betrag muss größer als 0 sein.');
     if (empty($datum))   return new WP_Error('invalid_datum',  'Datum fehlt.');
@@ -33,7 +35,7 @@ function jb_submit_auslage(array $data, array $file): int|WP_Error {
         'kategorie'     => $kat,
         'beschreibung'  => $beschr,
         'budget_id'     => $budget_id,
-        'status'        => 'ausstehend',
+        'status'        => ($modus === 'beleg') ? 'beleg' : 'ausstehend',
         'eingereicht_am'=> current_time('mysql'),
     ];
     $al_cols = $wpdb->get_col('SHOW COLUMNS FROM ' . $t);
@@ -56,9 +58,15 @@ function jb_submit_auslage(array $data, array $file): int|WP_Error {
             'beleg_pfad' => $nc_path,
             'beleg_name' => sanitize_file_name($file['name']),
         ], ['id' => $id]);
-    } elseif (get_option('jb_beleg_pflicht', '1') === '1') {
+    } elseif ($modus === 'beleg' || get_option('jb_beleg_pflicht', '1') === '1') {
         $wpdb->delete($t, ['id' => $id]);
-        return new WP_Error('beleg_fehlt', 'Beleg-Upload ist Pflicht.');
+        return new WP_Error('beleg_fehlt', 'Beleg-Datei fehlt.');
+    }
+
+    if ($modus === 'beleg') {
+        // Reiner Beleg: kein Erstattungslauf. Landet im „Belege ohne Buchung“-
+        // Pool und kann im Journal einer Buchung zugeordnet werden.
+        return $id;
     }
 
     // E-Mail an Kassier
@@ -124,6 +132,8 @@ function jb_approve_auslage(int $id, bool $approve, string $notiz = ''): bool {
     ], ['id' => $id]);
 
     if ($rows && $approve) {
+        // Genehmigte Auslage sofort ins Buchungsjournal übernehmen.
+        jb_auslage_to_journal($id);
         jb_notify_member_decision($id, true);
     } elseif ($rows && !$approve) {
         jb_notify_member_decision($id, false);
@@ -132,11 +142,54 @@ function jb_approve_auslage(int $id, bool $approve, string $notiz = ''): bool {
     return (bool) $rows;
 }
 
+/**
+ * Erzeugt (idempotent) die Journalbuchung zu einer Auslage: vergibt eine
+ * Beleg-Nr, verknüpft den Beleg, bucht das Budget. Gibt die buchung_id zurück.
+ */
+function jb_auslage_to_journal(int $id): int {
+    global $wpdb;
+    $auslage = jb_get_auslage($id);
+    if (!$auslage) return 0;
+    if (!empty($auslage['buchung_id'])) return (int) $auslage['buchung_id']; // schon gebucht
+
+    $konto   = $auslage['konto'] ?? '';
+    $sphaere = ($konto && function_exists('jb_konto_sphaere')) ? jb_konto_sphaere($konto) : '';
+    $beleg_nr = function_exists('jb_next_beleg_nr')
+        ? jb_next_beleg_nr(substr((string) $auslage['ausgabe_datum'], 0, 4))
+        : '';
+
+    $buchung_id = jb_journal_add([
+        'buchung_datum'  => $auslage['ausgabe_datum'],
+        'betrag'         => -abs((float) $auslage['betrag']),
+        'kategorie'      => $auslage['kategorie'],
+        'beschreibung'   => 'Auslage #' . $id . ': ' . $auslage['beschreibung'],
+        'quelle'         => 'Auslage',
+        'beleg_pfad'     => $auslage['beleg_pfad'],
+        'beleg_referenz' => $beleg_nr,
+        'beleg_nr'       => $beleg_nr,
+        'auslage_id'     => $id,
+        'konto'          => $konto,
+        'sphaere'        => $sphaere,
+        'gegenpartei'    => $auslage['user_name'] ?? '',
+    ]);
+
+    $wpdb->update(jb_table_auslagen(), ['buchung_id' => $buchung_id], ['id' => $id]);
+
+    if (!empty($auslage['budget_id'])) {
+        $wpdb->query($wpdb->prepare(
+            "UPDATE " . jb_table_budgets() . " SET ausgegeben = ausgegeben + %f WHERE id = %d",
+            abs((float) $auslage['betrag']),
+            (int) $auslage['budget_id']
+        ));
+    }
+    return (int) $buchung_id;
+}
+
 function jb_mark_paid(int $id): bool|WP_Error {
     if (!current_user_can('jb_mark_paid')) return false;
 
     $auslage = jb_get_auslage($id);
-    if (!$auslage || $auslage['status'] !== 'genehmigt') {
+    if (!$auslage || !in_array($auslage['status'], ['genehmigt'], true)) {
         return new WP_Error('invalid_state', 'Nur genehmigte Auslagen können ausgezahlt werden.');
     }
 
@@ -146,33 +199,8 @@ function jb_mark_paid(int $id): bool|WP_Error {
         'ausgezahlt_am' => current_time('mysql'),
     ], ['id' => $id]);
 
-    // Ins Buchungsjournal übernehmen (als Ausgabe, negativ)
-    $konto   = $auslage['konto'] ?? '';
-    $sphaere = ($konto && function_exists('jb_konto_sphaere')) ? jb_konto_sphaere($konto) : '';
-    $buchung_id = jb_journal_add([
-        'buchung_datum' => $auslage['ausgabe_datum'],
-        'betrag'        => -abs((float) $auslage['betrag']),
-        'kategorie'     => $auslage['kategorie'],
-        'beschreibung'  => 'Auslage #' . $id . ': ' . $auslage['beschreibung'],
-        'quelle'        => 'Auslage',
-        'beleg_pfad'    => $auslage['beleg_pfad'],
-        'auslage_id'    => $id,
-        'konto'         => $konto,
-        'sphaere'       => $sphaere,
-        'gegenpartei'   => $auslage['user_name'] ?? '',
-    ]);
-
-    // Buchungs-ID in Auslage speichern
-    $wpdb->update(jb_table_auslagen(), ['buchung_id' => $buchung_id], ['id' => $id]);
-
-    // Verbrauchtes Budget hochzählen (Kostenstelle).
-    if (!empty($auslage['budget_id'])) {
-        $wpdb->query($wpdb->prepare(
-            "UPDATE " . jb_table_budgets() . " SET ausgegeben = ausgegeben + %f WHERE id = %d",
-            abs((float) $auslage['betrag']),
-            (int) $auslage['budget_id']
-        ));
-    }
+    // Falls die Buchung noch fehlt (Altfälle): jetzt nachholen.
+    jb_auslage_to_journal($id);
 
     return true;
 }

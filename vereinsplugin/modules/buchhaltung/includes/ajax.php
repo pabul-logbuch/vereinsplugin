@@ -10,7 +10,10 @@ add_action('wp_ajax_jb_submit_auslage', function() {
     if (is_wp_error($result)) {
         wp_send_json_error($result->get_error_message());
     }
-    wp_send_json_success(['id' => $result, 'message' => 'Auslage erfolgreich eingereicht!']);
+    $msg = (($_POST['modus'] ?? '') === 'beleg')
+        ? 'Beleg gespeichert. Der Kassier ordnet ihn einer Buchung zu.'
+        : 'Auslage eingereicht. Der Kassier wurde benachrichtigt.';
+    wp_send_json_success(['id' => $result, 'message' => $msg]);
 });
 
 // Auslage genehmigen/ablehnen
