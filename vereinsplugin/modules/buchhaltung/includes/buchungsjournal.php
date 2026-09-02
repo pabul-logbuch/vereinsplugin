@@ -3,7 +3,7 @@ defined('ABSPATH') || exit;
 
 function jb_journal_add(array $data): int {
     global $wpdb;
-    $wpdb->insert(jb_table_journal(), [
+    $row = [
         'buchung_datum'  => sanitize_text_field($data['buchung_datum'] ?? current_time('Y-m-d')),
         'betrag'         => (float) $data['betrag'],
         'kategorie'      => sanitize_text_field($data['kategorie'] ?? 'Sonstige'),
@@ -13,7 +13,19 @@ function jb_journal_add(array $data): int {
         'beleg_pfad'     => sanitize_text_field($data['beleg_pfad'] ?? ''),
         'auslage_id'     => !empty($data['auslage_id']) ? (int) $data['auslage_id'] : null,
         'erstellt_von'   => get_current_user_id(),
-    ]);
+    ];
+    // SKR-Felder nur setzen, wenn die Spalten existieren (Migration gelaufen).
+    static $has_skr = null;
+    if ($has_skr === null) {
+        $cols = $wpdb->get_col('SHOW COLUMNS FROM ' . jb_table_journal());
+        $has_skr = in_array('konto', (array) $cols, true);
+    }
+    if ($has_skr) {
+        $row['konto']       = sanitize_text_field($data['konto'] ?? '');
+        $row['sphaere']     = sanitize_text_field($data['sphaere'] ?? '');
+        $row['gegenpartei'] = sanitize_text_field($data['gegenpartei'] ?? '');
+    }
+    $wpdb->insert(jb_table_journal(), $row);
     return (int) $wpdb->insert_id;
 }
 

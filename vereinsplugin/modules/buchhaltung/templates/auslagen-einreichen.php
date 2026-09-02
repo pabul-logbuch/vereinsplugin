@@ -30,6 +30,21 @@
         </div>
 
         <?php
+        $jb_konten = function_exists('jb_konten_all') ? jb_konten_all() : [];
+        if ($jb_konten): ?>
+        <div class="jb-field">
+            <label for="jb-konto">Konto (SKR)</label>
+            <select id="jb-konto" name="konto">
+                <option value="">– vom Kassier zuordnen –</option>
+                <?php foreach ($jb_konten as $k):
+                    if ($k->typ === 'einnahme' || $k->typ === 'bestand') continue; ?>
+                    <option value="<?= esc_attr($k->nummer) ?>"><?= esc_html($k->nummer . ' · ' . $k->bezeichnung) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <?php endif; ?>
+
+        <?php
         $jb_budgets = function_exists('jb_budgets_get_all') ? jb_budgets_get_all() : [];
         if ($jb_budgets): ?>
         <div class="jb-field">

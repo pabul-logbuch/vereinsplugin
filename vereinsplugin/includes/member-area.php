@@ -202,10 +202,10 @@ function vp_member_sections() {
 			'render' => 'vp_render_budgets_section',
 		),
 		'buchhaltung' => array(
-			'label'  => __( 'Buchhaltung (Backend)', 'vereinsplugin' ),
+			'label'  => __( 'Buchhaltung', 'vereinsplugin' ),
 			'group'  => 'vorstand',
 			'cap'    => 'jb_view_journal',
-			'render' => 'vp_render_backend_links_buchhaltung',
+			'render' => function_exists( 'vp_render_buchhaltung_hub' ) ? 'vp_render_buchhaltung_hub' : 'vp_render_backend_links_buchhaltung',
 		),
 		'veranstaltungen' => array(
 			'label'  => __( 'Veranstaltungen', 'vereinsplugin' ),

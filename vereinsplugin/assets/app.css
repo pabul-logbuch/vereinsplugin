@@ -60,6 +60,11 @@
 .vp-check input{width:auto;margin-top:3px}
 .vp-mandat-text{font-size:12px;color:var(--vp-muted);background:rgba(127,127,127,.08);padding:10px;border-radius:8px}
 
+.vp-konten-liste{display:flex;flex-direction:column;gap:6px;margin:0 0 14px}
+.vp-konto-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:var(--vp-card);border:1px solid var(--vp-border);border-radius:8px;padding:6px 8px}
+.vp-konto-row input,.vp-konto-row select{padding:5px 7px;border:1px solid var(--vp-border);border-radius:6px;background:var(--vp-bg);color:inherit;font:inherit}
+details.vp-card > summary{cursor:pointer}
+
 .vp-subnav{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 14px}
 .vp-subnav a{padding:6px 12px;border-radius:999px;text-decoration:none;color:inherit;background:rgba(127,127,127,.12);font-size:13px}
 .vp-subnav a.is-active{background:var(--vp-accent);color:var(--vp-accent-fg)}

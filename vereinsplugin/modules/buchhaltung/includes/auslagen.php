@@ -16,6 +16,7 @@ function jb_submit_auslage(array $data, array $file): int|WP_Error {
     $kat      = sanitize_text_field($data['kategorie'] ?? 'Sonstige Ausgaben');
     $beschr   = sanitize_textarea_field($data['beschreibung'] ?? '');
     $budget_id = (int) ($data['budget_id'] ?? 0) ?: null;
+    $konto     = sanitize_text_field($data['konto'] ?? '');
 
     if ($betrag <= 0)    return new WP_Error('invalid_betrag', 'Betrag muss größer als 0 sein.');
     if (empty($datum))   return new WP_Error('invalid_datum',  'Datum fehlt.');
@@ -25,7 +26,7 @@ function jb_submit_auslage(array $data, array $file): int|WP_Error {
     $t = jb_table_auslagen();
 
     // Eintrag anlegen (ohne Beleg zunächst)
-    $wpdb->insert($t, [
+    $row_ins = [
         'user_id'       => $user_id,
         'ausgabe_datum' => $datum,
         'betrag'        => $betrag,
@@ -34,7 +35,12 @@ function jb_submit_auslage(array $data, array $file): int|WP_Error {
         'budget_id'     => $budget_id,
         'status'        => 'ausstehend',
         'eingereicht_am'=> current_time('mysql'),
-    ]);
+    ];
+    $al_cols = $wpdb->get_col('SHOW COLUMNS FROM ' . $t);
+    if (in_array('konto', (array) $al_cols, true)) {
+        $row_ins['konto'] = $konto;
+    }
+    $wpdb->insert($t, $row_ins);
     $id = (int) $wpdb->insert_id;
     if (!$id) return new WP_Error('db_error', 'Datenbankfehler beim Speichern.');
 
@@ -141,6 +147,8 @@ function jb_mark_paid(int $id): bool|WP_Error {
     ], ['id' => $id]);
 
     // Ins Buchungsjournal übernehmen (als Ausgabe, negativ)
+    $konto   = $auslage['konto'] ?? '';
+    $sphaere = ($konto && function_exists('jb_konto_sphaere')) ? jb_konto_sphaere($konto) : '';
     $buchung_id = jb_journal_add([
         'buchung_datum' => $auslage['ausgabe_datum'],
         'betrag'        => -abs((float) $auslage['betrag']),
@@ -149,6 +157,9 @@ function jb_mark_paid(int $id): bool|WP_Error {
         'quelle'        => 'Auslage',
         'beleg_pfad'    => $auslage['beleg_pfad'],
         'auslage_id'    => $id,
+        'konto'         => $konto,
+        'sphaere'       => $sphaere,
+        'gegenpartei'   => $auslage['user_name'] ?? '',
     ]);
 
     // Buchungs-ID in Auslage speichern
