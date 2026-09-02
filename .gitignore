@@ -6,6 +6,10 @@
 /_extracted/
 /*.zip
 
+# Fremde Downloads, die im Projektordner gelandet sind
+/*.xip
+/Xcode*.xip
+
 # OS / Editor
 .DS_Store
 Thumbs.db
