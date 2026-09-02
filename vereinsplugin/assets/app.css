@@ -81,7 +81,8 @@
 .vp-table th,.vp-table td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--vp-border)}
 
 .vp-auslage-head{font-size:15px}
-.vp-auslage-actions{margin-top:8px}
+.vp-auslage-actions{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.vp-jb-notiz{flex:1 1 200px;min-width:160px;padding:7px 9px;border:1px solid var(--vp-border);border-radius:8px;background:var(--vp-card);color:inherit;font:inherit}
 .vp-auslage-msg{margin-top:6px;font-size:13px;color:var(--vp-muted)}
 
 .vp-login{max-width:420px;margin:24px auto}

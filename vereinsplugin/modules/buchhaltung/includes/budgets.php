@@ -26,9 +26,17 @@ function jb_budget_save(array $data): int|false {
         'zweck'       => sanitize_text_field($data['zweck'] ?? ''),
         'beschreibung'=> sanitize_textarea_field($data['beschreibung'] ?? ''),
         'betrag'      => (float)str_replace(',', '.', $data['betrag'] ?? 0),
-        'ausgegeben'  => (float)str_replace(',', '.', $data['ausgegeben'] ?? 0),
         'notiz'       => sanitize_textarea_field($data['notiz'] ?? ''),
+        'verantwortlich_user_id' => (int)($data['verantwortlich_user_id'] ?? 0) ?: null,
+        'jahr'        => (int)($data['jahr'] ?? 0) ?: null,
+        'kostenstelle'=> sanitize_text_field($data['kostenstelle'] ?? ''),
+        'konto'       => sanitize_text_field($data['konto'] ?? ''),
     ];
+    // 'ausgegeben' nur überschreiben, wenn ausdrücklich mitgegeben (sonst
+    // wird der per Auslagen-Auszahlung hochgezählte Wert nicht zerstört).
+    if (array_key_exists('ausgegeben', $data) && $data['ausgegeben'] !== '') {
+        $row['ausgegeben'] = (float)str_replace(',', '.', $data['ausgegeben']);
+    }
 
     if ($id) {
         $wpdb->update(jb_table_budgets(), $row, ['id' => $id]);

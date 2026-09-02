@@ -195,6 +195,12 @@ function vp_member_sections() {
 			'shortcode' => 'jb_kassenbericht',
 			'need_sc'   => true,
 		),
+		'budgets' => array(
+			'label'  => __( 'Budgets', 'vereinsplugin' ),
+			'group'  => 'vorstand',
+			'cap'    => 'jb_view_journal',
+			'render' => 'vp_render_budgets_section',
+		),
 		'buchhaltung' => array(
 			'label'  => __( 'Buchhaltung (Backend)', 'vereinsplugin' ),
 			'group'  => 'vorstand',
@@ -541,11 +547,17 @@ function vp_render_auslagen_pruefen_section() {
 
 	$pending  = jb_get_auslagen( array( 'status' => 'ausstehend' ) );
 	$approved = jb_get_auslagen( array( 'status' => 'genehmigt' ) );
+	$budgets  = function_exists( 'jb_budgets_get_all' ) ? jb_budgets_get_all() : array();
+	$budget_name = array();
+	foreach ( $budgets as $b ) {
+		$b = (object) $b;
+		$budget_name[ (int) $b->id ] = $b->zweck;
+	}
 
 	ob_start();
 	echo '<h2>' . esc_html__( 'Auslagen prüfen', 'vereinsplugin' ) . '</h2>';
 
-	$render_row = function ( $r ) {
+	$render_row = function ( $r ) use ( $budget_name ) {
 		$r = (object) $r;
 		echo '<div class="vp-card vp-auslage" data-id="' . (int) $r->id . '">';
 		printf(
@@ -555,14 +567,22 @@ function vp_render_auslagen_pruefen_section() {
 			esc_html( date_i18n( 'd.m.Y', strtotime( $r->ausgabe_datum ) ) )
 		);
 		echo '<div class="vp-muted">' . esc_html( $r->kategorie ) . ' — ' . esc_html( $r->beschreibung ) . '</div>';
+		$bid = isset( $r->budget_id ) ? (int) $r->budget_id : 0;
+		if ( $bid && isset( $budget_name[ $bid ] ) ) {
+			echo '<div class="vp-muted">' . esc_html__( 'Budget:', 'vereinsplugin' ) . ' ' . esc_html( $budget_name[ $bid ] ) . '</div>';
+		}
+		if ( ! empty( $r->beleg_pfad ) && function_exists( 'jb_nc' ) ) {
+			echo '<div><a class="vp-btn" target="_blank" rel="noopener" href="' . esc_url( jb_nc()->get_download_url( $r->beleg_pfad ) ) . '">' . esc_html__( 'Beleg ansehen', 'vereinsplugin' ) . '</a></div>';
+		}
 		echo '<div class="vp-auslage-actions">';
 		if ( 'ausstehend' === $r->status ) {
-			echo '<button class="vp-btn vp-btn-primary vp-jb-approve" data-do="approve">' . esc_html__( 'Genehmigen', 'vereinsplugin' ) . '</button> ';
-			echo '<button class="vp-btn vp-btn-danger vp-jb-approve" data-do="reject">' . esc_html__( 'Ablehnen', 'vereinsplugin' ) . '</button>';
+			echo '<input type="text" class="vp-jb-notiz" placeholder="' . esc_attr__( 'Notiz / Ablehnungsgrund (optional)', 'vereinsplugin' ) . '">';
+			echo '<button type="button" class="vp-btn vp-btn-primary vp-jb-decide" data-do="approve">' . esc_html__( 'Genehmigen', 'vereinsplugin' ) . '</button> ';
+			echo '<button type="button" class="vp-btn vp-btn-danger vp-jb-decide" data-do="reject">' . esc_html__( 'Ablehnen', 'vereinsplugin' ) . '</button>';
 		} elseif ( 'genehmigt' === $r->status ) {
-			echo '<button class="vp-btn vp-jb-paid">' . esc_html__( 'Als ausgezahlt markieren', 'vereinsplugin' ) . '</button>';
+			echo '<button type="button" class="vp-btn vp-jb-paid">' . esc_html__( 'Als ausgezahlt markieren', 'vereinsplugin' ) . '</button>';
 		}
-		echo '</div><div class="vp-auslage-msg"></div></div>';
+		echo '</div><div class="vp-auslage-msg" role="status"></div></div>';
 	};
 
 	echo '<h3>' . esc_html__( 'Wartet auf Prüfung', 'vereinsplugin' ) . '</h3>';
@@ -583,37 +603,69 @@ function vp_render_auslagen_pruefen_section() {
 		echo '<p class="vp-muted">' . esc_html__( 'Nichts offen.', 'vereinsplugin' ) . '</p>';
 	}
 
-	// Nutzt die bestehenden AJAX-Endpunkte des Buchhaltungs-Moduls (JB global).
+	// Nutzt die bestehenden AJAX-Endpunkte des Buchhaltungs-Moduls – bewusst
+	// in reinem JS (kein jQuery, kein window.prompt): das inline-Script läuft,
+	// bevor jQuery im Footer geladen ist, und prompt() ist in installierten
+	// PWAs oft gesperrt. Genau daran scheiterte bisher das Ablehnen.
+	$ajax  = admin_url( 'admin-ajax.php' );
+	$nonce = wp_create_nonce( 'jb_nonce' );
+	$t_ok   = esc_js( __( 'Erledigt.', 'vereinsplugin' ) );
+	$t_err  = esc_js( __( 'Fehler.', 'vereinsplugin' ) );
+	$t_wait = esc_js( __( 'Bitte warten …', 'vereinsplugin' ) );
 	?>
 	<script>
-	(function($){
-		if (typeof JB === 'undefined') return;
-		function post(data, el){
-			el.disabled = true;
-			$.post(JB.ajax_url, $.extend({nonce: JB.nonce}, data), function(res){
-				var card = $(el).closest('.vp-auslage');
-				var ok = res && res.success === true;
-				if (ok) {
-					card.find('.vp-auslage-msg').text('<?php echo esc_js( __( 'Gespeichert. Bitte Seite neu laden.', 'vereinsplugin' ) ); ?>');
-					card.css('opacity', .5);
-					card.find('.vp-btn').prop('disabled', true);
-				} else {
-					card.find('.vp-auslage-msg').text((res && res.data) ? res.data : '<?php echo esc_js( __( 'Fehler.', 'vereinsplugin' ) ); ?>');
-					el.disabled = false;
-				}
+	(function(){
+		var AJAX = <?php echo wp_json_encode( $ajax ); ?>;
+		var NONCE = <?php echo wp_json_encode( $nonce ); ?>;
+		function decide(card, act){
+			var id = card.getAttribute('data-id');
+			var notizEl = card.querySelector('.vp-jb-notiz');
+			var msg = card.querySelector('.vp-auslage-msg');
+			var btns = card.querySelectorAll('button');
+			btns.forEach(function(b){ b.disabled = true; });
+			msg.textContent = '<?php echo $t_wait; ?>';
+			var body = new URLSearchParams();
+			body.set('nonce', NONCE);
+			if (act === 'paid') {
+				body.set('action', 'jb_mark_paid');
+			} else {
+				body.set('action', 'jb_decide_auslage');
+				body.set('action_type', act); // 'approve' | 'reject'
+				body.set('notiz', notizEl ? notizEl.value : '');
+			}
+			body.set('id', id);
+			fetch(AJAX, {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'}, body: body.toString()})
+				.then(function(r){ return r.json(); })
+				.then(function(res){
+					var ok = res && (res.success === true);
+					if (ok) {
+						msg.textContent = '<?php echo $t_ok; ?>';
+						card.style.opacity = .45;
+					} else {
+						msg.textContent = (res && res.data) ? res.data : '<?php echo $t_err; ?>';
+						btns.forEach(function(b){ b.disabled = false; });
+					}
+				})
+				.catch(function(){
+					msg.textContent = '<?php echo $t_err; ?>';
+					btns.forEach(function(b){ b.disabled = false; });
+				});
+		}
+		function init(){
+			document.querySelectorAll('.vp-app .vp-auslage').forEach(function(card){
+				card.querySelectorAll('.vp-jb-decide').forEach(function(b){
+					b.addEventListener('click', function(){ decide(card, b.getAttribute('data-do')); });
+				});
+				var paid = card.querySelector('.vp-jb-paid');
+				if (paid) { paid.addEventListener('click', function(){ decide(card, 'paid'); }); }
 			});
 		}
-		$(document).on('click', '.vp-jb-approve', function(){
-			var id = $(this).closest('.vp-auslage').data('id');
-			var dov = $(this).data('do');
-			var notiz = dov === 'reject' ? (window.prompt('<?php echo esc_js( __( 'Grund für die Ablehnung (optional):', 'vereinsplugin' ) ); ?>') || '') : '';
-			post({action:'jb_decide_auslage', id:id, action_type:dov, notiz:notiz}, this);
-		});
-		$(document).on('click', '.vp-jb-paid', function(){
-			var id = $(this).closest('.vp-auslage').data('id');
-			post({action:'jb_mark_paid', id:id}, this);
-		});
-	})(jQuery);
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', init);
+		} else {
+			init();
+		}
+	})();
 	</script>
 	<?php
 	return ob_get_clean();

@@ -1,5 +1,12 @@
 <?php defined('ABSPATH') || exit;
 $auslagen = jb_get_auslagen(['user_id' => get_current_user_id()]);
+$jb_budget_names = [];
+if (function_exists('jb_budgets_get_all')) {
+    foreach (jb_budgets_get_all() as $__b) {
+        $__b = (object) $__b;
+        $jb_budget_names[(int) $__b->id] = $__b->zweck;
+    }
+}
 $status_labels = [
     'ausstehend' => ['label' => 'Ausstehend',  'color' => '#f59e0b'],
     'genehmigt'  => ['label' => 'Genehmigt',   'color' => '#10b981'],
@@ -31,7 +38,12 @@ $status_labels = [
                     <td><?= esc_html($a['ausgabe_datum']) ?></td>
                     <td><strong><?= number_format((float)$a['betrag'], 2, ',', '.') ?> €</strong></td>
                     <td><?= esc_html($a['beschreibung']) ?><br>
-                        <small class="jb-muted"><?= esc_html($a['kategorie']) ?></small></td>
+                        <small class="jb-muted"><?= esc_html($a['kategorie']) ?><?php
+                        $__bid = (int) ($a['budget_id'] ?? 0);
+                        if ($__bid && isset($jb_budget_names[$__bid])) {
+                            echo ' · ' . esc_html($jb_budget_names[$__bid]);
+                        }
+                        ?></small></td>
                     <td><span class="jb-badge" style="background:<?= $s['color'] ?>"><?= $s['label'] ?></span></td>
                     <td><?= $a['kassier_notiz'] ? esc_html($a['kassier_notiz']) : '–' ?></td>
                 </tr>

@@ -24,8 +24,10 @@ function jb_create_tables() {
         entschieden_am  DATETIME DEFAULT NULL,
         ausgezahlt_am   DATETIME DEFAULT NULL,
         buchung_id      BIGINT UNSIGNED DEFAULT NULL,
+        budget_id       BIGINT UNSIGNED DEFAULT NULL,
         KEY user_id (user_id),
-        KEY status (status)
+        KEY status (status),
+        KEY budget_id (budget_id)
     ) $charset;");
 
     // EÜR Buchungsjournal
@@ -55,8 +57,13 @@ function jb_create_tables() {
         betrag      DECIMAL(10,2) NOT NULL DEFAULT 0,
         ausgegeben  DECIMAL(10,2) NOT NULL DEFAULT 0,
         notiz       TEXT,
+        verantwortlich_user_id BIGINT UNSIGNED DEFAULT NULL,
+        jahr        SMALLINT DEFAULT NULL,
+        kostenstelle VARCHAR(50) DEFAULT '',
+        konto       VARCHAR(20) DEFAULT '',
         aktiv       TINYINT DEFAULT 1,
-        erstellt_am DATETIME DEFAULT CURRENT_TIMESTAMP
+        erstellt_am DATETIME DEFAULT CURRENT_TIMESTAMP,
+        KEY verantwortlich_user_id (verantwortlich_user_id)
     ) $charset;");
 
     // Rücklagen (wiederkehrende Kosten)

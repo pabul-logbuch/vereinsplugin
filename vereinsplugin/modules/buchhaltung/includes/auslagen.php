@@ -15,6 +15,7 @@ function jb_submit_auslage(array $data, array $file): int|WP_Error {
     $datum    = sanitize_text_field($data['ausgabe_datum'] ?? '');
     $kat      = sanitize_text_field($data['kategorie'] ?? 'Sonstige Ausgaben');
     $beschr   = sanitize_textarea_field($data['beschreibung'] ?? '');
+    $budget_id = (int) ($data['budget_id'] ?? 0) ?: null;
 
     if ($betrag <= 0)    return new WP_Error('invalid_betrag', 'Betrag muss größer als 0 sein.');
     if (empty($datum))   return new WP_Error('invalid_datum',  'Datum fehlt.');
@@ -30,6 +31,7 @@ function jb_submit_auslage(array $data, array $file): int|WP_Error {
         'betrag'        => $betrag,
         'kategorie'     => $kat,
         'beschreibung'  => $beschr,
+        'budget_id'     => $budget_id,
         'status'        => 'ausstehend',
         'eingereicht_am'=> current_time('mysql'),
     ]);
@@ -151,6 +153,15 @@ function jb_mark_paid(int $id): bool|WP_Error {
 
     // Buchungs-ID in Auslage speichern
     $wpdb->update(jb_table_auslagen(), ['buchung_id' => $buchung_id], ['id' => $id]);
+
+    // Verbrauchtes Budget hochzählen (Kostenstelle).
+    if (!empty($auslage['budget_id'])) {
+        $wpdb->query($wpdb->prepare(
+            "UPDATE " . jb_table_budgets() . " SET ausgegeben = ausgegeben + %f WHERE id = %d",
+            abs((float) $auslage['betrag']),
+            (int) $auslage['budget_id']
+        ));
+    }
 
     return true;
 }

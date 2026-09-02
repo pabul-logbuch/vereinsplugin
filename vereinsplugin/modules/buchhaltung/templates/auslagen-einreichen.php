@@ -29,6 +29,24 @@
             </select>
         </div>
 
+        <?php
+        $jb_budgets = function_exists('jb_budgets_get_all') ? jb_budgets_get_all() : [];
+        if ($jb_budgets): ?>
+        <div class="jb-field">
+            <label for="jb-budget">Budget / Kostenstelle</label>
+            <select id="jb-budget" name="budget_id">
+                <option value="0">– keinem Budget zuordnen –</option>
+                <?php foreach ($jb_budgets as $b):
+                    $b = (object) $b;
+                    $rest = (float) $b->betrag - (float) $b->ausgegeben; ?>
+                    <option value="<?= (int) $b->id ?>">
+                        <?= esc_html($b->zweck) ?><?= $b->jahr ? ' (' . (int) $b->jahr . ')' : '' ?> — Rest <?= number_format($rest, 2, ',', '.') ?> €
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <?php endif; ?>
+
         <div class="jb-field">
             <label for="jb-beschr">Was wurde gekauft? *</label>
             <textarea id="jb-beschr" name="beschreibung" rows="3"
