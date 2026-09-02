@@ -262,8 +262,24 @@ function vp_shortcode_member_area( $atts ) {
 		$active = array_key_first( $sections );
 	}
 
-	$u          = wp_get_current_user();
-	$has_board  = (bool) array_filter( $sections, function ( $s ) { return 'vorstand' === $s['group']; } );
+	$u = wp_get_current_user();
+
+	// Basis-URL für die Navigations-Links: fester Permalink der aktuellen Seite,
+	// nicht REQUEST_URI. Bewusst OHNE #-Anker – manche Themes fangen Klicks auf
+	// Links mit Rautezeichen ab (Smooth-Scroll) und verhindern die Navigation.
+	$base_url = get_permalink();
+	if ( ! $base_url ) {
+		$base_url = remove_query_arg( array( 'vp_tab', 'pp_view', 'id', 'vp_antrag_status' ) );
+	}
+
+	// Hinweis, wenn Mitglieder-Sektionen fehlen, weil ein Modul nicht aktiv ist.
+	$hidden_modules = array();
+	foreach ( vp_member_sections() as $skey => $sdef ) {
+		if ( ! empty( $sdef['need_sc'] ) && current_user_can( $sdef['cap'] )
+			&& ! shortcode_exists( $sdef['shortcode'] ) && ! isset( $sections[ $skey ] ) ) {
+			$hidden_modules[] = $sdef['label'];
+		}
+	}
 
 	ob_start();
 	?>
@@ -288,11 +304,12 @@ function vp_shortcode_member_area( $atts ) {
 						echo '<div class="vp-nav-group">' . esc_html( $g_label ) . '</div>';
 					}
 					foreach ( $in_group as $key => $s ) {
-						$url = add_query_arg( 'vp_tab', $key, remove_query_arg( array( 'pp_view', 'id', 'vp_antrag_status' ) ) );
+						$url = add_query_arg( 'vp_tab', $key, $base_url );
 						printf(
-							'<a class="vp-nav-item%s" href="%s">%s</a>',
+							'<a class="vp-nav-item%s" href="%s" data-vp-tab="%s">%s</a>',
 							$key === $active ? ' is-active' : '',
-							esc_url( $url . '#vp-app' ),
+							esc_url( $url ),
+							esc_attr( $key ),
 							esc_html( $s['label'] )
 						);
 					}
@@ -305,6 +322,16 @@ function vp_shortcode_member_area( $atts ) {
 
 			<main class="vp-app-main" id="vp-app-main">
 				<?php
+				if ( $hidden_modules && 'start' === $active ) {
+					echo '<div class="vp-note vp-note-warn">'
+						. esc_html( sprintf(
+							/* translators: %s = list of module names */
+							__( 'Nicht angezeigt, weil das zugehörige Modul nicht aktiv ist: %s. Prüfe unter „Verein → Einstellungen“, ob das Modul aktiviert ist bzw. ob noch ein altes Einzel-Plugin läuft.', 'vereinsplugin' ),
+							implode( ', ', $hidden_modules )
+						) )
+						. '</div>';
+				}
+
 				$s = $sections[ $active ];
 				if ( ! empty( $s['render'] ) && is_callable( $s['render'] ) ) {
 					echo call_user_func( $s['render'] ); // phpcs:ignore WordPress.Security.EscapeOutput
@@ -315,6 +342,24 @@ function vp_shortcode_member_area( $atts ) {
 			</main>
 		</div>
 	</div>
+	<script>
+	(function(){
+		var app = document.getElementById('vp-app');
+		if (!app) return;
+		// Nach dem Umschalten an den Anfang des Bereichs scrollen.
+		if (location.search.indexOf('vp_tab=') !== -1 && !/[?&]pp_view=/.test(location.search)) {
+			try { app.scrollIntoView({block:'start'}); } catch(e) { app.scrollIntoView(); }
+		}
+		// Navigation deterministisch selbst auslösen, damit kein Theme-Script
+		// (Smooth-Scroll, One-Page-Nav) den Klick abfangen kann.
+		app.querySelectorAll('.vp-nav-item[href]').forEach(function(a){
+			a.addEventListener('click', function(ev){
+				ev.preventDefault();
+				window.location.href = a.href;
+			});
+		});
+	})();
+	</script>
 	<?php
 	return ob_get_clean();
 }
