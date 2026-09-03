@@ -1244,10 +1244,12 @@ async function showJournal() {
 
   let rows = [];
   let konten = [];
+  let ruecklagen = [];
   try {
-    [rows, konten] = await Promise.all([
+    [rows, konten, ruecklagen] = await Promise.all([
       call(api.data.rows('jb_buchungen', { limit: 5000 })).then((r) => r.rows),
       call(api.data.rows('jb_konten', { limit: 2000 })).then((r) => r.rows).catch(() => []),
+      call(api.data.rows('jb_ruecklagen', { limit: 500 })).then((r) => r.rows.filter((x) => String(x.aktiv) !== '0')).catch(() => []),
     ]);
   } catch (e) {
     return view.append(el('div', { class: 'note err' }, e.message));
@@ -1256,7 +1258,7 @@ async function showJournal() {
   // Aktionen
   const acts = el('div', { class: 'toolbar' });
   acts.append(
-    el('button', { class: 'primary small', onclick: () => togglePanel('add', () => journalForm(konten)) }, '+ Buchung'),
+    el('button', { class: 'primary small', onclick: () => togglePanel('add', () => journalForm(konten, ruecklagen)) }, '+ Buchung'),
     el('button', { class: 'small', onclick: () => togglePanel('transfer', () => umbuchungForm(konten)) }, '⇄ Umbuchung'),
     el('button', { class: 'small', onclick: () => togglePanel('csv', () => bankCsvForm(konten)) }, '⇑ Bank-CSV importieren')
   );
@@ -1332,7 +1334,7 @@ function togglePanel(kind, builder) {
   host.append(builder());
 }
 
-function journalForm(konten) {
+function journalForm(konten, ruecklagen = []) {
   const card = el('div', { class: 'card' });
   card.append(el('h2', {}, 'Neue Buchung'));
   const datum = el('input', { type: 'date', value: new Date().toISOString().slice(0, 10) });
@@ -1349,12 +1351,14 @@ function journalForm(konten) {
   const quelle = selectEl(QUELLE_OPTS, 'Bank KSK');
   const gegen = el('input', { type: 'text', placeholder: 'Gegenpartei (optional)' });
   const beschr = el('textarea', { placeholder: 'Beschreibung' });
+  const rl = selectEl([['', '– keine –'], ...ruecklagen.map((r) => [String(r.id), r.bezeichnung])], '');
   const hint = el('div', { class: 'muted' });
   function betragHint(k) {
     hint.textContent = k.typ === 'einnahme' ? 'Einnahme → Betrag positiv.' : k.typ === 'ausgabe' ? 'Ausgabe → Betrag negativ.' : '';
   }
   const f = el('form', { class: 'detail' });
   f.append('Datum', datum, 'Betrag (€)', betrag, 'Konto (SKR)', konto, 'Sphäre', sph, 'Kategorie', kat, 'Quelle', quelle, 'Gegenpartei', gegen, 'Beschreibung', beschr);
+  if (ruecklagen.length) f.append('Für Rücklage', rl);
   const actions = el('div', { class: 'form-actions' });
   actions.append(el('button', { class: 'primary', type: 'submit' }, 'Buchen'), hint);
   f.append(actions);
@@ -1367,6 +1371,7 @@ function journalForm(konten) {
         buchung_datum: datum.value, betrag: amt, konto: konto.value, sphaere: sph.value,
         kategorie: kat.value || (konten.find((k) => String(k.nummer) === konto.value) || {}).bezeichnung || 'Sonstige',
         quelle: quelle.value, gegenpartei: gegen.value, beschreibung: beschr.value,
+        ruecklage_id: Number(rl.value) || 0,
       }));
       toast('Gebucht.');
       await runSyncQuiet();

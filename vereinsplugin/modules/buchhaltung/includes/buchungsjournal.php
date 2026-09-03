@@ -33,8 +33,33 @@ function jb_journal_add(array $data): int {
             $row['beleg_referenz'] = $beleg_nr;
         }
     }
+    // Optionale Zuordnung zu einer Rücklage.
+    static $has_rl = null;
+    if ($has_rl === null) {
+        $has_rl = in_array('ruecklage_id', (array) $wpdb->get_col('SHOW COLUMNS FROM ' . jb_table_journal()), true);
+    }
+    $ruecklage_id = !empty($data['ruecklage_id']) ? (int) $data['ruecklage_id'] : 0;
+    if ($has_rl) {
+        $row['ruecklage_id'] = $ruecklage_id ?: null;
+    }
+
     $wpdb->insert(jb_table_journal(), $row);
-    return (int) $wpdb->insert_id;
+    $id = (int) $wpdb->insert_id;
+
+    // „Letzte Zahlung" der Rücklage auf das Buchungsdatum ziehen – explizit
+    // (ruecklage_id) oder per Stichwort-Abgleich (Bezeichnung im Text).
+    if (function_exists('jb_table_ruecklagen')) {
+        if ($ruecklage_id) {
+            $wpdb->update(jb_table_ruecklagen(), ['letzte_zahlung' => $row['buchung_datum']], ['id' => $ruecklage_id]);
+        } elseif (function_exists('jb_ruecklage_zahlung_gebucht') && (float) $row['betrag'] < 0) {
+            jb_ruecklage_zahlung_gebucht(
+                strtolower(trim(($row['gegenpartei'] ?? '') . ' ' . $row['beschreibung'] . ' ' . $row['kategorie'])),
+                $row['buchung_datum']
+            );
+        }
+    }
+
+    return $id;
 }
 
 function jb_journal_get(array $args = []): array {

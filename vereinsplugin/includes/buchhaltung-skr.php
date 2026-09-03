@@ -14,7 +14,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_SKR_DB_VERSION', '4' );
+define( 'VP_SKR_DB_VERSION', '5' );
 
 /* =========================================================================
  * Schema
@@ -71,6 +71,7 @@ function vp_skr_maybe_upgrade() {
 	$add( $j, 'sphaere', "`sphaere` VARCHAR(16) NOT NULL DEFAULT ''" );
 	$add( $j, 'gegenpartei', "`gegenpartei` VARCHAR(200) NOT NULL DEFAULT ''" );
 	$add( $j, 'beleg_nr', "`beleg_nr` VARCHAR(20) NOT NULL DEFAULT ''" );
+	$add( $j, 'ruecklage_id', "`ruecklage_id` BIGINT UNSIGNED DEFAULT NULL" );
 
 	// `quelle` von ENUM auf VARCHAR erweitern, damit weitere Geld-Töpfe
 	// (z. B. „PayPal", „Umbuchung") ohne Schema-Änderung möglich sind.
@@ -514,6 +515,7 @@ function vp_bh_journal() {
 				'konto'         => $konto,
 				'sphaere'       => jb_konto_sphaere( $konto ),
 				'gegenpartei'   => sanitize_text_field( wp_unslash( $_POST['gegenpartei'] ?? '' ) ),
+				'ruecklage_id'  => (int) ( $_POST['ruecklage_id'] ?? 0 ),
 			) );
 			$msg = __( 'Buchung gespeichert.', 'vereinsplugin' );
 		}
@@ -541,6 +543,13 @@ function vp_bh_journal() {
 			if ( isset( $_POST['quelle'] ) ) {
 				$upd['quelle'] = sanitize_text_field( wp_unslash( $_POST['quelle'] ) );
 			}
+			if ( isset( $_POST['ruecklage_id'] ) && in_array( 'ruecklage_id', (array) $wpdb->get_col( 'SHOW COLUMNS FROM ' . jb_table_journal() ), true ) ) {
+				$rlid = (int) $_POST['ruecklage_id'];
+				$upd['ruecklage_id'] = $rlid ?: null;
+				if ( $rlid && function_exists( 'jb_table_ruecklagen' ) ) {
+					$wpdb->update( jb_table_ruecklagen(), array( 'letzte_zahlung' => $upd['buchung_datum'] ), array( 'id' => $rlid ) );
+				}
+			}
 			$wpdb->update( jb_table_journal(), $upd, array( 'id' => $eid ) );
 			$msg = __( 'Buchung aktualisiert.', 'vereinsplugin' );
 		}
@@ -552,6 +561,15 @@ function vp_bh_journal() {
 	$jahr  = isset( $_GET['jahr'] ) ? (int) $_GET['jahr'] : (int) gmdate( 'Y' );
 	$rows  = function_exists( 'jb_journal_get' ) ? jb_journal_get( array( 'year' => $jahr ) ) : array();
 	$konten = jb_konten_all();
+	$ruecklagen = function_exists( 'jb_ruecklagen_get_all' ) ? jb_ruecklagen_get_all() : array();
+	$rl_options = static function ( $selected ) use ( $ruecklagen ) {
+		$html = '<option value="0">' . esc_html__( '– keine –', 'vereinsplugin' ) . '</option>';
+		foreach ( $ruecklagen as $rr ) {
+			$rr = (object) $rr;
+			$html .= '<option value="' . (int) $rr->id . '"' . selected( (int) $selected, (int) $rr->id, false ) . '>' . esc_html( $rr->bezeichnung ) . '</option>';
+		}
+		return $html;
+	};
 
 	ob_start();
 	if ( $msg ) {
@@ -577,6 +595,10 @@ function vp_bh_journal() {
 						<?php endforeach; ?>
 					</select></label>
 				<label><?php esc_html_e( 'Gegenpartei', 'vereinsplugin' ); ?><input type="text" name="gegenpartei"></label>
+				<?php if ( $ruecklagen ) : ?>
+					<label><?php esc_html_e( 'Für Rücklage (optional)', 'vereinsplugin' ); ?>
+						<select name="ruecklage_id"><?php echo $rl_options( 0 ); // phpcs:ignore ?></select></label>
+				<?php endif; ?>
 				<label class="vp-col-2"><?php esc_html_e( 'Verwendungszweck', 'vereinsplugin' ); ?><input type="text" name="zweck"></label>
 				<label><?php esc_html_e( 'Beleg-Nr.', 'vereinsplugin' ); ?><input type="text" name="beleg"></label>
 			</div>
@@ -630,6 +652,7 @@ function vp_bh_journal() {
 				. '<label>' . esc_html__( 'Betrag (€)', 'vereinsplugin' ) . '<input type="text" name="betrag" inputmode="decimal" value="' . esc_attr( number_format( abs( $betrag ), 2, ',', '' ) ) . '"></label>'
 				. '<label>' . esc_html__( 'Konto (SKR 49)', 'vereinsplugin' ) . '<select name="konto">' . $opts . '</select></label>'
 				. '<label>' . esc_html__( 'Topf / Quelle', 'vereinsplugin' ) . '<select name="quelle">' . $q_opt . '</select></label>'
+				. ( $ruecklagen ? '<label>' . esc_html__( 'Für Rücklage', 'vereinsplugin' ) . '<select name="ruecklage_id">' . $rl_options( (int) ( $r['ruecklage_id'] ?? 0 ) ) . '</select></label>' : '' )
 				. '<label>' . esc_html__( 'Gegenpartei', 'vereinsplugin' ) . '<input type="text" name="gegenpartei" value="' . esc_attr( $r['gegenpartei'] ?? '' ) . '"></label>'
 				. '<label>' . esc_html__( 'Verwendungszweck', 'vereinsplugin' ) . '<input type="text" name="zweck" value="' . esc_attr( $r['beschreibung'] ?? '' ) . '"></label>'
 				. '<label>' . esc_html__( 'Beleg-Nr.', 'vereinsplugin' ) . '<input type="text" name="beleg" value="' . esc_attr( $r['beleg_nr'] ?? '' ) . '"></label>'

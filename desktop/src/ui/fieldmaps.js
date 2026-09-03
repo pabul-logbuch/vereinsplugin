@@ -188,6 +188,11 @@ const T = {
         type: 'select',
         from: { slug: 'jb_auslagen', value: 'id', label: (r) => `#${r.id} · ${r.betrag} € · ${r.beschreibung || ''}`.slice(0, 60) },
       },
+      ruecklage_id: {
+        label: 'Für Rücklage',
+        type: 'select',
+        from: { slug: 'jb_ruecklagen', value: 'id', label: (r) => r.bezeichnung },
+      },
       erstellt_von: { label: 'Erstellt von (User-ID)', type: 'number' },
     },
   },
