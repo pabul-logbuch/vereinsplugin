@@ -314,7 +314,7 @@ function rerender() {
   else if (c.name === 'kontenplan') showKontenplan();
   else if (c.name === 'zbon') showZbon();
   else if (c.name === 'kontenblaetter') showKontenblaetter();
-  else if (c.name === 'kontenblatt') showKontenblatt(c.konto);
+  else if (c.name === 'kontenblatt') showKontenblatt(c.konto, c.from);
   else if (c.name === 'auslagen_pruefen') showAuslagenPruefen();
   else if (c.name === 'journal') showJournal();
   else if (c.name === 'mitglieder') showMitglieder();
@@ -1013,7 +1013,7 @@ async function showKontenplan() {
     for (const k of byTyp[typ]) {
       const u = um[String(k.nummer)] || { einnahmen: 0, ausgaben: 0, anzahl: 0 };
       const saldo = u.einnahmen - u.ausgaben;
-      tbb.append(el('tr', { class: String(k.aktiv) === '0' ? 'muted' : '' },
+      tbb.append(el('tr', { class: String(k.aktiv) === '0' ? 'muted' : '', style: 'cursor:pointer', title: 'Buchungen dieses Kontos anzeigen', onclick: () => showKontenblatt(String(k.nummer), 'kontenplan') },
         el('td', {}, k.nummer), el('td', {}, k.bezeichnung), el('td', {}, k.sphaere || '—'),
         el('td', { style: 'text-align:right' }, u.einnahmen ? eur(u.einnahmen) : '—'),
         el('td', { style: 'text-align:right' }, u.ausgaben ? eur(u.ausgaben) : '—'),
@@ -1024,7 +1024,8 @@ async function showKontenplan() {
     view.append(t);
   }
   view.append(el('p', { class: 'muted', style: 'margin-top:12px' },
-    el('button', { class: 'small', onclick: () => showTable('jb_konten') }, 'Konten bearbeiten')));
+    'Zeile anklicken → alle Buchungen des Kontos (dort einzeln bearbeitbar). ',
+    el('button', { class: 'small', onclick: () => showTable('jb_konten') }, 'Kontenplan bearbeiten')));
 }
 
 /* --------------------------------------------------------- Z-Bon erfassen */
@@ -1187,11 +1188,12 @@ async function showKontenblaetter() {
   if (!(data.salden || []).length) view.append(el('div', { class: 'note' }, 'Noch keine Buchungen.'));
 }
 
-async function showKontenblatt(konto) {
-  state.current = { name: 'kontenblatt', konto };
+async function showKontenblatt(konto, from = 'blaetter') {
+  state.current = { name: 'kontenblatt', konto, from };
   renderNav();
   view.innerHTML = '';
-  view.append(el('button', { class: 'ghost small', onclick: showKontenblaetter }, '‹ Alle Konten'));
+  const back = from === 'kontenplan' ? showKontenplan : showKontenblaetter;
+  view.append(el('button', { class: 'ghost small', onclick: back }, from === 'kontenplan' ? '‹ Kontenplan' : '‹ Alle Konten'));
   view.append(el('h1', {}, `Kontenblatt ${konto}`));
   let kb;
   try {
