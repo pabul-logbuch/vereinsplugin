@@ -183,5 +183,12 @@ function vp_render_budgets_section() {
 		<p class="vp-muted"><?php esc_html_e( '„Verbraucht“ zählt automatisch hoch, sobald eine zugeordnete Auslage als ausgezahlt markiert wird.', 'vereinsplugin' ); ?></p>
 	</form>
 	<?php
+
+	// Rücklagen (wiederkehrende Kosten) direkt darunter.
+	if ( function_exists( 'vp_bh_ruecklagen' ) ) {
+		echo '<h2 style="margin-top:32px">' . esc_html__( 'Rücklagen für wiederkehrende Kosten', 'vereinsplugin' ) . '</h2>';
+		echo vp_bh_ruecklagen(); // phpcs:ignore WordPress.Security.EscapeOutput
+	}
+
 	return ob_get_clean();
 }

@@ -419,6 +419,17 @@ function vp_bh_ruecklagen() {
 		}
 		$msg = __( 'Rücklage gespeichert.', 'vereinsplugin' );
 	}
+	if ( $can_edit && isset( $_POST['vp_rl_del'] ) && check_admin_referer( 'vp_bh_rl', 'vp_rl_nonce' ) ) {
+		$rid = (int) ( $_POST['id'] ?? 0 );
+		if ( $rid ) {
+			if ( function_exists( 'jb_ruecklage_delete' ) ) {
+				jb_ruecklage_delete( $rid );
+			} else {
+				$wpdb->delete( jb_table_ruecklagen(), array( 'id' => $rid ) );
+			}
+			$msg = __( 'Rücklage gelöscht.', 'vereinsplugin' );
+		}
+	}
 
 	$rl = jb_ruecklagen_get_all();
 
@@ -427,7 +438,7 @@ function vp_bh_ruecklagen() {
 		echo '<div class="vp-note">' . esc_html( $msg ) . '</div>';
 	}
 	echo '<p class="vp-muted">' . esc_html__( 'Wiederkehrende Kosten (Versicherung, GEMA, DGUV …). Pro Monat wird anteilig zurückgelegt. „Letzte Zahlung“ nach jeder echten Zahlung aktualisieren.', 'vereinsplugin' ) . '</p>';
-	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Bezeichnung', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Betrag/Fällig.', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Intervall', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Letzte Zahlung', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Bedarf/Monat', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Rücklage heute', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
+	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Bezeichnung', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Betrag/Fällig.', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Intervall', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Letzte Zahlung', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Bedarf/Monat', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Rücklage heute', 'vereinsplugin' ) . '</th>' . ( $can_edit ? '<th></th>' : '' ) . '</tr></thead><tbody>';
 	$sum = 0.0;
 	foreach ( $rl as $r ) {
 		$r = (object) $r;
@@ -436,17 +447,35 @@ function vp_bh_ruecklagen() {
 		$monate = $r->letzte_zahlung ? max( 0, (int) floor( ( time() - strtotime( $r->letzte_zahlung ) ) / 2592000 ) ) : 0;
 		$heute = min( (float) $r->betrag, $pm * $monate );
 		$sum  += $heute;
+
+		$edit_cell = '';
+		if ( $can_edit ) {
+			$edit_cell = '<td><details class="vp-inline-edit"><summary class="vp-btn">✎</summary>'
+				. '<form method="post" class="vp-form" style="margin-top:8px;min-width:260px">'
+				. wp_nonce_field( 'vp_bh_rl', 'vp_rl_nonce', true, false )
+				. '<input type="hidden" name="id" value="' . (int) $r->id . '">'
+				. '<label>' . esc_html__( 'Bezeichnung', 'vereinsplugin' ) . '<input name="bezeichnung" value="' . esc_attr( $r->bezeichnung ) . '"></label>'
+				. '<label>' . esc_html__( 'Betrag pro Fälligkeit (€)', 'vereinsplugin' ) . '<input name="betrag" type="text" inputmode="decimal" value="' . esc_attr( number_format( (float) $r->betrag, 2, ',', '' ) ) . '"></label>'
+				. '<label>' . esc_html__( 'Intervall (Monate)', 'vereinsplugin' ) . '<input name="intervall_monate" type="number" min="1" value="' . $iv . '"></label>'
+				. '<label>' . esc_html__( 'Letzte Zahlung', 'vereinsplugin' ) . '<input name="letzte_zahlung" type="date" value="' . esc_attr( $r->letzte_zahlung ) . '"></label>'
+				. '<label class="vp-col-2">' . esc_html__( 'Notiz', 'vereinsplugin' ) . '<input name="notiz" value="' . esc_attr( $r->notiz ?? '' ) . '"></label>'
+				. '<p><button class="vp-btn vp-btn-primary" name="vp_rl_save" value="1">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button> '
+				. '<button class="vp-btn vp-btn-danger" name="vp_rl_del" value="1" onclick="return confirm(\'' . esc_js( __( 'Rücklage löschen?', 'vereinsplugin' ) ) . '\')">' . esc_html__( 'Löschen', 'vereinsplugin' ) . '</button></p>'
+				. '</form></details></td>';
+		}
+
 		printf(
-			'<tr><td>%s</td><td style="text-align:right">%s €</td><td>%d Mon.</td><td>%s</td><td style="text-align:right">%s €</td><td style="text-align:right">%s €</td></tr>',
+			'<tr><td>%s</td><td style="text-align:right">%s €</td><td>%d Mon.</td><td>%s</td><td style="text-align:right">%s €</td><td style="text-align:right">%s €</td>%s</tr>',
 			esc_html( $r->bezeichnung ),
 			esc_html( number_format( (float) $r->betrag, 2, ',', '.' ) ),
 			$iv,
 			esc_html( $r->letzte_zahlung ),
 			esc_html( number_format( $pm, 2, ',', '.' ) ),
-			esc_html( number_format( $heute, 2, ',', '.' ) )
+			esc_html( number_format( $heute, 2, ',', '.' ) ),
+			$edit_cell
 		);
 	}
-	printf( '<tr style="font-weight:700"><td colspan="5">%s</td><td style="text-align:right">%s €</td></tr>', esc_html__( 'Rücklagenbedarf gesamt', 'vereinsplugin' ), esc_html( number_format( $sum, 2, ',', '.' ) ) );
+	printf( '<tr style="font-weight:700"><td colspan="5">%s</td><td style="text-align:right">%s €</td>%s</tr>', esc_html__( 'Rücklagenbedarf gesamt', 'vereinsplugin' ), esc_html( number_format( $sum, 2, ',', '.' ) ), $can_edit ? '<td></td>' : '' );
 	echo '</tbody></table></div>';
 
 	if ( $can_edit ) {

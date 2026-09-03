@@ -852,6 +852,36 @@ async function showKassenbericht(year) {
     line('= Freies / verfügbares Budget', d.frei, true);
     view.append(el('div', { class: 'card' }, kv));
     view.append(el('p', { class: 'muted' }, 'Bank & Barkasse pflegst du im Plugin unter Buchhaltung → Kassenbericht; alles andere wird berechnet.'));
+
+    // Rücklagen-Aufschlüsselung aus dem lokalen Spiegel
+    try {
+      const rl = (await call(api.data.rows('jb_ruecklagen', { limit: 500 }))).rows.filter((x) => String(x.aktiv) !== '0');
+      if (rl.length) {
+        view.append(el('h2', {}, 'Rücklagen im Detail'));
+        const t = el('table');
+        t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Bezeichnung'), el('th', { style: 'text-align:right' }, 'Betrag/Fällig.'),
+          el('th', {}, 'Intervall'), el('th', {}, 'Letzte Zahlung'), el('th', { style: 'text-align:right' }, 'Rücklage heute'))));
+        const tb = el('tbody');
+        let sum = 0;
+        for (const r of rl) {
+          const betrag = Number(r.betrag) || 0;
+          const iv = Math.max(1, Number(r.intervall_monate) || 12);
+          const monate = r.letzte_zahlung ? Math.max(0, Math.floor((Date.now() - Date.parse(r.letzte_zahlung)) / (30.44 * 864e5))) : 0;
+          const heute = Math.min(betrag, (betrag / iv) * monate);
+          sum += heute;
+          tb.append(el('tr', { style: 'cursor:pointer', onclick: () => showDetail('jb_ruecklagen', r.id) },
+            el('td', {}, r.bezeichnung), el('td', { style: 'text-align:right' }, eur(betrag)),
+            el('td', {}, `${iv} Mon.`), el('td', {}, r.letzte_zahlung || '—'),
+            el('td', { style: 'text-align:right' }, eur(heute))));
+        }
+        tb.append(el('tr', { style: 'font-weight:700' }, el('td', { colspan: '4' }, 'Rücklagenbedarf gesamt'), el('td', { style: 'text-align:right' }, eur(sum))));
+        t.append(tb);
+        view.append(t);
+        view.append(el('p', { class: 'muted' }, 'Zeile anklicken zum Bearbeiten.'));
+      }
+    } catch {
+      /* jb_ruecklagen evtl. nicht gespiegelt */
+    }
   }
 
   // Nach Sphäre – Balken

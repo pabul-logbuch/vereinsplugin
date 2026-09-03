@@ -99,6 +99,12 @@ function jb_ruecklage_save(array $data): int|false {
     return (int)$wpdb->insert_id;
 }
 
+function jb_ruecklage_delete(int $id): bool {
+    if (!jb_is_kassier()) return false;
+    global $wpdb;
+    return (bool) $wpdb->delete(jb_table_ruecklagen(), ['id' => $id]);
+}
+
 function jb_ruecklage_zahlung_gebucht(string $bezeichnung_suche, string $datum): void {
     // Wenn eine passende Rücklage im Buchungsjournal auftaucht, letzte_zahlung updaten
     global $wpdb;
