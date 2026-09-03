@@ -77,9 +77,15 @@ function jb_ruecklagen_get_all(): array {
         $r['monatlicher_bedarf']  = round($pro_monat, 2);
         $r['monate_seit_zahlung'] = (int)$monate;
         $r['horizont_monate']     = $horizont;
+        // Reiner aufgelaufener Bedarf bis heute (auf eine Fälligkeit begrenzt).
         $r['ruecklage_bis_heute'] = round(min($betrag, $pro_monat * $monate), 2);
-        // „Bedarf": was bis in `horizont` Monaten zurückgelegt sein muss.
-        $r['ruecklage_jetzt']     = round(min($betrag, $pro_monat * ($monate + $horizont)), 2);
+        // „Bedarf": pro-Monat-Anteil über das Fenster (Monate seit letzter
+        // Zahlung + Vorausplanung), gedeckelt auf die Fälligkeiten, die im
+        // Fenster tatsächlich anfallen. Monatliche Kosten ⇒ horizont × Betrag,
+        // jährliche wachsen anteilig Richtung Jahresbetrag.
+        $fenster = max(0, $monate + $horizont);
+        $zyklen  = max(1, (int) ceil($fenster / $intervall));
+        $r['ruecklage_jetzt']     = round(min($betrag * $zyklen, $pro_monat * $fenster), 2);
         $r['naechste_faelligkeit']= date('Y-m-d', strtotime('+' . $intervall . ' months', $letzte));
     }
     return $rows;
@@ -128,12 +134,52 @@ function jb_ruecklage_zahlung_gebucht(string $bezeichnung_suche, string $datum):
 
 // ── DASHBOARD ────────────────────────────────────────────────────────────────
 
+/**
+ * Aktueller Kontostand je Geld-Topf = Anfangsbestand + Summe der Journalbuchungen
+ * mit passender „quelle" (ab optionalem Stichtag).
+ */
+function jb_topf_saldo(string $key): float {
+    global $wpdb;
+    $map = [
+        'bank'   => ["Bank KSK"],
+        'kasse'  => ["Zettle-Bar", "Bar"],
+        'paypal' => ["PayPal"],
+        'zettle' => ["Zettle-Karte"],
+    ];
+    $quellen = $map[$key] ?? [];
+    if (!$quellen) return (float) get_option('jb_anfangsbestand_' . $key, 0);
+
+    // Einmalige Migration: alte „aktueller Stand"-Option in einen Anfangsbestand
+    // umrechnen, damit der berechnete Saldo weiter stimmt.
+    if (get_option('jb_anfangsbestand_migr') !== '1') {
+        foreach (['bank' => 'jb_kontostand_bank', 'kasse' => 'jb_kontostand_kasse'] as $k => $alt) {
+            $old = get_option($alt, null);
+            if ($old !== null && get_option('jb_anfangsbestand_' . $k, null) === null) {
+                $qs  = "'" . implode("','", array_map('esc_sql', $map[$k])) . "'";
+                $sum = (float) $wpdb->get_var("SELECT COALESCE(SUM(betrag),0) FROM " . jb_table_journal() . " WHERE quelle IN ($qs)");
+                update_option('jb_anfangsbestand_' . $k, round((float) $old - $sum, 2));
+            }
+        }
+        update_option('jb_anfangsbestand_migr', '1');
+    }
+
+    $anfang  = (float) get_option('jb_anfangsbestand_' . $key, 0);
+    $stichtag = sanitize_text_field((string) get_option('jb_anfangsbestand_datum', ''));
+    $qs = "'" . implode("','", array_map('esc_sql', $quellen)) . "'";
+    $sql = "SELECT COALESCE(SUM(betrag),0) FROM " . jb_table_journal() . " WHERE quelle IN ($qs)";
+    if ($stichtag) {
+        $sql = $wpdb->prepare($sql . " AND buchung_datum >= %s", $stichtag);
+    }
+    return round($anfang + (float) $wpdb->get_var($sql), 2);
+}
+
 function jb_get_dashboard_data(): array {
     global $wpdb;
 
-    $bank  = (float)get_option('jb_kontostand_bank', 0);
-    $kasse = (float)get_option('jb_kontostand_kasse', 0);
-    $kontostand = $bank + $kasse;
+    $bank   = jb_topf_saldo('bank');
+    $kasse  = jb_topf_saldo('kasse');
+    $paypal = jb_topf_saldo('paypal') + jb_topf_saldo('zettle');
+    $kontostand = $bank + $kasse + $paypal;
 
     $ruecklagen        = jb_ruecklagen_bedarf_gesamt();
     $verplantes        = jb_budgets_rest_total();
@@ -149,7 +195,7 @@ function jb_get_dashboard_data(): array {
     $frei = $kontostand - $ruecklagen - $verplantes - $offene_auslagen;
 
     return compact(
-        'bank', 'kasse', 'kontostand',
+        'bank', 'kasse', 'paypal', 'kontostand',
         'ruecklagen', 'verplantes', 'offene_auslagen',
         'getraenke_wert', 'frei'
     );

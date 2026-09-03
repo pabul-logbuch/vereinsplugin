@@ -303,6 +303,7 @@ add_action( 'rest_api_init', function () {
 	$route( '/actions/shift-schicht-delete','wl_manage_wishes','vp_sync_action_shift_schicht_delete' );
 	$route( '/actions/shift-tausch',       'read',            'vp_sync_action_shift_tausch' );
 	$route( '/actions/zbon-import',        'jb_view_journal', 'vp_sync_action_zbon_import' );
+	$route( '/actions/split-buchung',      'jb_view_journal', 'vp_sync_action_split_buchung' );
 
 	register_rest_route( VP_SYNC_API_NS, '/nextcloud/users', array(
 		'methods'             => 'GET',
@@ -620,9 +621,16 @@ function vp_sync_apply_one( $slug, $op, $pk, $baserev, array $fields ) {
 	$allowed = array_diff( $cols, array( $pkcol ) );
 	$clean   = array();
 	foreach ( $fields as $k => $v ) {
-		if ( in_array( $k, $allowed, true ) ) {
-			$clean[ $k ] = is_scalar( $v ) || is_null( $v ) ? $v : wp_json_encode( $v );
+		if ( ! in_array( $k, $allowed, true ) ) {
+			continue;
 		}
+		$v = is_scalar( $v ) || is_null( $v ) ? $v : wp_json_encode( $v );
+		// Leere Datums-/Zeitfelder: '' verträgt MySQL im Strict-Mode nicht → NULL,
+		// bei NOT-NULL-Datumsspalten das heutige Datum.
+		if ( '' === $v && preg_match( '/(datum|_am|_zahlung|_start|_ende|geburtsdatum|faelligkeit)/i', $k ) ) {
+			$v = 'letzte_zahlung' === $k ? current_time( 'Y-m-d' ) : null;
+		}
+		$clean[ $k ] = $v;
 	}
 
 	$load = function ( $id ) use ( $wpdb, $table, $pkcol ) {
@@ -1005,19 +1013,25 @@ function vp_sync_report_summary( WP_REST_Request $req ) {
 		);
 	}
 
-	// Geld-Töpfe: Anfangsstand (Option) + kumulierte Journalbuchungen je quelle.
-	$pot = function ( $quelle ) use ( $wpdb, $t ) {
-		return (float) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(betrag),0) FROM `$t` WHERE quelle = %s", $quelle ) );
+	// Geld-Töpfe: Anfangsbestand + kumulierte Journalbuchungen je quelle.
+	$saldo = function ( $key ) use ( $wpdb, $t ) {
+		if ( function_exists( 'jb_topf_saldo' ) ) {
+			return (float) jb_topf_saldo( $key );
+		}
+		$q = array( 'bank' => array( 'Bank KSK' ), 'kasse' => array( 'Zettle-Bar', 'Bar' ), 'paypal' => array( 'PayPal' ), 'zettle' => array( 'Zettle-Karte' ) );
+		$sum = 0.0;
+		foreach ( $q[ $key ] ?? array() as $qq ) {
+			$sum += (float) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(betrag),0) FROM `$t` WHERE quelle = %s", $qq ) );
+		}
+		return round( (float) get_option( 'jb_anfangsbestand_' . $key, 0 ) + $sum, 2 );
 	};
-	$bank  = (float) get_option( 'jb_kontostand_bank', 0 );
-	$kasse = (float) get_option( 'jb_kontostand_kasse', 0 );
 	$journal_total = (float) $wpdb->get_var( "SELECT COALESCE(SUM(betrag),0) FROM `$t`" );
 
 	$topfe = array(
-		array( 'key' => 'bank',   'label' => 'Bankkonto (KSK)',  'saldo' => round( $bank + $pot( 'Bank KSK' ), 2 ) ),
-		array( 'key' => 'kasse',  'label' => 'Barkasse',          'saldo' => round( $kasse + $pot( 'Zettle-Bar' ) + $pot( 'Bar' ), 2 ) ),
-		array( 'key' => 'paypal', 'label' => 'PayPal',            'saldo' => round( $pot( 'PayPal' ), 2 ) ),
-		array( 'key' => 'zettle', 'label' => 'Zettle (Karte)',    'saldo' => round( $pot( 'Zettle-Karte' ), 2 ) ),
+		array( 'key' => 'bank',   'label' => 'Bankkonto (KSK)', 'saldo' => $saldo( 'bank' ) ),
+		array( 'key' => 'kasse',  'label' => 'Barkasse',         'saldo' => $saldo( 'kasse' ) ),
+		array( 'key' => 'paypal', 'label' => 'PayPal',           'saldo' => $saldo( 'paypal' ) ),
+		array( 'key' => 'zettle', 'label' => 'Zettle (Karte)',   'saldo' => $saldo( 'zettle' ) ),
 	);
 
 	// Kassenbericht-Kennzahlen aus dem Buchhaltungs-Dashboard (falls geladen).
@@ -1050,8 +1064,8 @@ function vp_sync_report_summary( WP_REST_Request $req ) {
 		'topfe'           => $topfe,
 		'dashboard'       => $dashboard,
 		'bestand'         => array(
-			'bank_option'   => round( $bank, 2 ),
-			'kasse_option'  => round( $kasse, 2 ),
+			'bank_option'   => $saldo( 'bank' ),
+			'kasse_option'  => $saldo( 'kasse' ),
 			'journal_saldo' => round( $journal_total, 2 ),
 		),
 	) );
@@ -1828,4 +1842,70 @@ function vp_sync_action_zbon_import( WP_REST_Request $req ) {
 		) );
 	}
 	return rest_ensure_response( array( 'ok' => true, 'preview' => false, 'lines' => $lines, 'booked_ids' => $ids ) );
+}
+
+/**
+ * POST /actions/split-buchung  { id, teile: [ { betrag, konto?, kategorie?, beschreibung?, quelle?, gegenpartei? } ] }
+ *
+ * Ersetzt eine Buchung durch mehrere Teilbuchungen. Summe der Teilbeträge muss
+ * (bis auf 1 Cent) dem Ursprungsbetrag entsprechen. Datum, Beleg-Referenz,
+ * Beleg-Pfad und Rücklagen-Bezug werden übernommen, sofern nicht überschrieben.
+ */
+function vp_sync_action_split_buchung( WP_REST_Request $req ) {
+	if ( ! function_exists( 'jb_journal_add' ) ) {
+		return new WP_Error( 'no_fn', 'Buchhaltungs-Modul nicht geladen.', array( 'status' => 400 ) );
+	}
+	global $wpdb;
+	$t  = $wpdb->prefix . 'jb_buchungen';
+	$b  = vp_sync_json( $req );
+	$id = (int) ( $b['id'] ?? 0 );
+	$src = $id ? $wpdb->get_row( $wpdb->prepare( "SELECT * FROM `$t` WHERE id = %d", $id ), ARRAY_A ) : null;
+	if ( ! $src ) {
+		return new WP_Error( 'not_found', 'Buchung nicht gefunden.', array( 'status' => 404 ) );
+	}
+	$teile = isset( $b['teile'] ) && is_array( $b['teile'] ) ? $b['teile'] : array();
+	if ( count( $teile ) < 2 ) {
+		return new WP_Error( 'bad_req', 'Mindestens zwei Teilbuchungen nötig.', array( 'status' => 400 ) );
+	}
+
+	$f   = static function ( $v ) { return round( (float) str_replace( ',', '.', (string) $v ), 2 ); };
+	$ziel = $f( $src['betrag'] );
+	$rows = array();
+	$sum  = 0.0;
+	$has_skr = in_array( 'konto', vp_sync_columns( 'jb_buchungen' ), true );
+	foreach ( $teile as $teil ) {
+		$betr = $f( $teil['betrag'] ?? 0 );
+		if ( 0.0 === $betr ) {
+			continue;
+		}
+		$sum += $betr;
+		$konto = $has_skr ? sanitize_text_field( (string) ( $teil['konto'] ?? $src['konto'] ?? '' ) ) : '';
+		$rows[] = array(
+			'buchung_datum' => $src['buchung_datum'],
+			'betrag'        => $betr,
+			'kategorie'     => sanitize_text_field( (string) ( $teil['kategorie'] ?? ( $src['kategorie'] ?? 'Sonstige' ) ) ),
+			'beschreibung'  => sanitize_textarea_field( (string) ( $teil['beschreibung'] ?? ( $src['beschreibung'] ?? '' ) ) ),
+			'quelle'        => sanitize_text_field( (string) ( $teil['quelle'] ?? ( $src['quelle'] ?? 'Manuell' ) ) ),
+			'gegenpartei'   => sanitize_text_field( (string) ( $teil['gegenpartei'] ?? ( $src['gegenpartei'] ?? '' ) ) ),
+			'konto'         => $konto,
+			'sphaere'       => ( $konto && function_exists( 'jb_konto_sphaere' ) ) ? jb_konto_sphaere( $konto ) : (string) ( $src['sphaere'] ?? '' ),
+			'beleg_referenz'=> (string) ( $src['beleg_referenz'] ?? '' ),
+			'beleg_pfad'    => (string) ( $src['beleg_pfad'] ?? '' ),
+			'auslage_id'    => ! empty( $src['auslage_id'] ) ? (int) $src['auslage_id'] : null,
+			'ruecklage_id'  => ! empty( $teil['ruecklage_id'] ) ? (int) $teil['ruecklage_id'] : ( ! empty( $src['ruecklage_id'] ) ? (int) $src['ruecklage_id'] : 0 ),
+		);
+	}
+	if ( count( $rows ) < 2 ) {
+		return new WP_Error( 'bad_req', 'Mindestens zwei Teilbeträge (≠ 0) nötig.', array( 'status' => 400 ) );
+	}
+	if ( abs( round( $sum, 2 ) - $ziel ) > 0.01 ) {
+		return new WP_Error( 'summe', sprintf( 'Summe der Teile (%s) ≠ Ursprungsbetrag (%s).', number_format( $sum, 2, ',', '.' ), number_format( $ziel, 2, ',', '.' ) ), array( 'status' => 400 ) );
+	}
+
+	$wpdb->delete( $t, array( 'id' => $id ) );
+	$ids = array();
+	foreach ( $rows as $r ) {
+		$ids[] = (int) jb_journal_add( $r );
+	}
+	return rest_ensure_response( array( 'ok' => true, 'deleted' => $id, 'created' => $ids ) );
 }

@@ -269,6 +269,7 @@ function vp_render_buchhaltung_hub() {
 		'auswertung' => __( 'Auswertung', 'vereinsplugin' ),
 		'ruecklagen' => __( 'Rücklagen', 'vereinsplugin' ),
 		'konten'     => __( 'Kontenplan', 'vereinsplugin' ),
+		'bestaende'  => __( 'Bestände', 'vereinsplugin' ),
 	);
 	if ( ! isset( $tabs[ $view ] ) ) {
 		$view = 'journal';
@@ -304,6 +305,9 @@ function vp_render_buchhaltung_hub() {
 			break;
 		case 'konten':
 			echo vp_bh_konten(); // phpcs:ignore
+			break;
+		case 'bestaende':
+			echo vp_bh_bestaende(); // phpcs:ignore
 			break;
 		default:
 			echo vp_bh_journal(); // phpcs:ignore
@@ -570,6 +574,30 @@ function vp_bh_journal() {
 	if ( $can_edit && isset( $_POST['vp_bh_beleg_up'] ) && check_admin_referer( 'vp_bh_journal', 'vp_bh_nonce' ) ) {
 		$msg = vp_bh_journal_beleg_upload( (int) $_POST['id'], $_FILES['beleg_file'] ?? array() );
 	}
+	if ( $can_edit && isset( $_POST['vp_bh_split'] ) && check_admin_referer( 'vp_bh_journal', 'vp_bh_nonce' ) ) {
+		$sid  = (int) ( $_POST['id'] ?? 0 );
+		$sbet = (float) str_replace( ',', '.', sanitize_text_field( wp_unslash( $_POST['split_betrag'] ?? '0' ) ) );
+		$skon = sanitize_text_field( wp_unslash( $_POST['split_konto'] ?? '' ) );
+		$src  = $sid ? $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . jb_table_journal() . ' WHERE id = %d', $sid ), ARRAY_A ) : null;
+		if ( $src && $sbet && abs( $sbet ) < abs( (float) $src['betrag'] ) + 0.005 ) {
+			jb_journal_add( array(
+				'buchung_datum' => $src['buchung_datum'],
+				'betrag'        => $sbet,
+				'kategorie'     => $skon ? ( $skon . ' ' . ( jb_konto_get( $skon )->bezeichnung ?? '' ) ) : sanitize_text_field( wp_unslash( $_POST['split_zweck'] ?? 'Teilbuchung' ) ),
+				'beschreibung'  => sanitize_text_field( wp_unslash( $_POST['split_zweck'] ?? '' ) ) ?: ( $src['beschreibung'] ?? '' ),
+				'quelle'        => $src['quelle'] ?? 'Manuell',
+				'konto'         => $skon,
+				'sphaere'       => $skon ? jb_konto_sphaere( $skon ) : ( $src['sphaere'] ?? '' ),
+				'gegenpartei'   => $src['gegenpartei'] ?? '',
+				'beleg_referenz'=> $src['beleg_referenz'] ?? '',
+				'beleg_pfad'    => $src['beleg_pfad'] ?? '',
+			) );
+			$wpdb->update( jb_table_journal(), array( 'betrag' => round( (float) $src['betrag'] - $sbet, 2 ) ), array( 'id' => $sid ) );
+			$msg = __( 'Buchung aufgeteilt.', 'vereinsplugin' );
+		} else {
+			$msg = __( 'Aufteilen nicht möglich (Betrag prüfen).', 'vereinsplugin' );
+		}
+	}
 
 	$jahr  = isset( $_GET['jahr'] ) ? (int) $_GET['jahr'] : (int) gmdate( 'Y' );
 	$rows  = function_exists( 'jb_journal_get' ) ? jb_journal_get( array( 'year' => $jahr ) ) : array();
@@ -671,6 +699,16 @@ function vp_bh_journal() {
 				. '<label>' . esc_html__( 'Beleg-Nr.', 'vereinsplugin' ) . '<input type="text" name="beleg" value="' . esc_attr( $r['beleg_nr'] ?? '' ) . '"></label>'
 				. '<p><button class="vp-btn vp-btn-primary" name="vp_bh_edit" value="1">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button> '
 				. '<button class="vp-btn vp-btn-danger" name="vp_bh_del" value="1" onclick="return confirm(\'' . esc_js( __( 'Buchung löschen?', 'vereinsplugin' ) ) . '\')">' . esc_html__( 'Löschen', 'vereinsplugin' ) . '</button></p>'
+				. '</form>'
+				. '<form method="post" class="vp-form" style="margin-top:8px;border-top:1px solid #e2e5ea;padding-top:8px">'
+				. wp_nonce_field( 'vp_bh_journal', 'vp_bh_nonce', true, false )
+				. '<input type="hidden" name="id" value="' . $rid . '">'
+				. '<strong>' . esc_html__( 'Teil abspalten', 'vereinsplugin' ) . '</strong>'
+				. '<label>' . esc_html__( 'Betrag (mit Vorzeichen, z. B. −3,00)', 'vereinsplugin' ) . '<input type="text" name="split_betrag" inputmode="decimal" placeholder="-3,00"></label>'
+				. '<label>' . esc_html__( 'Konto', 'vereinsplugin' ) . '<select name="split_konto">' . $opts . '</select></label>'
+				. '<label>' . esc_html__( 'Zweck', 'vereinsplugin' ) . '<input type="text" name="split_zweck" value="' . esc_attr__( 'Bankgebühr', 'vereinsplugin' ) . '"></label>'
+				. '<p><button class="vp-btn" name="vp_bh_split" value="1">' . esc_html__( 'Abspalten', 'vereinsplugin' ) . '</button> '
+				. '<span class="vp-muted">' . esc_html__( 'Der Betrag wird von dieser Buchung abgezogen und als eigene Buchung angelegt.', 'vereinsplugin' ) . '</span></p>'
 				. '</form></details></td>';
 		}
 
@@ -1124,6 +1162,61 @@ function vp_bh_konten() {
 		echo '<div class="vp-form-grid"><label>' . esc_html__( 'Stichwort', 'vereinsplugin' ) . '<input name="stichwort"></label>';
 		echo '<label>' . esc_html__( 'Konto-Nr.', 'vereinsplugin' ) . '<input name="regel_konto"></label></div>';
 		echo '<p><button class="vp-btn vp-btn-primary" name="vp_regel_save" value="1">' . esc_html__( 'Regel hinzufügen', 'vereinsplugin' ) . '</button></p></form>';
+	}
+	return ob_get_clean();
+}
+
+/* ---- Bestände (Anfangsbestände der Geld-Töpfe) ---- */
+
+function vp_bh_bestaende() {
+	if ( ! function_exists( 'jb_topf_saldo' ) ) {
+		return '<div class="vp-note">' . esc_html__( 'Nicht verfügbar.', 'vereinsplugin' ) . '</div>';
+	}
+	$can_edit = current_user_can( 'jb_edit_journal' ) || current_user_can( 'manage_options' );
+	$msg = '';
+
+	if ( $can_edit && isset( $_POST['vp_bestaende_save'] ) && check_admin_referer( 'vp_bestaende', 'vp_bestaende_nonce' ) ) {
+		foreach ( array( 'bank', 'kasse', 'paypal', 'zettle' ) as $k ) {
+			update_option( 'jb_anfangsbestand_' . $k, round( (float) str_replace( ',', '.', sanitize_text_field( wp_unslash( $_POST[ 'anf_' . $k ] ?? '0' ) ) ), 2 ) );
+		}
+		update_option( 'jb_anfangsbestand_datum', sanitize_text_field( wp_unslash( $_POST['anf_datum'] ?? '' ) ) );
+		$msg = __( 'Bestände gespeichert.', 'vereinsplugin' );
+	}
+
+	$stichtag = (string) get_option( 'jb_anfangsbestand_datum', '' );
+	$topfe = array(
+		'bank'   => __( 'Bankkonto (KSK)', 'vereinsplugin' ),
+		'kasse'  => __( 'Barkasse', 'vereinsplugin' ),
+		'paypal' => __( 'PayPal', 'vereinsplugin' ),
+		'zettle' => __( 'Zettle (Karte)', 'vereinsplugin' ),
+	);
+
+	ob_start();
+	echo '<h2>' . esc_html__( 'Bestände der Geld-Töpfe', 'vereinsplugin' ) . '</h2>';
+	if ( $msg ) {
+		echo '<div class="vp-note">' . esc_html( $msg ) . '</div>';
+	}
+	echo '<p class="vp-muted">' . esc_html__( 'Der aktuelle Stand im Kassenbericht wird berechnet: Anfangsbestand + alle Journalbuchungen mit passender Quelle (ab Stichtag). Trage hier den tatsächlichen Kontostand am Stichtag ein.', 'vereinsplugin' ) . '</p>';
+
+	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Topf', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Anfangsbestand', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Aktueller Stand (berechnet)', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
+	if ( $can_edit ) {
+		echo '<form method="post">' . wp_nonce_field( 'vp_bestaende', 'vp_bestaende_nonce', true, false );
+	}
+	foreach ( $topfe as $k => $label ) {
+		printf(
+			'<tr><td>%s</td><td style="text-align:right">%s</td><td style="text-align:right"><strong>%s €</strong></td></tr>',
+			esc_html( $label ),
+			$can_edit
+				? '<input type="text" name="anf_' . esc_attr( $k ) . '" inputmode="decimal" value="' . esc_attr( number_format( (float) get_option( 'jb_anfangsbestand_' . $k, 0 ), 2, ',', '' ) ) . '" style="width:110px;text-align:right">'
+				: esc_html( number_format( (float) get_option( 'jb_anfangsbestand_' . $k, 0 ), 2, ',', '.' ) ),
+			esc_html( number_format( jb_topf_saldo( $k ), 2, ',', '.' ) )
+		);
+	}
+	echo '</tbody></table></div>';
+	if ( $can_edit ) {
+		echo '<p><label>' . esc_html__( 'Stichtag (optional – nur Buchungen ab diesem Datum zählen)', 'vereinsplugin' )
+			. ' <input type="date" name="anf_datum" value="' . esc_attr( $stichtag ) . '"></label></p>';
+		echo '<p><button class="vp-btn vp-btn-primary" name="vp_bestaende_save" value="1">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button></p></form>';
 	}
 	return ob_get_clean();
 }

@@ -36,9 +36,10 @@ $base = get_permalink() ?: remove_query_arg( 'year' );
 		<h4><?php esc_html_e( 'Aktueller Stand', 'vereinsplugin' ); ?></h4>
 		<div class="vp-table-wrap"><table class="vp-table">
 			<tbody>
-				<tr><th colspan="2">1. <?php esc_html_e( 'Kontostand', 'vereinsplugin' ); ?></th></tr>
-				<tr><td><?php esc_html_e( 'Bankkonto', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['bank'] ) ); ?></td></tr>
-				<tr><td><?php esc_html_e( 'Barkasse (gezählt)', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['kasse'] ) ); ?></td></tr>
+				<tr><th colspan="2">1. <?php esc_html_e( 'Kontostand (berechnet aus Buchungen)', 'vereinsplugin' ); ?></th></tr>
+				<tr><td><?php esc_html_e( 'Bankkonto (KSK)', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['bank'] ) ); ?></td></tr>
+				<tr><td><?php esc_html_e( 'Barkasse', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['kasse'] ) ); ?></td></tr>
+				<?php if ( isset( $d['paypal'] ) ) : ?><tr><td><?php esc_html_e( 'PayPal / Zettle', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['paypal'] ) ); ?></td></tr><?php endif; ?>
 				<tr style="font-weight:700"><td><?php esc_html_e( 'Kontostand gesamt', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['kontostand'] ) ); ?></td></tr>
 
 				<tr><th colspan="2">2. <?php esc_html_e( 'Getränke', 'vereinsplugin' ); ?></th></tr>
@@ -57,7 +58,7 @@ $base = get_permalink() ?: remove_query_arg( 'year' );
 				<tr style="font-weight:700;font-size:1.05em"><td><?php esc_html_e( 'Freies / verfügbares Budget', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['frei'] ) ); ?></td></tr>
 			</tbody>
 		</table></div>
-		<p class="vp-muted"><?php esc_html_e( 'Freies Budget = Kontostand − offene Auslagen − Rücklagenbedarf − verplantes Budget. Bargeld & Bankkonto trägst du unter „Buchhaltung → Kassenbericht-Bestände“ ein; alles andere wird berechnet.', 'vereinsplugin' ); ?></p>
+		<p class="vp-muted"><?php esc_html_e( 'Freies Budget = Kontostand − offene Auslagen − Rücklagenbedarf − verplantes Budget. Kontostände = Anfangsbestand + Buchungen mit passender Quelle; Anfangsbestände unter „Buchhaltung → Bestände“.', 'vereinsplugin' ); ?></p>
 	<?php else : ?>
 		<p class="vp-muted"><?php esc_html_e( 'Detaillierter Stand nicht verfügbar (Buchhaltungs-Modul).', 'vereinsplugin' ); ?></p>
 	<?php endif; ?>

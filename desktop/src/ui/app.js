@@ -456,7 +456,13 @@ async function showDetail(slug, pk) {
   for (const c of cols) {
     const cf = (fm.fields && fm.fields[c]) || { label: c };
     const editable = fm.editable && writable.includes(c) && !cf.readonly;
-    const val = row[c] == null ? '' : String(row[c]);
+    let val = row[c] == null ? '' : String(row[c]);
+    // Neue Zeile: Datumsfelder mit heute vorbelegen (leere Strings brechen
+    // sonst NOT-NULL-DATE-Spalten wie jb_ruecklagen.letzte_zahlung).
+    if (isNew && val === '' && (cf.type === 'date' || c.includes('datum') || c.includes('_zahlung') || c === 'letzte_zahlung')) {
+      val = new Date().toISOString().slice(0, 10);
+    }
+    if (isNew && val === '' && c === 'aktiv') val = '1';
     let input;
 
     if (cf.type === 'select') {
@@ -842,8 +848,9 @@ async function showKassenbericht(year) {
       kv.append(el('div', {}, k));
       kv.append(el('div', strong ? { style: 'font-weight:700' } : {}, eur(v)));
     };
-    line('Bankkonto', d.bank);
-    line('Barkasse (gezählt)', d.kasse);
+    line('Bankkonto (KSK)', d.bank);
+    line('Barkasse', d.kasse);
+    if (d.paypal != null) line('PayPal / Zettle', d.paypal);
     line('Kontostand gesamt', d.kontostand, true);
     line('Getränke-Warenwert', d.getraenke_wert);
     line('− Offene Auslagen (genehmigt)', -d.offene_auslagen);
@@ -851,7 +858,7 @@ async function showKassenbericht(year) {
     line('− Verplantes Budget (Rest)', -d.verplantes);
     line('= Freies / verfügbares Budget', d.frei, true);
     view.append(el('div', { class: 'card' }, kv));
-    view.append(el('p', { class: 'muted' }, 'Bank & Barkasse pflegst du im Plugin unter Buchhaltung → Kassenbericht; alles andere wird berechnet.'));
+    view.append(el('p', { class: 'muted' }, 'Kontostände = Anfangsbestand + alle Buchungen mit passender Quelle. Anfangsbestände setzt du im Plugin unter Buchhaltung → Bestände.'));
 
     // Rücklagen-Aufschlüsselung aus dem lokalen Spiegel
     try {
@@ -868,7 +875,9 @@ async function showKassenbericht(year) {
           const betrag = Number(r.betrag) || 0;
           const iv = Math.max(1, Number(r.intervall_monate) || 12);
           const monate = r.letzte_zahlung ? Math.max(0, Math.floor((Date.now() - Date.parse(r.letzte_zahlung)) / (30.44 * 864e5))) : 0;
-          const heute = Math.min(betrag, (betrag / iv) * (monate + horizont));
+          const fenster = monate + horizont;
+          const zyklen = Math.max(1, Math.ceil(fenster / iv));
+          const heute = Math.min(betrag * zyklen, (betrag / iv) * fenster);
           sum += heute;
           tb.append(el('tr', { style: 'cursor:pointer', onclick: () => showDetail('jb_ruecklagen', r.id) },
             el('td', {}, r.bezeichnung), el('td', { style: 'text-align:right' }, eur(betrag)),
@@ -1234,7 +1243,7 @@ function kontoSelect(konten, value, mode = 'alle', attrs = {}) {
   return s;
 }
 
-const jState = { year: '', konto: '', sphaere: '', quelle: '', q: '', panel: null };
+const jState = { year: '', konto: '', sphaere: '', quelle: '', q: '', panel: null, sortBy: 'datum', sortDir: 'asc', sel: new Set() };
 
 async function showJournal() {
   state.current = { name: 'journal', slug: 'jb_buchungen' };
@@ -1257,6 +1266,7 @@ async function showJournal() {
   }
 
   // Aktionen
+  jState.sel = new Set();
   const acts = el('div', { class: 'toolbar' });
   acts.append(
     el('button', { class: 'primary small', onclick: () => togglePanel('add', () => journalForm(konten, ruecklagen)) }, '+ Buchung'),
@@ -1268,6 +1278,31 @@ async function showJournal() {
   view.append(panelHost);
   jState.panelHost = panelHost;
   jState.panel = null;
+
+  const selBar = el('div', { class: 'toolbar', hidden: true });
+  view.append(selBar);
+  function renderSelBar() {
+    selBar.innerHTML = '';
+    const n = jState.sel.size;
+    selBar.hidden = n === 0;
+    if (!n) return;
+    selBar.append(el('span', {}, `${n} ausgewählt`));
+    selBar.append(el('button', { class: 'small danger', onclick: batchDelete }, `${n} löschen`));
+    if (n === 1) selBar.append(el('button', { class: 'small', onclick: () => togglePanel('split', () => splitForm(rows.find((x) => String(x.id) === [...jState.sel][0]), konten, ruecklagen)) }, 'Aufteilen'));
+    selBar.append(el('button', { class: 'small ghost', onclick: () => { jState.sel.clear(); draw(); renderSelBar(); } }, 'Auswahl aufheben'));
+  }
+  async function batchDelete() {
+    if (!confirm(`${jState.sel.size} Buchung(en) löschen? Wird beim nächsten Sync auch auf dem Server gelöscht.`)) return;
+    try {
+      for (const id of jState.sel) await call(api.data.remove('jb_buchungen', id));
+      toast(`${jState.sel.size} zum Löschen vorgemerkt.`);
+      jState.sel.clear();
+      await runSyncQuiet();
+      showJournal();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
 
   // Filter
   const years = [...new Set(rows.map((r) => String(r.buchung_datum || '').slice(0, 4)).filter(Boolean))].sort().reverse();
@@ -1284,8 +1319,8 @@ async function showJournal() {
   view.append(tableHost);
 
   function draw() {
-    let list = rows.slice().sort((a, b) => String(a.buchung_datum).localeCompare(String(b.buchung_datum)) || Number(a.id) - Number(b.id));
-    const f = list.filter((r) => {
+    const kmap = Object.fromEntries((konten || []).map((k) => [String(k.nummer), k.bezeichnung]));
+    let f = rows.filter((r) => {
       if (jState.year && String(r.buchung_datum || '').slice(0, 4) !== jState.year) return false;
       if (jState.konto && String(r.konto) !== jState.konto) return false;
       if (jState.sphaere && String(r.sphaere) !== jState.sphaere) return false;
@@ -1295,31 +1330,90 @@ async function showJournal() {
       }
       return true;
     });
-    let saldo = 0;
-    const kmap = Object.fromEntries((konten || []).map((k) => [String(k.nummer), k.bezeichnung]));
+
+    // Laufender Saldo immer chronologisch berechnen …
+    const chrono = f.slice().sort((a, b) => String(a.buchung_datum).localeCompare(String(b.buchung_datum)) || Number(a.id) - Number(b.id));
+    let acc = 0;
+    const saldoOf = new Map();
+    for (const r of chrono) {
+      acc += Number(r.betrag) || 0;
+      saldoOf.set(r.id, acc);
+    }
+
+    // … Anzeige-Sortierung frei wählbar
+    const key = jState.sortBy;
+    const dir = jState.sortDir === 'desc' ? -1 : 1;
+    const val = (r) =>
+      key === 'betrag' ? Number(r.betrag) || 0
+      : key === 'konto' ? String(r.konto || r.kategorie || '')
+      : key === 'beschreibung' ? String(r.beschreibung || r.kategorie || '').toLowerCase()
+      : key === 'quelle' ? String(r.quelle || '')
+      : key === 'sphaere' ? String(r.sphaere || '')
+      : String(r.buchung_datum || '');
+    f = f.slice().sort((a, b) => {
+      const x = val(a), y = val(b);
+      return (typeof x === 'number' ? x - y : String(x).localeCompare(y)) * dir || (Number(a.id) - Number(b.id)) * dir;
+    });
+    const showSaldo = key === 'datum';
+
+    const th = (label, sortKey, right) => {
+      const active = jState.sortBy === sortKey;
+      const arrow = active ? (jState.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+      return el('th', {
+        style: `cursor:pointer;user-select:none;${right ? 'text-align:right' : ''}`,
+        onclick: () => {
+          if (jState.sortBy === sortKey) jState.sortDir = jState.sortDir === 'asc' ? 'desc' : 'asc';
+          else { jState.sortBy = sortKey; jState.sortDir = sortKey === 'betrag' ? 'desc' : 'asc'; }
+          draw();
+        },
+      }, label + arrow);
+    };
+
+    const allChk = el('input', { type: 'checkbox' });
+    allChk.checked = f.length > 0 && f.every((r) => jState.sel.has(String(r.id)));
+    allChk.addEventListener('change', () => {
+      if (allChk.checked) f.forEach((r) => jState.sel.add(String(r.id)));
+      else jState.sel.clear();
+      draw();
+      renderSelBar();
+    });
+
     const t = el('table');
     t.append(el('thead', {}, el('tr', {},
-      el('th', {}, 'Datum'), el('th', {}, 'Beschreibung'), el('th', {}, 'Konto'), el('th', {}, 'Sphäre'),
-      el('th', {}, 'Quelle'), el('th', { style: 'text-align:right' }, 'Betrag'), el('th', { style: 'text-align:right' }, 'Saldo'))));
+      el('th', {}, allChk), th('Datum', 'datum'), th('Beschreibung', 'beschreibung'), th('Konto', 'konto'),
+      th('Sphäre', 'sphaere'), th('Quelle', 'quelle'), th('Betrag', 'betrag', true), el('th', { style: 'text-align:right' }, 'Saldo'))));
     const tb = el('tbody');
     for (const r of f) {
       const b = Number(r.betrag) || 0;
-      saldo += b;
-      tb.append(el('tr', { class: r._dirty ? 'dirty' : '', style: 'cursor:pointer', title: 'Zum Bearbeiten klicken', onclick: () => showDetail('jb_buchungen', r.id) },
+      const chk = el('input', { type: 'checkbox' });
+      chk.checked = jState.sel.has(String(r.id));
+      chk.addEventListener('click', (e) => e.stopPropagation());
+      chk.addEventListener('change', () => {
+        chk.checked ? jState.sel.add(String(r.id)) : jState.sel.delete(String(r.id));
+        renderSelBar();
+      });
+      const descCell = el('td', {}, (r.beleg_nr ? `[${r.beleg_nr}] ` : '') + (r.beschreibung || r.kategorie || ''));
+      if (r.beleg_pfad) {
+        descCell.append(' ');
+        descCell.append(el('span', { style: 'cursor:pointer', title: 'Beleg öffnen', onclick: (e) => { e.stopPropagation(); openBeleg(r.beleg_pfad); } }, '📎'));
+      }
+      tb.append(el('tr', { class: r._dirty ? 'dirty' : '', style: 'cursor:pointer', onclick: () => showDetail('jb_buchungen', r.id) },
+        el('td', {}, chk),
         el('td', {}, r.buchung_datum),
-        el('td', {}, (r.beleg_nr ? `[${r.beleg_nr}] ` : '') + (r.beschreibung || r.kategorie || '')),
+        descCell,
         el('td', {}, r.konto ? `${r.konto} ${kmap[r.konto] ? '– ' + kmap[r.konto] : ''}` : (r.kategorie || '—')),
         el('td', {}, r.sphaere || '—'),
         el('td', {}, r.quelle || '—'),
         el('td', { style: 'text-align:right;color:' + (b < 0 ? 'var(--err-ink)' : 'var(--accent)') }, eur(b)),
-        el('td', { style: 'text-align:right' }, eur(saldo))));
+        el('td', { style: 'text-align:right' }, showSaldo ? eur(saldoOf.get(r.id) || 0) : '—')));
     }
     t.append(tb);
     tableHost.innerHTML = '';
     tableHost.append(t);
-    tableHost.append(el('p', { class: 'muted' }, `${f.length} Buchung(en) · Saldo gefiltert: ${eur(saldo)}`));
+    tableHost.append(el('p', { class: 'muted' }, `${f.length} Buchung(en) · Summe: ${eur(f.reduce((s, r) => s + (Number(r.betrag) || 0), 0))}` + (showSaldo ? '' : ' · Saldo nur bei Sortierung „Datum“')));
   }
   draw();
+  renderSelBar();
 }
 
 function togglePanel(kind, builder) {
@@ -1419,6 +1513,73 @@ function umbuchungForm(konten) {
     }
   });
   card.append(f);
+  return card;
+}
+
+function splitForm(row, konten, ruecklagen = []) {
+  const card = el('div', { class: 'card' });
+  if (!row) {
+    card.append(el('div', { class: 'note err' }, 'Buchung nicht gefunden – bitte neu synchronisieren.'));
+    return card;
+  }
+  const ziel = Number(row.betrag) || 0;
+  card.append(el('h2', {}, `Buchung #${row.id} aufteilen`));
+  card.append(el('p', { class: 'muted' }, `${row.buchung_datum} · ${row.beschreibung || row.kategorie || ''} · Gesamt ${eur(ziel)}`));
+
+  const parts = [];
+  const host = el('div', {});
+  const restEl = el('div', { class: 'muted', style: 'margin:6px 0' });
+
+  function addPart(preset = {}) {
+    const betrag = el('input', { type: 'number', step: '0.01', value: preset.betrag != null ? preset.betrag : '' });
+    const konto = kontoSelect(konten, preset.konto || row.konto || '', 'alle');
+    const zweck = el('input', { type: 'text', value: preset.beschreibung || row.beschreibung || '' });
+    const rl = ruecklagen.length ? selectEl([['', '– keine –'], ...ruecklagen.map((r) => [String(r.id), r.bezeichnung])], preset.ruecklage_id || '') : null;
+    const p = { betrag, konto, zweck, rl };
+    parts.push(p);
+    const rowEl = el('div', { class: 'row', style: 'gap:8px;margin:4px 0;flex-wrap:wrap' },
+      betrag, konto, zweck, rl,
+      el('button', { type: 'button', class: 'small ghost', onclick: () => { parts.splice(parts.indexOf(p), 1); rowEl.remove(); recalc(); } }, '×'));
+    host.append(rowEl);
+    betrag.addEventListener('input', recalc);
+  }
+  function recalc() {
+    const sum = parts.reduce((s, p) => s + (parseFloat(String(p.betrag.value).replace(',', '.')) || 0), 0);
+    const rest = +(ziel - sum).toFixed(2);
+    restEl.textContent = `Summe der Teile: ${eur(sum)} · Rest: ${eur(rest)}` + (Math.abs(rest) < 0.005 ? ' ✓' : '');
+    restEl.style.color = Math.abs(rest) < 0.005 ? 'var(--accent)' : 'var(--err-ink)';
+  }
+
+  // Vorbelegung: Teil 1 = Gesamt, Teil 2 = 0 (z. B. Bankgebühr abspalten)
+  addPart({ betrag: ziel.toFixed(2) });
+  addPart({ betrag: '0', beschreibung: 'Bankgebühr', konto: '5190' });
+  recalc();
+
+  card.append(host);
+  card.append(el('button', { type: 'button', class: 'small', onclick: () => { addPart(); recalc(); } }, '+ Zeile'));
+  card.append(restEl);
+  const go = el('button', { class: 'primary', style: 'display:block;margin-top:8px' }, 'Aufteilen');
+  go.addEventListener('click', async () => {
+    const teile = parts
+      .map((p) => ({
+        betrag: parseFloat(String(p.betrag.value).replace(',', '.')) || 0,
+        konto: p.konto.value,
+        beschreibung: p.zweck.value,
+        ruecklage_id: p.rl ? Number(p.rl.value) || 0 : 0,
+      }))
+      .filter((x) => x.betrag !== 0);
+    if (teile.length < 2) return toast('Mindestens zwei Teile mit Betrag ≠ 0.', true);
+    try {
+      const r = await call(api.action.run('split-buchung', { id: row.id, teile }));
+      toast(`Aufgeteilt in ${(r.created || []).length} Buchungen.`);
+      jState.sel.clear();
+      await runSyncQuiet();
+      showJournal();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+  card.append(go);
   return card;
 }
 
