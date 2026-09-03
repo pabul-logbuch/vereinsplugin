@@ -15,6 +15,14 @@
 
 defined( 'ABSPATH' ) || exit;
 
+/**
+ * Auffangkonto für Buchungen ohne SKR-Konto. Ohne dieses Konto stünde bei so
+ * einer Buchung auf beiden Seiten des Satzes dasselbe Geldkonto – Soll und
+ * Haben würden sich aufheben und der Kontostand wäre um genau diese Beträge
+ * zu niedrig (bzw. zu hoch).
+ */
+const VP_DOPPIK_INTERIM = '1590';
+
 /** Standard-Zuordnung quelle → Bestandskonto. */
 function vp_doppik_default_map() {
 	return array(
@@ -61,15 +69,19 @@ function vp_doppik_satz( array $r ) {
 	$konto  = (string) ( $r['konto'] ?? '' );
 	$gegen  = (string) ( $r['gegenkonto'] ?? '' );
 	$geld   = $gegen ?: vp_doppik_konto_fuer_quelle( (string) ( $r['quelle'] ?? 'Manuell' ) );
+	// Kein SKR-Konto gesetzt (Bank-Import, Altbestand)? Dann gegen das
+	// Verrechnungskonto buchen statt gegen das Geldkonto selbst – sonst
+	// verschwindet der Betrag aus dem Kontostand.
+	$sach = $konto ?: ( VP_DOPPIK_INTERIM === $geld ? '1599' : VP_DOPPIK_INTERIM );
 
 	if ( $gegen ) {                       // Umbuchung: konto = Ziel, gegenkonto = Quelle
-		$soll = $konto ?: $geld;
+		$soll  = $sach;
 		$haben = $gegen;
 	} elseif ( $betrag >= 0 ) {           // Einnahme
 		$soll  = $geld;
-		$haben = $konto ?: $geld;
+		$haben = $sach;
 	} else {                              // Ausgabe
-		$soll  = $konto ?: $geld;
+		$soll  = $sach;
 		$haben = $geld;
 	}
 
@@ -122,19 +134,22 @@ function vp_doppik_salden() {
 	}
 
 	$acc = array();
-	$bump = function ( $konto, $soll, $haben ) use ( &$acc ) {
+	$bump = function ( $konto, $soll, $haben, $zaehlen = true ) use ( &$acc ) {
 		if ( '' === $konto ) {
 			return;
 		}
 		if ( ! isset( $acc[ $konto ] ) ) {
-			$acc[ $konto ] = array( 'soll' => 0.0, 'haben' => 0.0 );
+			$acc[ $konto ] = array( 'soll' => 0.0, 'haben' => 0.0, 'anzahl' => 0 );
 		}
 		$acc[ $konto ]['soll']  += $soll;
 		$acc[ $konto ]['haben'] += $haben;
+		if ( $zaehlen ) {
+			$acc[ $konto ]['anzahl']++;
+		}
 	};
 
 	foreach ( vp_doppik_anfangsbestaende() as $konto => $v ) {
-		$bump( $konto, $v, 0 );
+		$bump( $konto, $v, 0, false );
 	}
 
 	$stichtag = sanitize_text_field( (string) get_option( 'jb_anfangsbestand_datum', '' ) );
@@ -153,12 +168,13 @@ function vp_doppik_salden() {
 	foreach ( $acc as $konto => $v ) {
 		$saldo = round( $v['soll'] - $v['haben'], 2 );
 		$out[] = array(
-			'konto' => (string) $konto,
-			'name'  => $namen[ (string) $konto ] ?? '',
-			'typ'   => $typ[ (string) $konto ] ?? '',
-			'soll'  => round( $v['soll'], 2 ),
-			'haben' => round( $v['haben'], 2 ),
-			'saldo' => $saldo,
+			'konto'  => (string) $konto,
+			'name'   => $namen[ (string) $konto ] ?? '',
+			'typ'    => $typ[ (string) $konto ] ?? '',
+			'soll'   => round( $v['soll'], 2 ),
+			'haben'  => round( $v['haben'], 2 ),
+			'saldo'  => $saldo,
+			'anzahl' => (int) $v['anzahl'],
 		);
 	}
 	usort( $out, function ( $a, $b ) {
@@ -228,6 +244,12 @@ function jb_buchungssatz_add( $soll, $haben, $betrag, $datum, $text = '', $beleg
 	$ts = $typ_of( $soll );
 	$th = $typ_of( $haben );
 	$ist_bestand = function ( $typ, $nr ) {
+		// Verrechnungskonten vertreten ein fehlendes Sachkonto und gehören
+		// deshalb auf die Erfolgsseite (sonst würde aus einer unzugeordneten
+		// Ausgabe eine vorzeichenlose Umbuchung).
+		if ( in_array( (string) $nr, array( VP_DOPPIK_INTERIM, '1599' ), true ) ) {
+			return false;
+		}
 		return in_array( $typ, array( 'bestand', 'neutral' ), true ) || 0 === strpos( (string) $nr, '1' );
 	};
 	$bestand_s = $ist_bestand( $ts, $soll );

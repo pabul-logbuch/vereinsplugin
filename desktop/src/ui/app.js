@@ -978,14 +978,16 @@ async function showKontenplan() {
   renderNav();
   view.innerHTML = '';
   view.append(el('h1', {}, 'Kontenplan'));
-  view.append(el('p', { class: 'sub' }, 'SKR-49-Konten mit ihren bisherigen Umsätzen, oben die Geld-Töpfe mit Saldo.'));
+  view.append(el('p', { class: 'sub' }, 'Alle SKR-49-Konten mit ihrem Saldo. Dieselbe Rechnung wie Kontenblätter und Kassenbericht: jede Buchung wirkt auf beiden Konten (Soll und Haben).'));
 
   let report = null;
   let konten = [];
+  let salden = [];
   try {
-    [report, konten] = await Promise.all([
+    [report, konten, salden] = await Promise.all([
       call(api.report.summary()).catch(() => null),
       call(api.data.rows('jb_konten', { limit: 2000 })).then((r) => r.rows),
+      call(api.report.salden()).then((s) => (s && s.salden) || []).catch(() => []),
     ]);
   } catch (e) {
     return view.append(el('div', { class: 'note err' }, e.message));
@@ -997,8 +999,23 @@ async function showKontenplan() {
     view.append(pt);
   }
 
-  const um = (report && report.by_konto_all) || {};
-  const groups = { einnahme: 'Einnahmen / Erträge', ausgabe: 'Ausgaben / Aufwand', '': 'Bank / Kasse / Sonstige' };
+  // Salden aus der Doppik: erfasst BEIDE Seiten jeder Buchung, also auch die
+  // Bewegungen auf Bank/Kasse/PayPal (die als `quelle` gespeichert sind und
+  // deshalb in einer reinen „GROUP BY konto"-Auswertung fehlen würden).
+  const sal = Object.fromEntries(salden.map((s) => [String(s.konto), s]));
+  const leer = { soll: 0, haben: 0, saldo: 0, anzahl: 0 };
+
+  // Auffangkonto sichtbar machen: dort landen Buchungen ohne SKR-Konto.
+  for (const nr of ['1590', '1599']) {
+    const u = sal[nr];
+    if (u && u.anzahl) {
+      view.append(el('div', { class: 'note' },
+        `${u.anzahl} Buchung(en) haben noch kein SKR-Konto und liegen auf ${nr} – ${u.name || 'Verrechnung'} (${eur(u.saldo)}). `,
+        el('button', { class: 'small', onclick: () => showKontenblatt(nr, 'kontenplan') }, 'anzeigen und zuordnen')));
+    }
+  }
+
+  const groups = { '': 'Bank / Kasse / Bestand', einnahme: 'Einnahmen / Erträge', ausgabe: 'Ausgaben / Aufwand' };
   const byTyp = { einnahme: [], ausgabe: [], '': [] };
   for (const k of konten.slice().sort((a, b) => String(a.nummer).localeCompare(String(b.nummer), 'de', { numeric: true }))) {
     byTyp[k.typ === 'einnahme' || k.typ === 'ausgabe' ? k.typ : ''].push(k);
@@ -1008,24 +1025,26 @@ async function showKontenplan() {
     view.append(el('h2', {}, label));
     const t = el('table');
     t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Nr'), el('th', {}, 'Bezeichnung'), el('th', {}, 'Sphäre'),
-      el('th', { style: 'text-align:right' }, 'Einnahmen'), el('th', { style: 'text-align:right' }, 'Ausgaben'),
-      el('th', { style: 'text-align:right' }, 'Saldo'), el('th', { style: 'text-align:right' }, 'Buchungen'))));
+      el('th', { style: 'text-align:right' }, 'Soll (Zugang)'), el('th', { style: 'text-align:right' }, 'Haben (Abgang)'),
+      el('th', { style: 'text-align:right' }, typ === '' ? 'Bestand' : 'Saldo'), el('th', { style: 'text-align:right' }, 'Buchungen'))));
     const tbb = el('tbody');
     for (const k of byTyp[typ]) {
-      const u = um[String(k.nummer)] || { einnahmen: 0, ausgaben: 0, anzahl: 0 };
-      const saldo = u.einnahmen - u.ausgaben;
+      const u = sal[String(k.nummer)] || leer;
+      // Erfolgskonten haben einen Haben-Saldo (Erträge) bzw. Soll-Saldo
+      // (Aufwand); für die Anzeige wird der Betrag positiv dargestellt.
+      const anz = typ === 'einnahme' ? -u.saldo : u.saldo;
       tbb.append(el('tr', { class: String(k.aktiv) === '0' ? 'muted' : '', style: 'cursor:pointer', title: 'Buchungen dieses Kontos anzeigen', onclick: () => showKontenblatt(String(k.nummer), 'kontenplan') },
         el('td', {}, k.nummer), el('td', {}, k.bezeichnung), el('td', {}, k.sphaere || '—'),
-        el('td', { style: 'text-align:right' }, u.einnahmen ? eur(u.einnahmen) : '—'),
-        el('td', { style: 'text-align:right' }, u.ausgaben ? eur(u.ausgaben) : '—'),
-        el('td', { style: 'text-align:right;font-weight:600' }, u.anzahl ? eur(saldo) : '—'),
+        el('td', { style: 'text-align:right' }, u.soll ? eur(u.soll) : '—'),
+        el('td', { style: 'text-align:right' }, u.haben ? eur(u.haben) : '—'),
+        el('td', { style: 'text-align:right;font-weight:600' }, u.anzahl || u.soll || u.haben ? eur(anz) : '—'),
         el('td', { style: 'text-align:right' }, String(u.anzahl || ''))));
     }
     t.append(tbb);
     view.append(t);
   }
   view.append(el('p', { class: 'muted', style: 'margin-top:12px' },
-    'Zeile anklicken → alle Buchungen des Kontos (dort einzeln bearbeitbar). ',
+    'Zeile anklicken → alle Buchungen des Kontos (dort einzeln bearbeitbar). Anfangsbestände zählen als Soll auf Bank/Kasse/PayPal/Zettle. ',
     el('button', { class: 'small', onclick: () => showTable('jb_konten') }, 'Kontenplan bearbeiten')));
 }
 
@@ -1376,11 +1395,14 @@ function doppikSatz(r, map) {
   const konto = String(r.konto || '');
   const gegen = String(r.gegenkonto || '');
   const geld = gegen || map[r.quelle] || map.Manuell || '1200';
+  // Ohne SKR-Konto gegen das Verrechnungskonto buchen – sonst stünde auf
+  // beiden Seiten dasselbe Geldkonto und der Betrag verschwände aus dem Saldo.
+  const sach = konto || (geld === '1590' ? '1599' : '1590');
   let soll;
   let haben;
-  if (gegen) { soll = konto || geld; haben = gegen; }
-  else if (betrag >= 0) { soll = geld; haben = konto || geld; }
-  else { soll = konto || geld; haben = geld; }
+  if (gegen) { soll = sach; haben = gegen; }
+  else if (betrag >= 0) { soll = geld; haben = sach; }
+  else { soll = sach; haben = geld; }
   return { soll, haben, betrag: abs, datum: r.buchung_datum || '', text: `${r.gegenpartei || ''} – ${r.beschreibung || ''}`.replace(/^ – | – $/, '') };
 }
 
@@ -1620,7 +1642,10 @@ function quelleFuerKonto(konto, map) {
  */
 function satzZuZeile(soll, haben, betrag, konten, map) {
   const typOf = (nr) => String(((konten || []).find((k) => String(k.nummer) === String(nr)) || {}).typ || '');
-  const erfolg = (nr) => typOf(nr) === 'einnahme' || typOf(nr) === 'ausgabe';
+  // Die Verrechnungskonten stehen für ein noch fehlendes Sachkonto und zählen
+  // deshalb als Erfolgsseite – sonst würde aus einer unzugeordneten Ausgabe
+  // beim Speichern eine vorzeichenlose Umbuchung.
+  const erfolg = (nr) => ['1590', '1599'].includes(String(nr)) || typOf(nr) === 'einnahme' || typOf(nr) === 'ausgabe';
   const sphOf = (nr) => String(((konten || []).find((k) => String(k.nummer) === String(nr)) || {}).sphaere || '');
   const b = Math.round(Math.abs(Number(betrag) || 0) * 100) / 100;
   const sE = erfolg(soll);
@@ -1668,6 +1693,12 @@ async function showBuchung(pk, from) {
     const k = konten.find((x) => String(x.nummer) === String(nr));
     return nr ? `${nr}${k ? ' – ' + k.bezeichnung : ''}` : '—';
   };
+
+  if (!String(row.konto || '')) {
+    view.append(el('div', { class: 'note' },
+      'Diese Buchung hat noch kein SKR-Konto – sie liegt deshalb auf dem Verrechnungskonto 1590. '
+      + 'Bitte unten das passende Sachkonto als Soll bzw. Haben wählen.'));
+  }
 
   const form = el('form', { class: 'detail' });
   const sec = (titel, hinweis) => {

@@ -14,7 +14,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_SKR_DB_VERSION', '7' );
+define( 'VP_SKR_DB_VERSION', '8' );
 
 /* =========================================================================
  * Schema
@@ -82,6 +82,11 @@ function vp_skr_maybe_upgrade() {
 		foreach ( array(
 			array( '1220', 'PayPal', 'bestand', 'neutral' ),
 			array( '1600', 'Verbindlichkeiten ggü. Mitgliedern (Auslagen)', 'bestand', 'neutral' ),
+			// Auffangkonten: Buchungen ohne SKR-Konto landen hier, damit sie
+			// den Kontostand des Geldkontos korrekt bewegen und sichtbar
+			// bleiben, bis jemand sie zuordnet.
+			array( '1590', 'Noch nicht zugeordnet (Verrechnung)', 'neutral', 'neutral' ),
+			array( '1599', 'Noch nicht zugeordnet (Gegenkonto)', 'neutral', 'neutral' ),
 		) as $kk ) {
 			$exists = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . jb_table_konten() . ' WHERE nummer = %s', $kk[0] ) );
 			if ( ! $exists ) {
