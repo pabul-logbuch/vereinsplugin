@@ -304,6 +304,7 @@ add_action( 'rest_api_init', function () {
 	$route( '/actions/shift-tausch',       'read',            'vp_sync_action_shift_tausch' );
 	$route( '/actions/zbon-import',        'jb_view_journal', 'vp_sync_action_zbon_import' );
 	$route( '/actions/split-buchung',      'jb_view_journal', 'vp_sync_action_split_buchung' );
+	$route( '/actions/zu-umbuchung',       'jb_view_journal', 'vp_sync_action_zu_umbuchung' );
 
 	register_rest_route( VP_SYNC_API_NS, '/nextcloud/users', array(
 		'methods'             => 'GET',
@@ -1908,4 +1909,84 @@ function vp_sync_action_split_buchung( WP_REST_Request $req ) {
 		$ids[] = (int) jb_journal_add( $r );
 	}
 	return rest_ensure_response( array( 'ok' => true, 'deleted' => $id, 'created' => $ids ) );
+}
+
+/**
+ * POST /actions/zu-umbuchung
+ *   { ids:[id], gegen_konto, gegen_quelle?, gegenbuchung?:bool }  – 1 Buchung:
+ *       Buchung wird neutral gestellt (Sphäre neutral, Kategorie/Quelle
+ *       „Umbuchung"); optional wird die Gegenbuchung (−Betrag) auf `gegen_konto`
+ *       angelegt.
+ *   { ids:[id1,id2] }  – 2 Buchungen (Summe ≈ 0): beide werden als Umbuchung
+ *       neutral gestellt und als Gegenpartei verknüpft.
+ */
+function vp_sync_action_zu_umbuchung( WP_REST_Request $req ) {
+	global $wpdb;
+	$t = $wpdb->prefix . 'jb_buchungen';
+	if ( ! vp_sync_columns( 'jb_buchungen' ) ) {
+		return new WP_Error( 'no_table', 'Buchungsjournal fehlt.', array( 'status' => 400 ) );
+	}
+	$b   = vp_sync_json( $req );
+	$ids = array_values( array_filter( array_map( 'intval', (array) ( $b['ids'] ?? array() ) ) ) );
+	if ( ! $ids ) {
+		return new WP_Error( 'bad_req', 'Keine Buchung ausgewählt.', array( 'status' => 400 ) );
+	}
+	$rows = array();
+	foreach ( $ids as $id ) {
+		$r = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM `$t` WHERE id = %d", $id ), ARRAY_A );
+		if ( ! $r ) {
+			return new WP_Error( 'not_found', 'Buchung #' . $id . ' nicht gefunden.', array( 'status' => 404 ) );
+		}
+		$rows[] = $r;
+	}
+	$neutral = array( 'kategorie' => 'Umbuchung', 'quelle' => 'Umbuchung' );
+	if ( in_array( 'sphaere', vp_sync_columns( 'jb_buchungen' ), true ) ) {
+		$neutral['sphaere'] = 'neutral';
+	}
+
+	/* ---- zwei Buchungen: nur umtaggen ---- */
+	if ( count( $rows ) >= 2 ) {
+		$summe = 0.0;
+		foreach ( $rows as $r ) {
+			$summe += (float) $r['betrag'];
+		}
+		if ( abs( round( $summe, 2 ) ) > 0.01 ) {
+			return new WP_Error( 'summe', 'Die ausgewählten Buchungen ergeben in Summe nicht 0 (' . number_format( $summe, 2, ',', '.' ) . ' €).', array( 'status' => 400 ) );
+		}
+		foreach ( $rows as $i => $r ) {
+			$other = $rows[ ( $i + 1 ) % count( $rows ) ];
+			$upd   = $neutral;
+			if ( in_array( 'gegenpartei', vp_sync_columns( 'jb_buchungen' ), true ) ) {
+				$upd['gegenpartei'] = trim( (string) ( $other['konto'] ?? '' ) . ' ' . ( $other['gegenpartei'] ?? '' ) ) ?: 'Umbuchung';
+			}
+			$wpdb->update( $t, $upd, array( 'id' => (int) $r['id'] ) );
+		}
+		return rest_ensure_response( array( 'ok' => true, 'updated' => $ids ) );
+	}
+
+	/* ---- eine Buchung: neutral stellen (+ optional Gegenbuchung) ---- */
+	$src   = $rows[0];
+	$gk    = sanitize_text_field( (string) ( $b['gegen_konto'] ?? '' ) );
+	$upd   = $neutral;
+	if ( in_array( 'gegenpartei', vp_sync_columns( 'jb_buchungen' ), true ) && $gk ) {
+		$upd['gegenpartei'] = $gk;
+	}
+	$wpdb->update( $t, $upd, array( 'id' => (int) $src['id'] ) );
+
+	$new = 0;
+	if ( ! empty( $b['gegenbuchung'] ) && function_exists( 'jb_journal_add' ) ) {
+		$gq  = sanitize_text_field( (string) ( $b['gegen_quelle'] ?? 'Umbuchung' ) );
+		$new = (int) jb_journal_add( array(
+			'buchung_datum' => $src['buchung_datum'],
+			'betrag'        => -1 * (float) $src['betrag'],
+			'kategorie'     => 'Umbuchung',
+			'beschreibung'  => (string) ( $src['beschreibung'] ?? 'Umbuchung' ),
+			'quelle'        => $gq ?: 'Umbuchung',
+			'konto'         => $gk,
+			'sphaere'       => ( $gk && function_exists( 'jb_konto_sphaere' ) ) ? jb_konto_sphaere( $gk ) : 'neutral',
+			'gegenpartei'   => trim( (string) ( $src['konto'] ?? '' ) . ' ' . ( $src['gegenpartei'] ?? '' ) ) ?: 'Umbuchung',
+			'beleg_referenz'=> (string) ( $src['beleg_referenz'] ?? '' ),
+		) );
+	}
+	return rest_ensure_response( array( 'ok' => true, 'updated' => array( (int) $src['id'] ), 'created' => $new ? array( $new ) : array() ) );
 }

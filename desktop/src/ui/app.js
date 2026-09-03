@@ -1337,6 +1337,7 @@ async function showJournal() {
     selBar.append(el('span', {}, `${n} ausgewählt`));
     selBar.append(el('button', { class: 'small danger', onclick: batchDelete }, `${n} löschen`));
     if (n === 1) selBar.append(el('button', { class: 'small', onclick: () => togglePanel('split', () => splitForm(rows.find((x) => String(x.id) === [...jState.sel][0]), konten, ruecklagen)) }, 'Aufteilen'));
+    if (n === 1 || n === 2) selBar.append(el('button', { class: 'small', onclick: () => togglePanel('umb', () => zuUmbuchungForm([...jState.sel], rows, konten)) }, 'Zu Umbuchung'));
     selBar.append(el('button', { class: 'small ghost', onclick: () => { jState.sel.clear(); draw(); renderSelBar(); } }, 'Auswahl aufheben'));
   }
   async function batchDelete() {
@@ -1629,6 +1630,56 @@ function splitForm(row, konten, ruecklagen = []) {
   });
   card.append(go);
   return card;
+}
+
+function zuUmbuchungForm(ids, rows, konten) {
+  const card = el('div', { class: 'card' });
+  const sel = ids.map((id) => rows.find((r) => String(r.id) === String(id))).filter(Boolean);
+  if (!sel.length) {
+    card.append(el('div', { class: 'note err' }, 'Buchung(en) nicht gefunden – neu synchronisieren.'));
+    return card;
+  }
+  card.append(el('h2', {}, 'Zu Umbuchung machen'));
+  card.append(el('p', { class: 'muted' }, 'Umbuchungen sind neutral (Sphäre „neutral", Kategorie/Quelle „Umbuchung") und zählen nicht als Einnahme/Ausgabe.'));
+  for (const r of sel) card.append(el('div', {}, `#${r.id} · ${r.buchung_datum} · ${eur(Number(r.betrag) || 0)} · ${r.konto || r.kategorie || ''}`));
+
+  if (sel.length >= 2) {
+    const summe = sel.reduce((s, r) => s + (Number(r.betrag) || 0), 0);
+    const ok = Math.abs(summe) < 0.005;
+    card.append(el('p', { class: ok ? 'muted' : 'note err' }, `Summe: ${eur(summe)}` + (ok ? ' ✓' : ' – muss 0 ergeben')));
+    const go = el('button', { class: 'primary', disabled: !ok }, 'Beide als Umbuchung markieren');
+    go.addEventListener('click', () => runZuUmb({ ids }));
+    card.append(go);
+    return card;
+  }
+
+  // Eine Buchung → neutral stellen + optional Gegenbuchung
+  const src = sel[0];
+  const gk = kontoSelect(konten, '', 'alle');
+  const gq = selectEl(['Umbuchung', 'Bank KSK', 'Zettle-Bar', 'Bar', 'PayPal', 'Zettle-Karte'], 'Umbuchung');
+  const mkGegen = el('input', { type: 'checkbox' });
+  mkGegen.checked = true;
+  const f = el('form', { class: 'detail' });
+  f.append('Gegen-Konto', gk, 'Topf / Quelle der Gegenbuchung', gq, 'Gegenbuchung anlegen', el('label', {}, mkGegen, ` +${eur(-(Number(src.betrag) || 0))} auf das Gegen-Konto`));
+  f.append(el('div', { class: 'form-actions' }, el('button', { class: 'primary', type: 'submit' }, 'Umbuchung erstellen')));
+  f.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (mkGegen.checked && !gk.value) return toast('Gegen-Konto wählen.', true);
+    runZuUmb({ ids, gegen_konto: gk.value, gegen_quelle: gq.value, gegenbuchung: mkGegen.checked });
+  });
+  card.append(f);
+  return card;
+}
+async function runZuUmb(body) {
+  try {
+    const r = await call(api.action.run('zu-umbuchung', body));
+    toast('Umbuchung gesetzt' + (r.created && r.created.length ? ' (+ Gegenbuchung).' : '.'));
+    jState.sel.clear();
+    await runSyncQuiet();
+    showJournal();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function bankCsvForm(konten) {
