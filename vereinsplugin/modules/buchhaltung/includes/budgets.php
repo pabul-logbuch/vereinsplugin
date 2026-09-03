@@ -149,6 +149,19 @@ function jb_topf_saldo(string $key): float {
     $quellen = $map[$key] ?? [];
     if (!$quellen) return (float) get_option('jb_anfangsbestand_' . $key, 0);
 
+    // Bevorzugt der buchhalterisch saubere Weg: Saldo des zugehörigen
+    // Geldkontos aus der Doppik (berücksichtigt Umbuchungen über gegenkonto
+    // und Vorzeichen korrekt, nicht nur die „quelle").
+    static $doppik_konto = ['bank' => '1200', 'kasse' => '1000', 'paypal' => '1220', 'zettle' => '1360'];
+    if (function_exists('vp_doppik_salden') && isset($doppik_konto[$key])) {
+        foreach (vp_doppik_salden() as $s) {
+            if ($s['konto'] === $doppik_konto[$key]) {
+                return (float) $s['saldo'];
+            }
+        }
+        return (float) get_option('jb_anfangsbestand_' . $key, 0);
+    }
+
     // Einmalige Migration: alte „aktueller Stand"-Option in einen Anfangsbestand
     // umrechnen, damit der berechnete Saldo weiter stimmt.
     if (get_option('jb_anfangsbestand_migr') !== '1') {

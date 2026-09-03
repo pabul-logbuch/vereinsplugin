@@ -137,7 +137,12 @@ function vp_doppik_salden() {
 		$bump( $konto, $v, 0 );
 	}
 
-	$rows = $wpdb->get_results( "SELECT id, buchung_datum, betrag, konto, gegenkonto, quelle, beschreibung, gegenpartei, beleg_nr, beleg_referenz FROM `$t`", ARRAY_A );
+	$stichtag = sanitize_text_field( (string) get_option( 'jb_anfangsbestand_datum', '' ) );
+	$sql = "SELECT id, buchung_datum, betrag, konto, gegenkonto, quelle, beschreibung, gegenpartei, beleg_nr, beleg_referenz FROM `$t`";
+	if ( $stichtag ) {
+		$sql = $wpdb->prepare( $sql . ' WHERE buchung_datum >= %s', $stichtag );
+	}
+	$rows = $wpdb->get_results( $sql, ARRAY_A );
 	foreach ( (array) $rows as $r ) {
 		$s = vp_doppik_satz( $r );
 		$bump( $s['soll'], $s['betrag'], 0 );
@@ -166,8 +171,13 @@ function vp_doppik_salden() {
 function vp_doppik_kontenblatt( $konto ) {
 	global $wpdb;
 	$t = $wpdb->prefix . 'jb_buchungen';
-	$konto = sanitize_text_field( (string) $konto );
-	$rows  = $wpdb->get_results( "SELECT id, buchung_datum, betrag, konto, gegenkonto, quelle, beschreibung, gegenpartei, beleg_nr, beleg_referenz FROM `$t` ORDER BY buchung_datum ASC, id ASC", ARRAY_A );
+	$konto    = sanitize_text_field( (string) $konto );
+	$stichtag = sanitize_text_field( (string) get_option( 'jb_anfangsbestand_datum', '' ) );
+	$sql      = "SELECT id, buchung_datum, betrag, konto, gegenkonto, quelle, beschreibung, gegenpartei, beleg_nr, beleg_referenz FROM `$t`";
+	if ( $stichtag ) {
+		$sql = $wpdb->prepare( $sql . ' WHERE buchung_datum >= %s', $stichtag );
+	}
+	$rows = $wpdb->get_results( $sql . ' ORDER BY buchung_datum ASC, id ASC', ARRAY_A );
 
 	$anf = vp_doppik_anfangsbestaende();
 	$saldo = (float) ( $anf[ $konto ] ?? 0 );
