@@ -233,6 +233,7 @@ function renderNav() {
     groupEl('Vorstand · Kassier:in');
     if (can('jb_approve_auslagen')) addItem('auslagen_pruefen', 'Auslagen prüfen', { onClick: showAuslagenPruefen });
     if (has('jb_buchungen')) addItem('journal', 'Buchungsjournal', { slug: 'jb_buchungen', onClick: showJournal });
+    if (has('jb_buchungen')) addItem('zbon', 'Z-Bon erfassen', { onClick: showZbon });
     if (has('jb_budgets')) tblItem('jb_budgets', 'Budgets');
     if (has('jb_ruecklagen')) tblItem('jb_ruecklagen', 'Rücklagen');
     if (has('jb_konten')) addItem('kontenplan', 'Kontenplan', { onClick: showKontenplan });
@@ -277,6 +278,7 @@ function rerender() {
   else if (c.name === 'nextcloud') showNextcloud();
   else if (c.name === 'kassenbericht') showKassenbericht();
   else if (c.name === 'kontenplan') showKontenplan();
+  else if (c.name === 'zbon') showZbon();
   else if (c.name === 'auslagen_pruefen') showAuslagenPruefen();
   else if (c.name === 'journal') showJournal();
   else if (c.name === 'mitglieder') showMitglieder();
@@ -941,6 +943,120 @@ async function showKontenplan() {
   }
   view.append(el('p', { class: 'muted', style: 'margin-top:12px' },
     el('button', { class: 'small', onclick: () => showTable('jb_konten') }, 'Konten bearbeiten')));
+}
+
+/* --------------------------------------------------------- Z-Bon erfassen */
+
+async function showZbon() {
+  state.current = { name: 'zbon' };
+  renderNav();
+  view.innerHTML = '';
+  view.append(el('h1', {}, 'Z-Bon erfassen'));
+  view.append(el('p', { class: 'sub' }, 'Zettle-Tagesbon in vier Buchungen aufteilen (Getränke Bar/Karte, Trinkgeld, Spende).'));
+
+  let konten = [];
+  let booked = [];
+  try {
+    [konten, booked] = await Promise.all([
+      call(api.data.rows('jb_konten', { limit: 2000 })).then((r) => r.rows).catch(() => []),
+      call(api.data.rows('jb_buchungen', { limit: 5000 })).then((r) => r.rows).catch(() => []),
+    ]);
+  } catch (e) {
+    return view.append(el('div', { class: 'note err' }, e.message));
+  }
+  const kOpts = (konten.length ? konten : [{ nummer: '4600', bezeichnung: 'Getränkeumsatz' }, { nummer: '4200', bezeichnung: 'Geldspenden' }])
+    .filter((k) => k.typ !== 'ausgabe')
+    .sort((a, b) => String(a.nummer).localeCompare(String(b.nummer), 'de', { numeric: true }))
+    .map((k) => [String(k.nummer), `${k.nummer} – ${k.bezeichnung}`]);
+  const pick = (val) => selectEl(kOpts.length ? kOpts : [['', '—']], val);
+
+  const f = el('form', { class: 'detail' });
+  const nr = el('input', { placeholder: '60' });
+  const datum = el('input', { type: 'date', value: new Date().toISOString().slice(0, 10) });
+  const bar = el('input', { type: 'number', step: '0.01', placeholder: 'Zahlungsart Bar' });
+  const karte = el('input', { type: 'number', step: '0.01', placeholder: 'Zahlungsart Karte' });
+  const tip = el('input', { type: 'number', step: '0.01', value: '0', placeholder: 'Trinkgelder' });
+  const spende = el('input', { type: 'number', step: '0.01', value: '0', placeholder: 'Produkt „Spende"' });
+  const spWeg = selectEl([['bar', 'bar bezahlt'], ['karte', 'per Karte bezahlt']], 'bar');
+  const kGetr = pick('4600');
+  const kSpende = pick('4200');
+  const kTip = pick('4200');
+  f.append(
+    'Z-Bon-Nr', nr, 'Datum', datum,
+    'Bar (Zahlungsart)', bar, 'Karte (Zahlungsart)', karte,
+    'Trinkgeld', tip, 'Produkt „Spende"', spende, 'Spende bezahlt', spWeg,
+    'Konto Getränke', kGetr, 'Konto Spende', kSpende, 'Konto Trinkgeld', kTip
+  );
+  view.append(el('div', { class: 'card' }, f));
+
+  const prev = el('div', {});
+  view.append(prev);
+  const num = (x) => parseFloat(String(x.value).replace(',', '.')) || 0;
+
+  function computeLines() {
+    const spBar = spWeg.value === 'bar' ? num(spende) : 0;
+    const spKarte = spWeg.value === 'karte' ? num(spende) : 0;
+    const getrBar = +(num(bar) - spBar).toFixed(2);
+    const getrKarte = +(num(karte) - num(tip) - spKarte).toFixed(2);
+    const kn = (v) => (kOpts.find((o) => o[0] === v) || [v, v])[1];
+    const lines = [];
+    if (getrBar > 0) lines.push(['Getränke Bar', getrBar, kn(kGetr.value), 'Barkasse']);
+    if (getrKarte > 0) lines.push(['Getränke Karte', getrKarte, kn(kGetr.value), 'PayPal']);
+    if (num(tip) > 0) lines.push(['Trinkgeld (Spende)', +num(tip).toFixed(2), kn(kTip.value), 'PayPal']);
+    if (num(spende) > 0) lines.push(['Spende', +num(spende).toFixed(2), kn(kSpende.value), spWeg.value === 'bar' ? 'Barkasse' : 'PayPal']);
+    return { lines, getrBar, getrKarte };
+  }
+
+  function drawPreview() {
+    const { lines, getrBar, getrKarte } = computeLines();
+    prev.innerHTML = '';
+    prev.append(el('h2', {}, 'Vorschau'));
+    if (getrBar < 0 || getrKarte < 0) {
+      return prev.append(el('div', { class: 'note err' }, 'Trinkgeld/Spende übersteigen den Bar- bzw. Kartenumsatz.'));
+    }
+    const t = el('table');
+    t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Buchung'), el('th', {}, 'Konto'), el('th', {}, 'Topf'), el('th', { style: 'text-align:right' }, 'Betrag'))));
+    const tb = el('tbody');
+    let sBar = 0;
+    let sPP = 0;
+    for (const [label, betrag, konto, topf] of lines) {
+      tb.append(el('tr', {}, el('td', {}, `${label} Z-Bon #${nr.value || '?'}`), el('td', {}, konto), el('td', {}, topf), el('td', { style: 'text-align:right' }, eur(betrag))));
+      if (topf === 'Barkasse') sBar += betrag;
+      else sPP += betrag;
+    }
+    t.append(tb);
+    prev.append(t);
+    prev.append(el('p', { class: 'muted' }, `→ Barkasse ${eur(sBar)} (soll: ${eur(num(bar))}) · PayPal ${eur(sPP)} (soll: ${eur(num(karte))})`));
+    const btn = el('button', { class: 'primary', style: 'margin-top:8px' }, 'Buchen');
+    btn.addEventListener('click', book);
+    prev.append(btn);
+  }
+
+  async function book() {
+    if (!nr.value.trim()) return toast('Z-Bon-Nummer fehlt.', true);
+    try {
+      const r = await call(api.action.run('zbon-import', {
+        nr: nr.value, datum: datum.value, bar: num(bar), karte: num(karte), trinkgeld: num(tip),
+        spende_produkt: num(spende), spende_bezahlung: spWeg.value,
+        konto_getraenke: kGetr.value, konto_spende: kSpende.value, konto_trinkgeld: kTip.value,
+      }));
+      toast(`${(r.booked_ids || []).length} Buchung(en) angelegt.`);
+      await runSyncQuiet();
+      showZbon();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  [nr, bar, karte, tip, spende, spWeg, kGetr, kSpende, kTip].forEach((n) => n.addEventListener('input', drawPreview));
+  drawPreview();
+
+  // Bereits gebuchte Z-Bons
+  const done = [...new Set(booked.filter((x) => String(x.beleg_referenz || '').startsWith('ZBON-')).map((x) => x.beleg_referenz))].sort();
+  if (done.length) {
+    view.append(el('h2', {}, 'Bereits gebucht'));
+    view.append(el('p', { class: 'muted' }, done.map((d) => d.replace('ZBON-', '#')).join(' · ')));
+  }
 }
 
 /* --------------------------------------------------------- Auslagen prüfen */
