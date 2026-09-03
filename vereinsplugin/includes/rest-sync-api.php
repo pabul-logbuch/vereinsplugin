@@ -72,7 +72,7 @@ function vp_sync_tables() {
 		'wl_shift_stationen'     => array( 'wl_shift_stationen',      'id', null,             'read',             null ),
 		'wl_shift_schichten'     => array( 'wl_shift_schichten',      'id', null,             'read',             null ),
 		'wl_shift_eintragungen'  => array( 'wl_shift_eintragungen',   'id', 'eingetragen_am','wl_manage_wishes', 'user_id' ),
-		'wl_shift_tausch'        => array( 'wl_shift_tausch',         'id', 'erstellt_am',   'read',             null ),
+		'wl_shift_tausch'        => array( 'wl_shift_tausch',         'id', 'erstellt_am',   'wl_manage_wishes', '__tausch' ),
 		// Protokoll
 		'pp_gremien'             => array( 'pp_gremien',              'id', 'erstellt_am',   'pp_manage', null ),
 		'pp_rollen'              => array( 'pp_rollen',               'id', 'erstellt_am',   'pp_manage', null ),
@@ -290,6 +290,18 @@ add_action( 'rest_api_init', function () {
 	$route( '/actions/top-delete',       'pp_manage',         'vp_sync_action_top_delete' );
 	$route( '/actions/aufgabe-save',     'pp_manage',         'vp_sync_action_aufgabe_save' );
 	$route( '/actions/thema-save',       'pp_manage',         'vp_sync_action_thema_save' );
+	$route( '/actions/gremium-save',     'pp_manage',         'vp_sync_action_gremium_save' );
+	$route( '/actions/gremium-delete',   'pp_manage',         'vp_sync_action_gremium_delete' );
+	$route( '/actions/kreis-mitglied',   'pp_manage',         'vp_sync_action_kreis_mitglied' );
+	$route( '/actions/rolle-save',       'pp_manage',         'vp_sync_action_rolle_save' );
+	$route( '/actions/rolle-delete',     'pp_manage',         'vp_sync_action_rolle_delete' );
+	$route( '/actions/shift-event-save',   'wl_manage_wishes', 'vp_sync_action_shift_event_save' );
+	$route( '/actions/shift-event-delete', 'wl_manage_wishes', 'vp_sync_action_shift_event_delete' );
+	$route( '/actions/shift-station-save', 'wl_manage_wishes', 'vp_sync_action_shift_station_save' );
+	$route( '/actions/shift-station-delete','wl_manage_wishes','vp_sync_action_shift_station_delete' );
+	$route( '/actions/shift-schicht-save', 'wl_manage_wishes', 'vp_sync_action_shift_schicht_save' );
+	$route( '/actions/shift-schicht-delete','wl_manage_wishes','vp_sync_action_shift_schicht_delete' );
+	$route( '/actions/shift-tausch',       'read',            'vp_sync_action_shift_tausch' );
 
 	register_rest_route( VP_SYNC_API_NS, '/nextcloud/users', array(
 		'methods'             => 'GET',
@@ -466,6 +478,11 @@ function vp_sync_route_snapshot( WP_REST_Request $req ) {
 			} elseif ( '__voterkey' === $vis['self'] && in_array( 'voter_key', $cols, true ) ) {
 				$where[]  = '`voter_key` = %s';
 				$params[] = 'u' . $uid;
+			} elseif ( '__tausch' === $vis['self'] ) {
+				$et       = $wpdb->prefix . 'wl_shift_eintragungen';
+				$where[]  = "( `an_email` = %s OR `von_eintrag_id` IN ( SELECT id FROM `$et` WHERE user_id = %d ) )";
+				$params[] = $my_email;
+				$params[] = $uid;
 			} elseif ( '__' !== substr( (string) $vis['self'], 0, 2 ) && in_array( (string) $vis['self'], $cols, true ) ) {
 				$where[]  = "`" . $vis['self'] . "` = %d";
 				$params[] = $uid;
@@ -1358,4 +1375,359 @@ function vp_sync_action_thema_save( WP_REST_Request $req ) {
 		$id = (int) $wpdb->insert_id;
 	}
 	return rest_ensure_response( array( 'ok' => true, 'id' => $id ) );
+}
+
+/* =========================================================================
+ * Kreise & Rollen (Protokoll-Modul)
+ * ====================================================================== */
+
+/** POST /actions/gremium-save */
+function vp_sync_action_gremium_save( WP_REST_Request $req ) {
+	global $wpdb;
+	$t = $wpdb->prefix . 'pp_gremien';
+	if ( ! vp_sync_columns( 'pp_gremien' ) ) {
+		return new WP_Error( 'no_table', 'Gremien-Tabelle fehlt.', array( 'status' => 400 ) );
+	}
+	$b     = vp_sync_json( $req );
+	$typen = array( 'mv', 'vorstand', 'leitungskreis', 'kreis', 'kreisversammlung' );
+	$data  = array(
+		'typ'                  => in_array( ( $b['typ'] ?? 'kreis' ), $typen, true ) ? $b['typ'] : 'kreis',
+		'name'                 => sanitize_text_field( (string) ( $b['name'] ?? '' ) ),
+		'parent_gremium_id'    => ! empty( $b['parent_gremium_id'] ) ? (int) $b['parent_gremium_id'] : null,
+		'oeffentlichkeit'      => in_array( ( $b['oeffentlichkeit'] ?? 'vereinsintern' ), array( 'oeffentlich', 'vereinsintern', 'nur_gremium' ), true ) ? $b['oeffentlichkeit'] : 'vereinsintern',
+		'standardverfahren'    => in_array( ( $b['standardverfahren'] ?? 'konsent' ), array( 'konsent', 'mehrheit', 'geheime_wahl' ), true ) ? $b['standardverfahren'] : 'konsent',
+		'einladungsfrist_tage' => max( 0, (int) ( $b['einladungsfrist_tage'] ?? 14 ) ),
+		'beschreibung'         => sanitize_textarea_field( (string) ( $b['beschreibung'] ?? '' ) ),
+		'aktiv'                => empty( $b['aktiv'] ) ? 0 : 1,
+	);
+	if ( '' === $data['name'] ) {
+		return new WP_Error( 'bad_req', 'Name nötig.', array( 'status' => 400 ) );
+	}
+	$id = (int) ( $b['id'] ?? 0 );
+	if ( $id > 0 ) {
+		$wpdb->update( $t, $data, array( 'id' => $id ) );
+	} else {
+		$data['erstellt_von'] = get_current_user_id();
+		$wpdb->insert( $t, $data );
+		$id = (int) $wpdb->insert_id;
+	}
+	return rest_ensure_response( array( 'ok' => true, 'id' => $id ) );
+}
+
+/** POST /actions/gremium-delete { id } – inkl. Mitglieder & Rollen dieses Gremiums */
+function vp_sync_action_gremium_delete( WP_REST_Request $req ) {
+	global $wpdb;
+	$id = (int) ( vp_sync_json( $req )['id'] ?? 0 );
+	if ( ! $id ) {
+		return new WP_Error( 'bad_req', 'id nötig.', array( 'status' => 400 ) );
+	}
+	$wpdb->delete( $wpdb->prefix . 'pp_gremien', array( 'id' => $id ) );
+	$wpdb->delete( $wpdb->prefix . 'pp_kreis_mitglieder', array( 'gremium_id' => $id ) );
+	$wpdb->delete( $wpdb->prefix . 'pp_rollen', array( 'gremium_id' => $id ) );
+	return rest_ensure_response( array( 'ok' => true ) );
+}
+
+/** POST /actions/kreis-mitglied  { op:"add"|"remove", gremium_id, user_id, id?, beigetreten_am? } */
+function vp_sync_action_kreis_mitglied( WP_REST_Request $req ) {
+	global $wpdb;
+	$t = $wpdb->prefix . 'pp_kreis_mitglieder';
+	if ( ! vp_sync_columns( 'pp_kreis_mitglieder' ) ) {
+		return new WP_Error( 'no_table', 'Kreis-Mitglieder-Tabelle fehlt.', array( 'status' => 400 ) );
+	}
+	$b = vp_sync_json( $req );
+	if ( 'remove' === ( $b['op'] ?? '' ) ) {
+		$id = (int) ( $b['id'] ?? 0 );
+		if ( ! $id ) {
+			return new WP_Error( 'bad_req', 'id nötig.', array( 'status' => 400 ) );
+		}
+		$wpdb->delete( $t, array( 'id' => $id ) );
+		return rest_ensure_response( array( 'ok' => true ) );
+	}
+	$g = (int) ( $b['gremium_id'] ?? 0 );
+	$u = (int) ( $b['user_id'] ?? 0 );
+	if ( ! $g || ! $u ) {
+		return new WP_Error( 'bad_req', 'gremium_id und user_id nötig.', array( 'status' => 400 ) );
+	}
+	if ( (int) $wpdb->get_var( $wpdb->prepare( "SELECT id FROM `$t` WHERE gremium_id = %d AND user_id = %d AND ausgetreten_am IS NULL", $g, $u ) ) ) {
+		return rest_ensure_response( array( 'ok' => true, 'note' => 'bereits Mitglied' ) );
+	}
+	$wpdb->insert( $t, array(
+		'gremium_id'     => $g,
+		'user_id'        => $u,
+		'beigetreten_am' => sanitize_text_field( (string) ( $b['beigetreten_am'] ?? current_time( 'Y-m-d' ) ) ),
+	) );
+	return rest_ensure_response( array( 'ok' => true, 'id' => (int) $wpdb->insert_id ) );
+}
+
+/** POST /actions/rolle-save */
+function vp_sync_action_rolle_save( WP_REST_Request $req ) {
+	global $wpdb;
+	$t = $wpdb->prefix . 'pp_rollen';
+	if ( ! vp_sync_columns( 'pp_rollen' ) ) {
+		return new WP_Error( 'no_table', 'Rollen-Tabelle fehlt.', array( 'status' => 400 ) );
+	}
+	$b    = vp_sync_json( $req );
+	$data = array(
+		'gremium_id'            => (int) ( $b['gremium_id'] ?? 0 ),
+		'rollenvorlage_id'      => ! empty( $b['rollenvorlage_id'] ) ? (int) $b['rollenvorlage_id'] : null,
+		'bezeichnung'           => sanitize_text_field( (string) ( $b['bezeichnung'] ?? '' ) ),
+		'user_id'               => ! empty( $b['user_id'] ) ? (int) $b['user_id'] : null,
+		'vertretungsberechtigt' => empty( $b['vertretungsberechtigt'] ) ? 0 : 1,
+		'amtszeit_start'        => sanitize_text_field( (string) ( $b['amtszeit_start'] ?? '' ) ) ?: null,
+		'amtszeit_ende'         => sanitize_text_field( (string) ( $b['amtszeit_ende'] ?? '' ) ) ?: null,
+		'wahl_gruppe'           => sanitize_text_field( (string) ( $b['wahl_gruppe'] ?? '' ) ),
+	);
+	if ( ! $data['gremium_id'] || '' === $data['bezeichnung'] ) {
+		return new WP_Error( 'bad_req', 'gremium_id und bezeichnung nötig.', array( 'status' => 400 ) );
+	}
+	$id = (int) ( $b['id'] ?? 0 );
+	if ( $id > 0 ) {
+		$wpdb->update( $t, $data, array( 'id' => $id ) );
+	} else {
+		$wpdb->insert( $t, $data );
+		$id = (int) $wpdb->insert_id;
+	}
+	return rest_ensure_response( array( 'ok' => true, 'id' => $id ) );
+}
+
+/** POST /actions/rolle-delete { id } */
+function vp_sync_action_rolle_delete( WP_REST_Request $req ) {
+	global $wpdb;
+	$id = (int) ( vp_sync_json( $req )['id'] ?? 0 );
+	if ( ! $id ) {
+		return new WP_Error( 'bad_req', 'id nötig.', array( 'status' => 400 ) );
+	}
+	$wpdb->delete( $wpdb->prefix . 'pp_rollen', array( 'id' => $id ) );
+	return rest_ensure_response( array( 'ok' => true ) );
+}
+
+/* =========================================================================
+ * Schichtplan-Editor (Wunschliste-Modul)
+ * ====================================================================== */
+
+function vp_sync_shift_slug( $titel, $wpdb ) {
+	$t    = $wpdb->prefix . 'wl_shift_events';
+	$base = sanitize_title( $titel ) ?: ( 'event-' . time() );
+	$slug = $base;
+	$i    = 1;
+	while ( $wpdb->get_var( $wpdb->prepare( "SELECT id FROM `$t` WHERE slug = %s", $slug ) ) ) {
+		$slug = $base . '-' . ( ++$i );
+	}
+	return $slug;
+}
+
+/** POST /actions/shift-event-save */
+function vp_sync_action_shift_event_save( WP_REST_Request $req ) {
+	global $wpdb;
+	$t = $wpdb->prefix . 'wl_shift_events';
+	if ( ! vp_sync_columns( 'wl_shift_events' ) ) {
+		return new WP_Error( 'no_table', 'Schicht-Tabellen fehlen.', array( 'status' => 400 ) );
+	}
+	$b    = vp_sync_json( $req );
+	$data = array(
+		'titel'               => sanitize_text_field( (string) ( $b['titel'] ?? '' ) ),
+		'beschreibung'        => sanitize_textarea_field( (string) ( $b['beschreibung'] ?? '' ) ),
+		'veranstaltungsdatum' => sanitize_text_field( (string) ( $b['veranstaltungsdatum'] ?? '' ) ) ?: null,
+		'tagesgrenze_stunde'  => max( 0, min( 23, (int) ( $b['tagesgrenze_stunde'] ?? 0 ) ) ),
+		'aktiv'               => isset( $b['aktiv'] ) && ! $b['aktiv'] ? 0 : 1,
+	);
+	if ( '' === $data['titel'] ) {
+		return new WP_Error( 'bad_req', 'Titel nötig.', array( 'status' => 400 ) );
+	}
+	$id = (int) ( $b['id'] ?? 0 );
+	if ( $id > 0 ) {
+		$wpdb->update( $t, $data, array( 'id' => $id ) );
+	} else {
+		$data['slug']         = ! empty( $b['slug'] ) ? sanitize_title( $b['slug'] ) : vp_sync_shift_slug( $data['titel'], $wpdb );
+		$data['erstellt_von'] = get_current_user_id();
+		$wpdb->insert( $t, $data );
+		$id = (int) $wpdb->insert_id;
+	}
+	return rest_ensure_response( array( 'ok' => true, 'id' => $id ) );
+}
+
+/** POST /actions/shift-event-delete { id } – Kaskade */
+function vp_sync_action_shift_event_delete( WP_REST_Request $req ) {
+	global $wpdb;
+	$id = (int) ( vp_sync_json( $req )['id'] ?? 0 );
+	if ( ! $id ) {
+		return new WP_Error( 'bad_req', 'id nötig.', array( 'status' => 400 ) );
+	}
+	$st = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM {$wpdb->prefix}wl_shift_stationen WHERE event_id = %d", $id ) );
+	foreach ( (array) $st as $sid ) {
+		vp_sync_shift_delete_station( (int) $sid, $wpdb );
+	}
+	$wpdb->delete( $wpdb->prefix . 'wl_shift_events', array( 'id' => $id ) );
+	return rest_ensure_response( array( 'ok' => true ) );
+}
+
+function vp_sync_shift_delete_station( $sid, $wpdb ) {
+	$sch = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM {$wpdb->prefix}wl_shift_schichten WHERE station_id = %d", $sid ) );
+	foreach ( (array) $sch as $scid ) {
+		$wpdb->delete( $wpdb->prefix . 'wl_shift_eintragungen', array( 'schicht_id' => (int) $scid ) );
+	}
+	$wpdb->delete( $wpdb->prefix . 'wl_shift_schichten', array( 'station_id' => $sid ) );
+	$wpdb->delete( $wpdb->prefix . 'wl_shift_stationen', array( 'id' => $sid ) );
+}
+
+/** POST /actions/shift-station-save */
+function vp_sync_action_shift_station_save( WP_REST_Request $req ) {
+	global $wpdb;
+	$t = $wpdb->prefix . 'wl_shift_stationen';
+	if ( ! vp_sync_columns( 'wl_shift_stationen' ) ) {
+		return new WP_Error( 'no_table', 'Stationen-Tabelle fehlt.', array( 'status' => 400 ) );
+	}
+	$b    = vp_sync_json( $req );
+	$data = array(
+		'event_id'                => (int) ( $b['event_id'] ?? 0 ),
+		'titel'                   => sanitize_text_field( (string) ( $b['titel'] ?? '' ) ),
+		'beschreibung'            => sanitize_textarea_field( (string) ( $b['beschreibung'] ?? '' ) ),
+		'treffpunkt'              => sanitize_text_field( (string) ( $b['treffpunkt'] ?? '' ) ),
+		'ansprechperson1'         => sanitize_text_field( (string) ( $b['ansprechperson1'] ?? '' ) ),
+		'ansprechperson1_kontakt' => sanitize_text_field( (string) ( $b['ansprechperson1_kontakt'] ?? '' ) ),
+		'ansprechperson2'         => sanitize_text_field( (string) ( $b['ansprechperson2'] ?? '' ) ),
+		'ansprechperson2_kontakt' => sanitize_text_field( (string) ( $b['ansprechperson2_kontakt'] ?? '' ) ),
+		'sortierung'              => (int) ( $b['sortierung'] ?? 0 ),
+	);
+	if ( ! $data['event_id'] || '' === $data['titel'] ) {
+		return new WP_Error( 'bad_req', 'event_id und titel nötig.', array( 'status' => 400 ) );
+	}
+	$id = (int) ( $b['id'] ?? 0 );
+	if ( $id > 0 ) {
+		$wpdb->update( $t, $data, array( 'id' => $id ) );
+	} else {
+		$wpdb->insert( $t, $data );
+		$id = (int) $wpdb->insert_id;
+	}
+	return rest_ensure_response( array( 'ok' => true, 'id' => $id ) );
+}
+
+/** POST /actions/shift-station-delete { id } */
+function vp_sync_action_shift_station_delete( WP_REST_Request $req ) {
+	global $wpdb;
+	$id = (int) ( vp_sync_json( $req )['id'] ?? 0 );
+	if ( ! $id ) {
+		return new WP_Error( 'bad_req', 'id nötig.', array( 'status' => 400 ) );
+	}
+	vp_sync_shift_delete_station( $id, $wpdb );
+	return rest_ensure_response( array( 'ok' => true ) );
+}
+
+/** POST /actions/shift-schicht-save */
+function vp_sync_action_shift_schicht_save( WP_REST_Request $req ) {
+	global $wpdb;
+	$t = $wpdb->prefix . 'wl_shift_schichten';
+	if ( ! vp_sync_columns( 'wl_shift_schichten' ) ) {
+		return new WP_Error( 'no_table', 'Schichten-Tabelle fehlt.', array( 'status' => 400 ) );
+	}
+	$b    = vp_sync_json( $req );
+	$data = array(
+		'station_id'  => (int) ( $b['station_id'] ?? 0 ),
+		'titel'       => sanitize_text_field( (string) ( $b['titel'] ?? '' ) ),
+		'start_zeit'  => sanitize_text_field( (string) ( $b['start_zeit'] ?? '' ) ) ?: null,
+		'end_zeit'    => sanitize_text_field( (string) ( $b['end_zeit'] ?? '' ) ) ?: null,
+		'min_plaetze' => max( 0, (int) ( $b['min_plaetze'] ?? 0 ) ),
+		'max_plaetze' => max( 1, (int) ( $b['max_plaetze'] ?? 1 ) ),
+		'sortierung'  => (int) ( $b['sortierung'] ?? 0 ),
+	);
+	if ( ! $data['station_id'] ) {
+		return new WP_Error( 'bad_req', 'station_id nötig.', array( 'status' => 400 ) );
+	}
+	$id = (int) ( $b['id'] ?? 0 );
+	if ( $id > 0 ) {
+		$wpdb->update( $t, $data, array( 'id' => $id ) );
+	} else {
+		$wpdb->insert( $t, $data );
+		$id = (int) $wpdb->insert_id;
+	}
+	return rest_ensure_response( array( 'ok' => true, 'id' => $id ) );
+}
+
+/** POST /actions/shift-schicht-delete { id } */
+function vp_sync_action_shift_schicht_delete( WP_REST_Request $req ) {
+	global $wpdb;
+	$id = (int) ( vp_sync_json( $req )['id'] ?? 0 );
+	if ( ! $id ) {
+		return new WP_Error( 'bad_req', 'id nötig.', array( 'status' => 400 ) );
+	}
+	$wpdb->delete( $wpdb->prefix . 'wl_shift_eintragungen', array( 'schicht_id' => $id ) );
+	$wpdb->delete( $wpdb->prefix . 'wl_shift_schichten', array( 'id' => $id ) );
+	return rest_ensure_response( array( 'ok' => true ) );
+}
+
+/* =========================================================================
+ * Schichttausch
+ * ====================================================================== */
+
+/**
+ * POST /actions/shift-tausch
+ *   { op:"anfrage", von_eintrag_id, an_email }
+ *   { op:"entscheiden", id, annehmen:bool }
+ *   { op:"zuruecknehmen", id }
+ */
+function vp_sync_action_shift_tausch( WP_REST_Request $req ) {
+	global $wpdb;
+	$tt = $wpdb->prefix . 'wl_shift_tausch';
+	$te = $wpdb->prefix . 'wl_shift_eintragungen';
+	if ( ! vp_sync_columns( 'wl_shift_tausch' ) ) {
+		return new WP_Error( 'no_table', 'Tausch-Tabelle fehlt.', array( 'status' => 400 ) );
+	}
+	$b   = vp_sync_json( $req );
+	$op  = $b['op'] ?? 'anfrage';
+	$uid = get_current_user_id();
+	$me  = wp_get_current_user();
+
+	if ( 'anfrage' === $op ) {
+		$ve    = (int) ( $b['von_eintrag_id'] ?? 0 );
+		$email = sanitize_email( (string) ( $b['an_email'] ?? '' ) );
+		$row   = $ve ? $wpdb->get_row( $wpdb->prepare( "SELECT * FROM `$te` WHERE id = %d", $ve ) ) : null;
+		if ( ! $row || ! $email ) {
+			return new WP_Error( 'bad_req', 'von_eintrag_id und gültige an_email nötig.', array( 'status' => 400 ) );
+		}
+		if ( (int) $row->user_id !== $uid && ! current_user_can( 'wl_manage_wishes' ) && ! current_user_can( 'manage_options' ) ) {
+			return new WP_Error( 'forbidden', 'Nur die eigene Eintragung kann getauscht werden.', array( 'status' => 403 ) );
+		}
+		$key = wp_generate_password( 24, false );
+		$wpdb->insert( $tt, array(
+			'von_eintrag_id' => $ve,
+			'an_email'       => strtolower( $email ),
+			'tausch_key'     => $key,
+			'status'         => 'offen',
+			'erstellt_am'    => current_time( 'mysql' ),
+		) );
+		wp_mail(
+			$email,
+			sprintf( '[%s] Schichttausch-Anfrage', get_bloginfo( 'name' ) ),
+			sprintf( '%s möchte eine Schicht mit dir tauschen. Bitte im Mitgliederbereich unter „Schichtpläne“ annehmen oder ablehnen.', $me->display_name ?: $me->user_login )
+		);
+		return rest_ensure_response( array( 'ok' => true, 'id' => (int) $wpdb->insert_id ) );
+	}
+
+	$id = (int) ( $b['id'] ?? 0 );
+	$tr = $id ? $wpdb->get_row( $wpdb->prepare( "SELECT * FROM `$tt` WHERE id = %d", $id ) ) : null;
+	if ( ! $tr ) {
+		return new WP_Error( 'bad_req', 'Tausch-Anfrage nicht gefunden.', array( 'status' => 400 ) );
+	}
+
+	if ( 'zuruecknehmen' === $op ) {
+		$wpdb->delete( $tt, array( 'id' => $id ) );
+		return rest_ensure_response( array( 'ok' => true ) );
+	}
+
+	if ( 'offen' !== $tr->status ) {
+		return new WP_Error( 'done', 'Diese Anfrage ist schon entschieden.', array( 'status' => 409 ) );
+	}
+	if ( strtolower( (string) $me->user_email ) !== strtolower( (string) $tr->an_email ) && ! current_user_can( 'wl_manage_wishes' ) ) {
+		return new WP_Error( 'forbidden', 'Diese Anfrage ist nicht an dich gerichtet.', array( 'status' => 403 ) );
+	}
+	$annehmen = ! empty( $b['annehmen'] );
+	if ( $annehmen ) {
+		$wpdb->update( $te, array(
+			'name'    => $me->display_name ?: $me->user_login,
+			'email'   => $me->user_email,
+			'user_id' => $uid,
+		), array( 'id' => (int) $tr->von_eintrag_id ) );
+	}
+	$wpdb->update( $tt, array( 'status' => $annehmen ? 'angenommen' : 'abgelehnt' ), array( 'id' => $id ) );
+	return rest_ensure_response( array( 'ok' => true, 'status' => $annehmen ? 'angenommen' : 'abgelehnt' ) );
 }

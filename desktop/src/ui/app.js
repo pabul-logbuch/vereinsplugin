@@ -1888,23 +1888,183 @@ function ppViewProtokolle({ host, protok, tops, gname, gremien, manage }) {
   if (!protok.length) host.append(el('div', { class: 'note' }, 'Keine Protokolle.'));
 }
 
+async function membersList() {
+  if (state._members) return state._members;
+  try {
+    state._members = (await call(api.data.rows('wp_members', { limit: 3000 }))).rows;
+  } catch {
+    state._members = [];
+  }
+  return state._members;
+}
+function memberName(members, uid) {
+  const m = members.find((x) => String(x.id) === String(uid));
+  return m ? m.display_name || `${m.first_name} ${m.last_name}`.trim() || m.user_login : `User #${uid}`;
+}
+function userSelect(members, value) {
+  return selectEl(
+    [['', '— niemand —'], ...members.slice().sort((a, b) => String(a.display_name).localeCompare(String(b.display_name))).map((m) => [String(m.id), m.display_name || m.user_login])],
+    String(value || '')
+  );
+}
+
 function ppViewKreise({ host, gremien, kmit, rollen }) {
   const mBy = {};
   for (const m of kmit) (mBy[m.gremium_id] ||= []).push(m);
   const rBy = {};
   for (const r of rollen) (rBy[r.gremium_id] ||= []).push(r);
+  if (can('pp_manage')) host.append(el('div', { class: 'toolbar' }, el('button', { class: 'primary small', onclick: () => showGremium(null, gremien) }, '+ Neues Gremium')));
   const grid = el('div', { class: 'grid-cards' });
   for (const g of gremien) {
-    const c = el('div', { class: 'card', onclick: () => showDetail('pp_gremien', String(g.id)) });
+    const c = el('div', { class: 'card', onclick: () => showGremium(g, gremien) });
     c.append(el('strong', {}, g.name));
-    c.append(el('div', { class: 'muted', style: 'font-size:12px' }, g.typ || ''));
-    const mem = mBy[g.id] || [];
-    const rol = rBy[g.id] || [];
-    c.append(el('div', {}, `${mem.length} Mitglied(er) · ${rol.length} Rolle(n)`));
+    c.append(el('div', { class: 'muted', style: 'font-size:12px' }, (g.typ || '') + (String(g.aktiv) === '0' ? ' · inaktiv' : '')));
+    c.append(el('div', {}, `${(mBy[g.id] || []).length} Mitglied(er) · ${(rBy[g.id] || []).length} Rolle(n)`));
     grid.append(c);
   }
   host.append(grid);
   if (!gremien.length) host.append(el('div', { class: 'note' }, 'Keine Gremien.'));
+}
+
+async function showGremium(g, gremien) {
+  g = g || {};
+  state.current = { name: 'protokolle', sub: 'kreise' };
+  view.innerHTML = '';
+  view.append(el('button', { class: 'ghost small', onclick: () => showProtokolle({ sub: 'kreise' }) }, '‹ Zurück'));
+  view.append(el('h1', {}, g.id ? g.name : 'Neues Gremium'));
+
+  const members = await membersList();
+  let kmit = [];
+  let rollen = [];
+  let vorlagen = [];
+  if (g.id) {
+    [kmit, rollen, vorlagen] = await Promise.all([
+      call(api.data.rows('pp_kreis_mitglieder', { limit: 5000 })).then((r) => r.rows.filter((x) => String(x.gremium_id) === String(g.id))).catch(() => []),
+      call(api.data.rows('pp_rollen', { limit: 5000 })).then((r) => r.rows.filter((x) => String(x.gremium_id) === String(g.id))).catch(() => []),
+      call(api.data.rows('pp_rollenvorlagen', { limit: 2000 })).then((r) => r.rows.filter((x) => String(x.gremium_id) === String(g.id))).catch(() => []),
+    ]);
+  }
+
+  // --- Gremium-Stammdaten ---
+  const f = el('form', { class: 'detail' });
+  const name = el('input', { value: g.name || '' });
+  const typ = selectEl(['mv', 'vorstand', 'leitungskreis', 'kreis', 'kreisversammlung'], g.typ || 'kreis');
+  const parent = selectEl([['', '—'], ...(gremien || []).filter((x) => String(x.id) !== String(g.id)).map((x) => [String(x.id), x.name])], String(g.parent_gremium_id || ''));
+  const oeff = selectEl(['oeffentlich', 'vereinsintern', 'nur_gremium'], g.oeffentlichkeit || 'vereinsintern');
+  const verf = selectEl(['konsent', 'mehrheit', 'geheime_wahl'], g.standardverfahren || 'konsent');
+  const frist = el('input', { type: 'number', value: g.einladungsfrist_tage ?? 14 });
+  const beschr = el('textarea', {});
+  beschr.value = g.beschreibung || '';
+  const aktiv = selectEl([['1', 'aktiv'], ['0', 'inaktiv']], String(g.aktiv ?? 1));
+  f.append('Name', name, 'Typ', typ, 'Übergeordnet', parent, 'Öffentlichkeit', oeff, 'Verfahren', verf, 'Einladungsfrist (Tage)', frist, 'Beschreibung', beschr, 'Status', aktiv);
+  f.append(el('div', { class: 'form-actions' },
+    el('button', { class: 'primary', type: 'submit' }, 'Speichern'),
+    g.id ? el('button', { type: 'button', class: 'danger', onclick: () => gremiumDelete(g.id) }, 'Gremium löschen') : null));
+  f.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    try {
+      const r = await call(api.action.run('gremium-save', {
+        id: g.id || 0, name: name.value, typ: typ.value, parent_gremium_id: parent.value, oeffentlichkeit: oeff.value,
+        standardverfahren: verf.value, einladungsfrist_tage: frist.value, beschreibung: beschr.value, aktiv: Number(aktiv.value),
+      }));
+      toast('Gespeichert.');
+      await runSyncQuiet();
+      const fresh = (await call(api.data.rows('pp_gremien', { limit: 500 }))).rows.find((x) => String(x.id) === String(r.id));
+      showGremium(fresh || { ...g, id: r.id }, gremien);
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+  view.append(el('div', { class: 'card' }, f));
+  if (!g.id) return;
+
+  // --- Mitglieder ---
+  view.append(el('h2', {}, `Mitglieder (${kmit.length})`));
+  const ml = el('div', { class: 'card' });
+  for (const m of kmit) {
+    ml.append(el('div', { class: 'row', style: 'justify-content:space-between;border-bottom:1px solid var(--line);padding:5px 0' },
+      el('div', {}, memberName(members, m.user_id), m.beigetreten_am ? el('span', { class: 'muted' }, ' · seit ' + m.beigetreten_am) : null),
+      el('button', { class: 'small danger', onclick: () => kreisMitglied({ op: 'remove', id: m.id }, g, gremien) }, 'Entfernen')));
+  }
+  const addSel = userSelect(members, '');
+  ml.append(el('div', { class: 'row', style: 'margin-top:8px' }, addSel,
+    el('button', { class: 'small primary', onclick: () => addSel.value && kreisMitglied({ op: 'add', gremium_id: g.id, user_id: addSel.value }, g, gremien) }, '+ Hinzufügen')));
+  view.append(ml);
+
+  // --- Rollen ---
+  view.append(el('h2', {}, `Rollen (${rollen.length})`));
+  if (can('pp_manage')) view.append(el('div', { class: 'toolbar' }, el('button', { class: 'primary small', onclick: () => rolleEdit(null, g, members, vorlagen) }, '+ Rolle')));
+  for (const r of rollen) {
+    view.append(el('div', { class: 'card row', style: 'justify-content:space-between' },
+      el('div', {}, el('strong', {}, r.bezeichnung), el('div', { class: 'muted', style: 'font-size:12px' },
+        (r.user_id ? memberName(members, r.user_id) : 'unbesetzt') + (String(r.vertretungsberechtigt) === '1' ? ' · vertretungsberechtigt' : '') +
+        (r.amtszeit_ende ? ` · bis ${r.amtszeit_ende}` : ''))),
+      el('div', { class: 'row' },
+        el('button', { class: 'small', onclick: () => rolleEdit(r, g, members, vorlagen) }, 'Bearbeiten'),
+        el('button', { class: 'small danger', onclick: () => rolleDelete(r.id, g, gremien) }, 'Löschen'))));
+  }
+}
+
+async function gremiumDelete(id) {
+  if (!confirm('Gremium mit allen Mitgliedern und Rollen löschen?')) return;
+  try {
+    await call(api.action.run('gremium-delete', { id }));
+    toast('Gelöscht.');
+    await runSyncQuiet();
+    showProtokolle({ sub: 'kreise' });
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+async function kreisMitglied(body, g, gremien) {
+  try {
+    await call(api.action.run('kreis-mitglied', body));
+    await runSyncQuiet();
+    state._members = null;
+    showGremium(g, gremien);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+async function rolleDelete(id, g, gremien) {
+  if (!confirm('Rolle löschen?')) return;
+  try {
+    await call(api.action.run('rolle-delete', { id }));
+    await runSyncQuiet();
+    showGremium(g, gremien);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+function rolleEdit(r, g, members, vorlagen) {
+  r = r || {};
+  view.innerHTML = '';
+  view.append(el('button', { class: 'ghost small', onclick: () => showGremium(g, null) }, '‹ Zurück'));
+  view.append(el('h1', {}, r.id ? 'Rolle bearbeiten' : 'Neue Rolle'));
+  const bez = el('input', { value: r.bezeichnung || '' });
+  const person = userSelect(members, r.user_id);
+  const vorlage = selectEl([['', '—'], ...(vorlagen || []).map((v) => [String(v.id), v.bezeichnung])], String(r.rollenvorlage_id || ''));
+  const vertret = selectEl([['0', 'nein'], ['1', 'ja']], String(r.vertretungsberechtigt || 0));
+  const start = el('input', { type: 'date', value: (r.amtszeit_start || '').slice(0, 10) });
+  const ende = el('input', { type: 'date', value: (r.amtszeit_ende || '').slice(0, 10) });
+  const wg = el('input', { value: r.wahl_gruppe || '' });
+  const f = el('form', { class: 'detail' }, 'Bezeichnung', bez, 'Person', person, 'Rollenvorlage', vorlage, 'Vertretungsberechtigt', vertret, 'Amtszeit von', start, 'Amtszeit bis', ende, 'Wahlgruppe', wg);
+  f.append(el('div', { class: 'form-actions' }, el('button', { class: 'primary', type: 'submit' }, 'Speichern')));
+  f.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    try {
+      await call(api.action.run('rolle-save', {
+        id: r.id || 0, gremium_id: g.id, bezeichnung: bez.value, user_id: person.value, rollenvorlage_id: vorlage.value,
+        vertretungsberechtigt: Number(vertret.value), amtszeit_start: start.value, amtszeit_ende: ende.value, wahl_gruppe: wg.value,
+      }));
+      toast('Gespeichert.');
+      await runSyncQuiet();
+      showGremium(g, null);
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+  view.append(f);
 }
 
 function ppViewGeneric({ host }, slug, label, cols) {
@@ -2103,12 +2263,14 @@ async function showSchichtplaene() {
   let st = [];
   let sc = [];
   let ei = [];
+  let tausch = [];
   try {
-    [ev, st, sc, ei] = await Promise.all([
+    [ev, st, sc, ei, tausch] = await Promise.all([
       call(api.data.rows('wl_shift_events', { limit: 500 })).then((r) => r.rows),
       call(api.data.rows('wl_shift_stationen', { limit: 2000 })).then((r) => r.rows).catch(() => []),
       call(api.data.rows('wl_shift_schichten', { limit: 5000 })).then((r) => r.rows).catch(() => []),
       call(api.data.rows('wl_shift_eintragungen', { limit: 20000 })).then((r) => r.rows).catch(() => []),
+      call(api.data.rows('wl_shift_tausch', { limit: 5000 })).then((r) => r.rows).catch(() => []),
     ]);
   } catch (e) {
     return view.append(el('div', { class: 'note err' }, e.message));
@@ -2120,6 +2282,34 @@ async function showSchichtplaene() {
   const eiBy = {};
   ei.forEach((e) => (eiBy[e.schicht_id] ||= []).push(e));
   const myId = state.me && String(state.me.id);
+  const myEmail = (state.me && (state.me.email || '')).toLowerCase();
+  const myEntryIds = new Set(ei.filter((x) => String(x.user_id) === myId).map((x) => String(x.id)));
+  const schichtInfo = (eid) => {
+    const en = ei.find((x) => String(x.id) === String(eid));
+    if (!en) return `Eintrag #${eid}`;
+    const s = sc.find((x) => String(x.id) === String(en.schicht_id)) || {};
+    return `${(s.start_zeit || s.titel || 'Schicht').slice(0, 16)} (${en.name})`;
+  };
+
+  // --- Tauschanfragen ---
+  const incoming = tausch.filter((t) => (t.an_email || '').toLowerCase() === myEmail && t.status === 'offen');
+  const outgoing = tausch.filter((t) => myEntryIds.has(String(t.von_eintrag_id)));
+  if (incoming.length || outgoing.length) {
+    view.append(el('h2', {}, 'Schichttausch'));
+    for (const t of incoming) {
+      view.append(el('div', { class: 'card row', style: 'justify-content:space-between' },
+        el('div', {}, `Anfrage: ${schichtInfo(t.von_eintrag_id)}`),
+        el('div', { class: 'row' },
+          el('button', { class: 'small primary', onclick: () => tauschEntscheiden(t.id, true) }, 'Annehmen'),
+          el('button', { class: 'small danger', onclick: () => tauschEntscheiden(t.id, false) }, 'Ablehnen'))));
+    }
+    for (const t of outgoing) {
+      view.append(el('div', { class: 'card row', style: 'justify-content:space-between' },
+        el('div', {}, `Meine Anfrage an ${t.an_email}: ${schichtInfo(t.von_eintrag_id)} `,
+          el('span', { class: 'st st-' + (t.status === 'angenommen' ? 'ausgezahlt' : t.status === 'offen' ? 'ausstehend' : 'abgelehnt') }, t.status)),
+        t.status === 'offen' ? el('button', { class: 'small ghost', onclick: () => tauschZurueck(t.id) }, 'Zurückziehen') : null));
+    }
+  }
 
   for (const e of ev.filter((x) => String(x.aktiv) !== '0')) {
     view.append(el('h2', {}, `${e.titel}${e.veranstaltungsdatum ? ' · ' + e.veranstaltungsdatum : ''}`));
@@ -2144,8 +2334,13 @@ async function showSchichtplaene() {
         const cell = el('div', { class: 'shift-cell' + (mine ? ' mine' : full ? ' full' : '') });
         cell.append(el('div', { class: 'shift-time' }, zeit, ' ', el('span', { class: 'muted' }, `${eintr.length}/${max}`)));
         if (eintr.length) cell.append(el('div', { class: 'shift-names' }, eintr.map((x) => x.name).join(', ')));
-        if (mine) cell.append(el('button', { class: 'small ghost', onclick: () => schichtAus(mine.id) }, 'Austragen'));
-        else if (!full) cell.append(el('button', { class: 'small primary', onclick: () => schichtEin(schicht.id) }, 'Eintragen'));
+        if (mine) {
+          cell.append(el('div', { class: 'row' },
+            el('button', { class: 'small ghost', onclick: () => schichtAus(mine.id) }, 'Austragen'),
+            el('button', { class: 'small', onclick: () => tauschAnfrage(mine.id) }, 'Tauschen')));
+        } else if (!full) {
+          cell.append(el('button', { class: 'small primary', onclick: () => schichtEin(schicht.id) }, 'Eintragen'));
+        }
         col.append(cell);
       }
       cols.append(col);
@@ -2177,19 +2372,201 @@ async function schichtAus(eintrag_id) {
     toast(e.message, true);
   }
 }
+async function tauschAnfrage(von_eintrag_id) {
+  const an_email = prompt('E-Mail der Person, die die Schicht übernehmen soll:', '');
+  if (!an_email) return;
+  try {
+    await call(api.action.run('shift-tausch', { op: 'anfrage', von_eintrag_id, an_email }));
+    toast('Tauschanfrage verschickt.');
+    await runSyncQuiet();
+    showSchichtplaene();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+async function tauschEntscheiden(id, annehmen) {
+  try {
+    await call(api.action.run('shift-tausch', { op: 'entscheiden', id, annehmen }));
+    toast(annehmen ? 'Schicht übernommen.' : 'Abgelehnt.');
+    await runSyncQuiet();
+    showSchichtplaene();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+async function tauschZurueck(id) {
+  try {
+    await call(api.action.run('shift-tausch', { op: 'zuruecknehmen', id }));
+    toast('Zurückgezogen.');
+    await runSyncQuiet();
+    showSchichtplaene();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
 
 async function showSchichtverwaltung() {
   state.current = { name: 'schicht_verwaltung' };
   renderNav();
   view.innerHTML = '';
   view.append(el('h1', {}, 'Schichtplanverwaltung'));
-  view.append(el('p', { class: 'sub' }, 'Veranstaltungen, Stationen und Schichten pflegst du hier über die Rohdaten-Editoren.'));
-  view.append(el('div', { class: 'row' },
-    el('button', { class: 'small', onclick: () => showTable('wl_shift_events') }, 'Veranstaltungen'),
-    el('button', { class: 'small', onclick: () => showTable('wl_shift_stationen') }, 'Stationen'),
-    el('button', { class: 'small', onclick: () => showTable('wl_shift_schichten') }, 'Schichten'),
-    el('button', { class: 'small', onclick: () => showTable('wl_shift_eintragungen') }, 'Eintragungen')));
-  view.append(el('p', { class: 'muted', style: 'margin-top:12px' }, 'Ansicht wie „Schichtpläne" zeigt das Ergebnis; ein voller Kalender-Editor folgt später.'));
+  view.append(el('div', { class: 'toolbar' }, el('button', { class: 'primary small', onclick: () => schichtEventEdit(null) }, '+ Veranstaltung')));
+
+  let ev = [];
+  let st = [];
+  let sc = [];
+  let ei = [];
+  try {
+    [ev, st, sc, ei] = await Promise.all([
+      call(api.data.rows('wl_shift_events', { limit: 500 })).then((r) => r.rows),
+      call(api.data.rows('wl_shift_stationen', { limit: 3000 })).then((r) => r.rows).catch(() => []),
+      call(api.data.rows('wl_shift_schichten', { limit: 8000 })).then((r) => r.rows).catch(() => []),
+      call(api.data.rows('wl_shift_eintragungen', { limit: 20000 })).then((r) => r.rows).catch(() => []),
+    ]);
+  } catch (e) {
+    return view.append(el('div', { class: 'note err' }, e.message));
+  }
+  const stBy = {};
+  st.forEach((s) => (stBy[s.event_id] ||= []).push(s));
+  const scBy = {};
+  sc.forEach((s) => (scBy[s.station_id] ||= []).push(s));
+  const eiN = {};
+  ei.forEach((e) => (eiN[e.schicht_id] = (eiN[e.schicht_id] || 0) + 1));
+
+  for (const e of ev) {
+    const d = el('details', { class: 'card' });
+    d.append(el('summary', {}, `${e.titel}${e.veranstaltungsdatum ? ' · ' + e.veranstaltungsdatum : ''}${String(e.aktiv) === '0' ? ' · inaktiv' : ''}`));
+    d.append(el('div', { class: 'row', style: 'margin:6px 0' },
+      el('button', { class: 'small', onclick: () => schichtEventEdit(e) }, 'Veranstaltung bearbeiten'),
+      el('button', { class: 'small primary', onclick: () => schichtStationEdit(null, e.id) }, '+ Station'),
+      el('button', { class: 'small danger', onclick: () => schichtDel('shift-event-delete', e.id, 'Veranstaltung inkl. Stationen/Schichten löschen?') }, 'Löschen')));
+    for (const station of (stBy[e.id] || []).sort((a, b) => Number(a.sortierung) - Number(b.sortierung))) {
+      const sd = el('div', { style: 'border-top:1px solid var(--line);padding:8px 0' });
+      sd.append(el('div', { class: 'row', style: 'justify-content:space-between' },
+        el('strong', {}, station.titel + (station.treffpunkt ? ` · 📍 ${station.treffpunkt}` : '')),
+        el('div', { class: 'row' },
+          el('button', { class: 'small', onclick: () => schichtStationEdit(station, e.id) }, 'Station'),
+          el('button', { class: 'small primary', onclick: () => schichtSchichtEdit(null, station.id) }, '+ Schicht'),
+          el('button', { class: 'small danger', onclick: () => schichtDel('shift-station-delete', station.id, 'Station inkl. Schichten löschen?') }, '×'))));
+      for (const schicht of (scBy[station.id] || []).sort((a, b) => String(a.start_zeit || '').localeCompare(String(b.start_zeit || '')))) {
+        const zeit = schicht.start_zeit ? `${schicht.start_zeit.slice(0, 16)}–${(schicht.end_zeit || '').slice(11, 16)}` : (schicht.titel || 'Schicht');
+        sd.append(el('div', { class: 'row', style: 'justify-content:space-between;padding:3px 0 3px 16px' },
+          el('div', {}, `${zeit} · ${eiN[schicht.id] || 0}/${schicht.max_plaetze || 1}`),
+          el('div', { class: 'row' },
+            el('button', { class: 'small', onclick: () => schichtSchichtEdit(schicht, station.id) }, 'bearb.'),
+            el('button', { class: 'small danger', onclick: () => schichtDel('shift-schicht-delete', schicht.id, 'Schicht löschen?') }, '×'))));
+      }
+      d.append(sd);
+    }
+    view.append(d);
+  }
+  if (!ev.length) view.append(el('div', { class: 'note' }, 'Noch keine Veranstaltungen.'));
+}
+
+async function schichtDel(action, id, frage) {
+  if (!confirm(frage)) return;
+  try {
+    await call(api.action.run(action, { id }));
+    toast('Gelöscht.');
+    await runSyncQuiet();
+    showSchichtverwaltung();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+function schichtEventEdit(e) {
+  e = e || {};
+  view.innerHTML = '';
+  view.append(el('button', { class: 'ghost small', onclick: showSchichtverwaltung }, '‹ Zurück'));
+  view.append(el('h1', {}, e.id ? 'Veranstaltung bearbeiten' : 'Neue Veranstaltung'));
+  const titel = el('input', { value: e.titel || '' });
+  const datum = el('input', { type: 'date', value: (e.veranstaltungsdatum || '').slice(0, 10) });
+  const beschr = el('textarea', {});
+  beschr.value = e.beschreibung || '';
+  const grenze = el('input', { type: 'number', min: '0', max: '23', value: e.tagesgrenze_stunde ?? 0 });
+  const aktiv = selectEl([['1', 'aktiv'], ['0', 'inaktiv']], String(e.aktiv ?? 1));
+  const f = el('form', { class: 'detail' }, 'Titel', titel, 'Datum', datum, 'Beschreibung', beschr, 'Tagesgrenze (Stunde)', grenze, 'Status', aktiv);
+  f.append(el('div', { class: 'form-actions' }, el('button', { class: 'primary', type: 'submit' }, 'Speichern')));
+  f.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    try {
+      await call(api.action.run('shift-event-save', {
+        id: e.id || 0, titel: titel.value, veranstaltungsdatum: datum.value, beschreibung: beschr.value,
+        tagesgrenze_stunde: grenze.value, aktiv: Number(aktiv.value),
+      }));
+      toast('Gespeichert.');
+      await runSyncQuiet();
+      showSchichtverwaltung();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+  view.append(f);
+}
+function schichtStationEdit(s, eventId) {
+  s = s || {};
+  view.innerHTML = '';
+  view.append(el('button', { class: 'ghost small', onclick: showSchichtverwaltung }, '‹ Zurück'));
+  view.append(el('h1', {}, s.id ? 'Station bearbeiten' : 'Neue Station'));
+  const titel = el('input', { value: s.titel || '' });
+  const beschr = el('textarea', {});
+  beschr.value = s.beschreibung || '';
+  const treff = el('input', { value: s.treffpunkt || '' });
+  const ap1 = el('input', { value: s.ansprechperson1 || '' });
+  const ap1k = el('input', { value: s.ansprechperson1_kontakt || '' });
+  const ap2 = el('input', { value: s.ansprechperson2 || '' });
+  const ap2k = el('input', { value: s.ansprechperson2_kontakt || '' });
+  const sort = el('input', { type: 'number', value: s.sortierung || 0 });
+  const f = el('form', { class: 'detail' }, 'Titel', titel, 'Beschreibung', beschr, 'Treffpunkt', treff,
+    'Ansprechperson 1', ap1, 'Kontakt 1', ap1k, 'Ansprechperson 2', ap2, 'Kontakt 2', ap2k, 'Sortierung', sort);
+  f.append(el('div', { class: 'form-actions' }, el('button', { class: 'primary', type: 'submit' }, 'Speichern')));
+  f.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    try {
+      await call(api.action.run('shift-station-save', {
+        id: s.id || 0, event_id: eventId, titel: titel.value, beschreibung: beschr.value, treffpunkt: treff.value,
+        ansprechperson1: ap1.value, ansprechperson1_kontakt: ap1k.value, ansprechperson2: ap2.value, ansprechperson2_kontakt: ap2k.value,
+        sortierung: sort.value,
+      }));
+      toast('Gespeichert.');
+      await runSyncQuiet();
+      showSchichtverwaltung();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+  view.append(f);
+}
+function schichtSchichtEdit(sc, stationId) {
+  sc = sc || {};
+  view.innerHTML = '';
+  view.append(el('button', { class: 'ghost small', onclick: showSchichtverwaltung }, '‹ Zurück'));
+  view.append(el('h1', {}, sc.id ? 'Schicht bearbeiten' : 'Neue Schicht'));
+  const titel = el('input', { value: sc.titel || '' });
+  const start = el('input', { type: 'datetime-local', value: (sc.start_zeit || '').replace(' ', 'T').slice(0, 16) });
+  const ende = el('input', { type: 'datetime-local', value: (sc.end_zeit || '').replace(' ', 'T').slice(0, 16) });
+  const minp = el('input', { type: 'number', min: '0', value: sc.min_plaetze ?? 0 });
+  const maxp = el('input', { type: 'number', min: '1', value: sc.max_plaetze ?? 1 });
+  const sort = el('input', { type: 'number', value: sc.sortierung || 0 });
+  const f = el('form', { class: 'detail' }, 'Titel (optional)', titel, 'Beginn', start, 'Ende', ende, 'Mindestplätze', minp, 'Maximalplätze', maxp, 'Sortierung', sort);
+  f.append(el('div', { class: 'form-actions' }, el('button', { class: 'primary', type: 'submit' }, 'Speichern')));
+  f.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    try {
+      await call(api.action.run('shift-schicht-save', {
+        id: sc.id || 0, station_id: stationId, titel: titel.value,
+        start_zeit: start.value ? start.value.replace('T', ' ') + ':00' : '',
+        end_zeit: ende.value ? ende.value.replace('T', ' ') + ':00' : '',
+        min_plaetze: minp.value, max_plaetze: maxp.value, sortierung: sort.value,
+      }));
+      toast('Gespeichert.');
+      await runSyncQuiet();
+      showSchichtverwaltung();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+  view.append(f);
 }
 
 /* =========================================================== Newsletter */
