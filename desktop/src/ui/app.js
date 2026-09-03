@@ -2505,23 +2505,29 @@ async function showSchichtplaene() {
 }
 
 async function schichtEin(schicht_id) {
+  if (!schicht_id) return toast('Schicht-ID fehlt (bitte einmal synchronisieren).', true);
+  if (!(api.action && api.action.run)) return toast('App bitte komplett neu starten (npm start), nicht nur neu laden.', true);
   try {
-    await call(api.action.run('schicht-eintragen', { schicht_id }));
-    toast('Eingetragen.');
+    const r = await call(api.action.run('schicht-eintragen', { schicht_id }));
+    toast(r && r.note ? r.note : 'Eingetragen.');
     await runSyncQuiet();
     showSchichtplaene();
   } catch (e) {
-    toast(e.message, true);
+    console.error('schicht-eintragen', e);
+    toast(e.message || 'Eintragen fehlgeschlagen.', true);
   }
 }
 async function schichtAus(eintrag_id) {
+  if (!eintrag_id) return toast('Eintrag-ID fehlt.', true);
+  if (!(api.action && api.action.run)) return toast('App bitte komplett neu starten (npm start).', true);
   try {
     await call(api.action.run('schicht-austragen', { eintrag_id }));
     toast('Ausgetragen.');
     await runSyncQuiet();
     showSchichtplaene();
   } catch (e) {
-    toast(e.message, true);
+    console.error('schicht-austragen', e);
+    toast(e.message || 'Austragen fehlgeschlagen.', true);
   }
 }
 async function tauschAnfrage(von_eintrag_id) {
