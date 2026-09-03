@@ -139,6 +139,22 @@ ipcMain.handle('report:summary', async (_e, { year } = {}) => {
   }
 });
 
+ipcMain.handle('report:salden', async () => {
+  try {
+    return ok(await client().salden());
+  } catch (e) {
+    return fail(e);
+  }
+});
+
+ipcMain.handle('report:kontenblatt', async (_e, { konto }) => {
+  try {
+    return ok(await client().kontenblatt(konto));
+  } catch (e) {
+    return fail(e);
+  }
+});
+
 ipcMain.handle('action:run', async (_e, { name, body }) => {
   try {
     return ok(await client().action(name, body));

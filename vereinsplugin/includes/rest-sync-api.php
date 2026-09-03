@@ -269,6 +269,29 @@ add_action( 'rest_api_init', function () {
 		'args'                => array( 'year' => array( 'type' => 'integer', 'required' => false ) ),
 	) );
 
+	register_rest_route( VP_SYNC_API_NS, '/report/salden', array(
+		'methods'             => 'GET',
+		'permission_callback' => $cap( 'jb_view_journal' ),
+		'callback'            => function () {
+			return rest_ensure_response( array(
+				'salden' => function_exists( 'vp_doppik_salden' ) ? vp_doppik_salden() : array(),
+				'map'    => function_exists( 'vp_doppik_map' ) ? vp_doppik_map() : array(),
+			) );
+		},
+	) );
+
+	register_rest_route( VP_SYNC_API_NS, '/report/kontenblatt', array(
+		'methods'             => 'GET',
+		'permission_callback' => $cap( 'jb_view_journal' ),
+		'callback'            => function ( WP_REST_Request $r ) {
+			if ( ! function_exists( 'vp_doppik_kontenblatt' ) ) {
+				return new WP_Error( 'no_fn', 'Doppik-Modul nicht geladen.', array( 'status' => 400 ) );
+			}
+			return rest_ensure_response( vp_doppik_kontenblatt( (string) $r->get_param( 'konto' ) ) );
+		},
+		'args'                => array( 'konto' => array( 'type' => 'string', 'required' => true ) ),
+	) );
+
 	/* ---- Editierbare Mitglieder-/Vorstands-Bereiche ---- */
 
 	$route = function ( $path, $capname, $fn ) use ( $cap ) {
@@ -870,12 +893,31 @@ function vp_sync_action_auslage_submit( WP_REST_Request $req ) {
 	return rest_ensure_response( array( 'ok' => true, 'id' => (int) $res ) );
 }
 
-/** POST /actions/journal-add  { buchung_datum, betrag, kategorie, beschreibung, konto, sphaere, quelle, gegenpartei, beleg_nr } */
+/**
+ * POST /actions/journal-add
+ *   EÜR-Form:    { buchung_datum, betrag, kategorie, beschreibung, konto, sphaere, quelle, … }
+ *   Doppik-Form: { soll_konto, haben_konto, betrag, datum, text, beleg_nr }
+ */
 function vp_sync_action_journal_add( WP_REST_Request $req ) {
 	if ( ! function_exists( 'jb_journal_add' ) ) {
 		return new WP_Error( 'no_fn', 'Buchhaltungs-Modul nicht geladen.', array( 'status' => 400 ) );
 	}
 	$b = (array) $req->get_json_params();
+
+	if ( ! empty( $b['soll_konto'] ) && ! empty( $b['haben_konto'] ) ) {
+		if ( ! function_exists( 'jb_buchungssatz_add' ) ) {
+			return new WP_Error( 'no_fn', 'Doppik-Modul nicht geladen.', array( 'status' => 400 ) );
+		}
+		$r = jb_buchungssatz_add(
+			$b['soll_konto'], $b['haben_konto'], $b['betrag'] ?? 0,
+			$b['datum'] ?? ( $b['buchung_datum'] ?? '' ), $b['text'] ?? ( $b['beschreibung'] ?? '' ), $b['beleg_nr'] ?? ''
+		);
+		if ( is_wp_error( $r ) ) {
+			return $r;
+		}
+		return rest_ensure_response( array( 'ok' => true, 'id' => (int) $r ) );
+	}
+
 	if ( ! isset( $b['betrag'] ) || '' === (string) $b['betrag'] ) {
 		return new WP_Error( 'bad_req', 'betrag nötig.', array( 'status' => 400 ) );
 	}

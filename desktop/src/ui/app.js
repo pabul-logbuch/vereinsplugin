@@ -267,6 +267,7 @@ function renderNav() {
     if (can('jb_approve_auslagen')) addItem('auslagen_pruefen', 'Auslagen prüfen', { onClick: showAuslagenPruefen });
     if (has('jb_buchungen')) addItem('journal', 'Buchungsjournal', { slug: 'jb_buchungen', onClick: showJournal });
     if (has('jb_buchungen')) addItem('zbon', 'Z-Bon erfassen', { onClick: showZbon });
+    if (has('jb_buchungen')) addItem('kontenblaetter', 'Kontenblätter (Doppik)', { onClick: showKontenblaetter });
     if (has('jb_budgets')) tblItem('jb_budgets', 'Budgets');
     if (has('jb_ruecklagen')) tblItem('jb_ruecklagen', 'Rücklagen');
     if (has('jb_konten')) addItem('kontenplan', 'Kontenplan', { onClick: showKontenplan });
@@ -312,6 +313,8 @@ function rerender() {
   else if (c.name === 'kassenbericht') showKassenbericht();
   else if (c.name === 'kontenplan') showKontenplan();
   else if (c.name === 'zbon') showZbon();
+  else if (c.name === 'kontenblaetter') showKontenblaetter();
+  else if (c.name === 'kontenblatt') showKontenblatt(c.konto);
   else if (c.name === 'auslagen_pruefen') showAuslagenPruefen();
   else if (c.name === 'journal') showJournal();
   else if (c.name === 'mitglieder') showMitglieder();
@@ -1147,6 +1150,71 @@ async function showZbon() {
   }
 }
 
+/* --------------------------------------------------------- Kontenblätter (Doppik) */
+
+async function showKontenblaetter() {
+  state.current = { name: 'kontenblaetter' };
+  renderNav();
+  view.innerHTML = '';
+  view.append(el('h1', {}, 'Kontenblätter (Doppik)'));
+  view.append(el('p', { class: 'sub' }, 'Sicht auf dieselben Daten in Soll/Haben. EÜR und Exporte bleiben unverändert.'));
+  let data;
+  try {
+    data = await call(api.report.salden());
+  } catch (e) {
+    return view.append(el('div', { class: 'note err' }, e.message + ' – online sein und Recht „Buchungsjournal sehen“.'));
+  }
+  const groups = { bestand: 'Bestands-/Geldkonten', einnahme: 'Einnahmen (Erträge)', ausgabe: 'Ausgaben (Aufwand)', '': 'Neutral / Sonstige' };
+  const byTyp = { bestand: [], einnahme: [], ausgabe: [], '': [] };
+  for (const s of data.salden || []) (byTyp[['bestand', 'einnahme', 'ausgabe'].includes(s.typ) ? s.typ : ''] ||= []).push(s);
+  for (const [typ, label] of Object.entries(groups)) {
+    if (!byTyp[typ] || !byTyp[typ].length) continue;
+    view.append(el('h2', {}, label));
+    const t = el('table');
+    t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Konto'), el('th', {}, 'Bezeichnung'),
+      el('th', { style: 'text-align:right' }, 'Soll'), el('th', { style: 'text-align:right' }, 'Haben'), el('th', { style: 'text-align:right' }, 'Saldo'))));
+    const tb = el('tbody');
+    for (const s of byTyp[typ].sort((a, b) => String(a.konto).localeCompare(String(b.konto), 'de', { numeric: true }))) {
+      tb.append(el('tr', { style: 'cursor:pointer', onclick: () => showKontenblatt(s.konto) },
+        el('td', {}, s.konto), el('td', {}, s.name || '—'),
+        el('td', { style: 'text-align:right' }, s.soll ? eur(s.soll) : '—'),
+        el('td', { style: 'text-align:right' }, s.haben ? eur(s.haben) : '—'),
+        el('td', { style: 'text-align:right;font-weight:600' }, eur(s.saldo))));
+    }
+    t.append(tb);
+    view.append(t);
+  }
+  if (!(data.salden || []).length) view.append(el('div', { class: 'note' }, 'Noch keine Buchungen.'));
+}
+
+async function showKontenblatt(konto) {
+  state.current = { name: 'kontenblatt', konto };
+  renderNav();
+  view.innerHTML = '';
+  view.append(el('button', { class: 'ghost small', onclick: showKontenblaetter }, '‹ Alle Konten'));
+  view.append(el('h1', {}, `Kontenblatt ${konto}`));
+  let kb;
+  try {
+    kb = await call(api.report.kontenblatt(konto));
+  } catch (e) {
+    return view.append(el('div', { class: 'note err' }, e.message));
+  }
+  const t = el('table');
+  t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Datum'), el('th', {}, 'Text'),
+    el('th', { style: 'text-align:right' }, 'Soll'), el('th', { style: 'text-align:right' }, 'Haben'), el('th', { style: 'text-align:right' }, 'Saldo'))));
+  const tb = el('tbody');
+  for (const z of kb.zeilen || []) {
+    tb.append(el('tr', { style: z.id ? 'cursor:pointer' : '', onclick: z.id ? () => showDetail('jb_buchungen', z.id) : null },
+      el('td', {}, z.datum || '—'), el('td', {}, z.text || '—'),
+      el('td', { style: 'text-align:right' }, z.soll ? eur(z.soll) : ''),
+      el('td', { style: 'text-align:right' }, z.haben ? eur(z.haben) : ''),
+      el('td', { style: 'text-align:right' }, eur(z.saldo))));
+  }
+  tb.append(el('tr', { style: 'font-weight:700' }, el('td', { colspan: '4' }, 'Endsaldo'), el('td', { style: 'text-align:right' }, eur(kb.endsaldo))));
+  t.append(tb);
+  view.append(t);
+}
+
 /* --------------------------------------------------------- Auslagen prüfen */
 
 async function showAuslagenPruefen() {
@@ -1291,7 +1359,27 @@ function kontoSelect(konten, value, mode = 'alle', attrs = {}) {
   return s;
 }
 
-const jState = { year: '', konto: '', sphaere: '', quelle: '', q: '', panel: null, sortBy: 'datum', sortDir: 'asc', sel: new Set() };
+const jState = { year: '', konto: '', sphaere: '', quelle: '', q: '', panel: null, sortBy: 'datum', sortDir: 'asc', sel: new Set(), view: 'euer' };
+
+const DOPPIK_MAP_DEFAULT = {
+  'Bank KSK': '1200', 'Zettle-Bar': '1000', Bar: '1000', PayPal: '1220',
+  'Zettle-Karte': '1360', Auslage: '1600', Umbuchung: '1360', Manuell: '1200',
+};
+/** Soll/Haben aus einer jb_buchungen-Zeile ableiten (Spiegel von vp_doppik_satz). */
+function doppikSatz(r, map) {
+  map = map || DOPPIK_MAP_DEFAULT;
+  const betrag = Number(r.betrag) || 0;
+  const abs = Math.round(Math.abs(betrag) * 100) / 100;
+  const konto = String(r.konto || '');
+  const gegen = String(r.gegenkonto || '');
+  const geld = gegen || map[r.quelle] || map.Manuell || '1200';
+  let soll;
+  let haben;
+  if (gegen) { soll = konto || geld; haben = gegen; }
+  else if (betrag >= 0) { soll = geld; haben = konto || geld; }
+  else { soll = konto || geld; haben = geld; }
+  return { soll, haben, betrag: abs, datum: r.buchung_datum || '', text: `${r.gegenpartei || ''} – ${r.beschreibung || ''}`.replace(/^ – | – $/, '') };
+}
 
 async function showJournal() {
   state.current = { name: 'journal', slug: 'jb_buchungen' };
@@ -1303,15 +1391,19 @@ async function showJournal() {
   let rows = [];
   let konten = [];
   let ruecklagen = [];
+  let dmap = DOPPIK_MAP_DEFAULT;
   try {
     [rows, konten, ruecklagen] = await Promise.all([
       call(api.data.rows('jb_buchungen', { limit: 5000 })).then((r) => r.rows),
       call(api.data.rows('jb_konten', { limit: 2000 })).then((r) => r.rows).catch(() => []),
       call(api.data.rows('jb_ruecklagen', { limit: 500 })).then((r) => r.rows.filter((x) => String(x.aktiv) !== '0')).catch(() => []),
     ]);
+    const s = await call(api.report.salden()).catch(() => null);
+    if (s && s.map) dmap = { ...DOPPIK_MAP_DEFAULT, ...s.map };
   } catch (e) {
     return view.append(el('div', { class: 'note err' }, e.message));
   }
+  const kmapName = Object.fromEntries((konten || []).map((k) => [String(k.nummer), k.bezeichnung]));
 
   // Aktionen
   jState.sel = new Set();
@@ -1319,7 +1411,10 @@ async function showJournal() {
   acts.append(
     el('button', { class: 'primary small', onclick: () => togglePanel('add', () => journalForm(konten, ruecklagen)) }, '+ Buchung'),
     el('button', { class: 'small', onclick: () => togglePanel('transfer', () => umbuchungForm(konten)) }, '⇄ Umbuchung'),
-    el('button', { class: 'small', onclick: () => togglePanel('csv', () => bankCsvForm(konten)) }, '⇑ Bank-CSV importieren')
+    el('button', { class: 'small', onclick: () => togglePanel('csv', () => bankCsvForm(konten)) }, '⇑ Bank-CSV importieren'),
+    el('span', { style: 'flex:1' }),
+    el('button', { class: 'small' + (jState.view === 'euer' ? ' primary' : ''), onclick: () => { jState.view = 'euer'; draw(); } }, 'EÜR'),
+    el('button', { class: 'small' + (jState.view === 'doppik' ? ' primary' : ''), onclick: () => { jState.view = 'doppik'; draw(); } }, 'Doppik')
   );
   view.append(acts);
   const panelHost = el('div', {});
@@ -1367,11 +1462,10 @@ async function showJournal() {
   const tableHost = el('div', {});
   view.append(tableHost);
 
-  function draw() {
-    const kmap = Object.fromEntries((konten || []).map((k) => [String(k.nummer), k.bezeichnung]));
-    let f = rows.filter((r) => {
+  function filtered() {
+    return rows.filter((r) => {
       if (jState.year && String(r.buchung_datum || '').slice(0, 4) !== jState.year) return false;
-      if (jState.konto && String(r.konto) !== jState.konto) return false;
+      if (jState.konto && String(r.konto) !== jState.konto && String(r.gegenkonto) !== jState.konto) return false;
       if (jState.sphaere && String(r.sphaere) !== jState.sphaere) return false;
       if (jState.q) {
         const hay = `${r.beschreibung} ${r.kategorie} ${r.gegenpartei} ${r.beleg_nr}`.toLowerCase();
@@ -1379,6 +1473,31 @@ async function showJournal() {
       }
       return true;
     });
+  }
+
+  function drawDoppik() {
+    const f = filtered().slice().sort((a, b) => String(a.buchung_datum).localeCompare(String(b.buchung_datum)) || Number(a.id) - Number(b.id));
+    const lbl = (nr) => (nr ? `${nr}${kmapName[nr] ? ' ' + kmapName[nr] : ''}` : '—');
+    const t = el('table');
+    t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Datum'), el('th', {}, 'Soll'), el('th', {}, 'Haben'), el('th', { style: 'text-align:right' }, 'Betrag'), el('th', {}, 'Text'))));
+    const tb = el('tbody');
+    for (const r of f) {
+      const s = doppikSatz(r, dmap);
+      tb.append(el('tr', { style: 'cursor:pointer', onclick: () => showDetail('jb_buchungen', r.id) },
+        el('td', {}, s.datum), el('td', {}, lbl(s.soll)), el('td', {}, lbl(s.haben)),
+        el('td', { style: 'text-align:right' }, eur(s.betrag)), el('td', {}, s.text || '—')));
+    }
+    t.append(tb);
+    tableHost.innerHTML = '';
+    tableHost.append(t);
+    tableHost.append(el('p', { class: 'muted' }, `${f.length} Buchungssatz/-sätze · Ansicht Doppik (Soll/Haben)`));
+  }
+
+  function draw() {
+    renderSelBar();
+    if (jState.view === 'doppik') return drawDoppik();
+    const kmap = kmapName;
+    let f = filtered();
 
     // Laufender Saldo immer chronologisch berechnen …
     const chrono = f.slice().sort((a, b) => String(a.buchung_datum).localeCompare(String(b.buchung_datum)) || Number(a.id) - Number(b.id));
@@ -1480,7 +1599,24 @@ function togglePanel(kind, builder) {
 
 function journalForm(konten, ruecklagen = []) {
   const card = el('div', { class: 'card' });
-  card.append(el('h2', {}, 'Neue Buchung'));
+  const head = el('div', { class: 'row', style: 'justify-content:space-between' });
+  head.append(el('h2', {}, 'Neue Buchung'));
+  const modeBtns = el('div', { class: 'row' });
+  head.append(modeBtns);
+  card.append(head);
+  const body = el('div', {});
+  card.append(body);
+  const setMode = (m) => {
+    modeBtns.innerHTML = '';
+    modeBtns.append(
+      el('button', { type: 'button', class: 'small' + (m === 'betrag' ? ' primary' : ''), onclick: () => setMode('betrag') }, 'Betrag'),
+      el('button', { type: 'button', class: 'small' + (m === 'sh' ? ' primary' : ''), onclick: () => setMode('sh') }, 'Soll-Haben')
+    );
+    body.innerHTML = '';
+    body.append(m === 'sh' ? sollHabenForm(konten) : euerForm());
+  };
+
+  function euerForm() {
   const datum = el('input', { type: 'date', value: new Date().toISOString().slice(0, 10) });
   const betrag = moneyInput('', { placeholder: 'negativ = Ausgabe' });
   const konto = kontoSelect(konten, '', 'kategorie', {
@@ -1524,8 +1660,41 @@ function journalForm(konten, ruecklagen = []) {
       toast(e.message, true);
     }
   });
-  card.append(f);
+  return f;
+  }
+
+  setMode('betrag');
   return card;
+}
+
+function sollHabenForm(konten) {
+  const f = el('form', { class: 'detail' });
+  const datum = el('input', { type: 'date', value: new Date().toISOString().slice(0, 10) });
+  const betrag = moneyInput('', { placeholder: 'Betrag > 0' });
+  const soll = kontoSelect(konten, '', 'alle');
+  const haben = kontoSelect(konten, '', 'alle');
+  const text = el('input', { type: 'text', placeholder: 'Buchungstext' });
+  const beleg = el('input', { type: 'text', placeholder: 'Beleg-Nr (optional)' });
+  f.append('Datum', datum, 'Betrag (€)', betrag, 'Soll (an Konto)', soll, 'Haben (von Konto)', haben, 'Text', text, 'Beleg-Nr', beleg);
+  f.append(el('div', { class: 'form-actions' },
+    el('button', { class: 'primary', type: 'submit' }, 'Buchen'),
+    el('span', { class: 'muted' }, 'Geldkonto↔Erfolgskonto = Einnahme/Ausgabe · Geldkonto↔Geldkonto = Umbuchung')));
+  f.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const amt = parseNum(betrag.value);
+    if (!amt || !soll.value || !haben.value || soll.value === haben.value) return toast('Betrag und zwei verschiedene Konten nötig.', true);
+    try {
+      await call(api.action.run('journal-add', {
+        soll_konto: soll.value, haben_konto: haben.value, betrag: amt, datum: datum.value, text: text.value, beleg_nr: beleg.value,
+      }));
+      toast('Gebucht.');
+      await runSyncQuiet();
+      showJournal();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+  return f;
 }
 
 function umbuchungForm(konten) {

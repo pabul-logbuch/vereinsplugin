@@ -14,7 +14,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_SKR_DB_VERSION', '5' );
+define( 'VP_SKR_DB_VERSION', '6' );
 
 /* =========================================================================
  * Schema
@@ -72,6 +72,20 @@ function vp_skr_maybe_upgrade() {
 	$add( $j, 'gegenpartei', "`gegenpartei` VARCHAR(200) NOT NULL DEFAULT ''" );
 	$add( $j, 'beleg_nr', "`beleg_nr` VARCHAR(20) NOT NULL DEFAULT ''" );
 	$add( $j, 'ruecklage_id', "`ruecklage_id` BIGINT UNSIGNED DEFAULT NULL" );
+	$add( $j, 'gegenkonto', "`gegenkonto` VARCHAR(10) NOT NULL DEFAULT ''" );
+
+	// Geldkonten für die Doppik-Ansicht sicherstellen (idempotent).
+	if ( function_exists( 'jb_table_konten' ) ) {
+		foreach ( array(
+			array( '1220', 'PayPal', 'bestand', 'neutral' ),
+			array( '1600', 'Verbindlichkeiten ggü. Mitgliedern (Auslagen)', 'bestand', 'neutral' ),
+		) as $kk ) {
+			$exists = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . jb_table_konten() . ' WHERE nummer = %s', $kk[0] ) );
+			if ( ! $exists ) {
+				$wpdb->insert( jb_table_konten(), array( 'nummer' => $kk[0], 'bezeichnung' => $kk[1], 'typ' => $kk[2], 'sphaere' => $kk[3], 'aktiv' => 1 ) );
+			}
+		}
+	}
 
 	// `quelle` von ENUM auf VARCHAR erweitern, damit weitere Geld-Töpfe
 	// (z. B. „PayPal", „Umbuchung") ohne Schema-Änderung möglich sind.
@@ -270,6 +284,7 @@ function vp_render_buchhaltung_hub() {
 		'ruecklagen' => __( 'Rücklagen', 'vereinsplugin' ),
 		'konten'     => __( 'Kontenplan', 'vereinsplugin' ),
 		'bestaende'  => __( 'Bestände', 'vereinsplugin' ),
+		'doppik'     => __( 'Doppik', 'vereinsplugin' ),
 	);
 	if ( ! isset( $tabs[ $view ] ) ) {
 		$view = 'journal';
@@ -308,6 +323,9 @@ function vp_render_buchhaltung_hub() {
 			break;
 		case 'bestaende':
 			echo vp_bh_bestaende(); // phpcs:ignore
+			break;
+		case 'doppik':
+			echo function_exists( 'vp_bh_doppik' ) ? vp_bh_doppik() : ''; // phpcs:ignore
 			break;
 		default:
 			echo vp_bh_journal(); // phpcs:ignore

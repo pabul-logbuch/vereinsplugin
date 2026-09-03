@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('api', {
   me: () => invoke('me:get'),
   report: {
     summary: (year) => invoke('report:summary', { year }),
+    salden: () => invoke('report:salden'),
+    kontenblatt: (konto) => invoke('report:kontenblatt', { konto }),
   },
   action: {
     run: (name, body) => invoke('action:run', { name, body }),

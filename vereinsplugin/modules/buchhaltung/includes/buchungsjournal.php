@@ -24,6 +24,13 @@ function jb_journal_add(array $data): int {
         $row['konto']       = sanitize_text_field($data['konto'] ?? '');
         $row['sphaere']     = sanitize_text_field($data['sphaere'] ?? '');
         $row['gegenpartei'] = sanitize_text_field($data['gegenpartei'] ?? '');
+        static $has_gk = null;
+        if ($has_gk === null) {
+            $has_gk = in_array('gegenkonto', (array) $wpdb->get_col('SHOW COLUMNS FROM ' . jb_table_journal()), true);
+        }
+        if ($has_gk) {
+            $row['gegenkonto'] = sanitize_text_field($data['gegenkonto'] ?? '');
+        }
         $beleg_nr = sanitize_text_field($data['beleg_nr'] ?? '');
         if ($beleg_nr === '' && function_exists('jb_next_beleg_nr')) {
             $beleg_nr = jb_next_beleg_nr(substr((string) $row['buchung_datum'], 0, 4));

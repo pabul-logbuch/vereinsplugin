@@ -70,6 +70,14 @@ class SyncClient {
     return this._req('GET', '/report/summary', { query: year ? { year } : {} });
   }
 
+  salden() {
+    return this._req('GET', '/report/salden');
+  }
+
+  kontenblatt(konto) {
+    return this._req('GET', '/report/kontenblatt', { query: { konto } });
+  }
+
   /** Aktions-Endpunkte: JSON-Body. */
   action(name, body) {
     return this._req('POST', `/actions/${name}`, { json: body || {} });

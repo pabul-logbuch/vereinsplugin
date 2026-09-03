@@ -181,6 +181,7 @@ const T = {
         ],
       },
       konto: { label: 'Konto (SKR 49)', type: 'select', from: KONTO_FROM },
+      gegenkonto: { label: 'Gegenkonto (Umbuchung)', type: 'select', from: KONTO_FROM },
       sphaere: { label: 'Sphäre', type: 'select', options: SPHAEREN },
       gegenpartei: { label: 'Gegenpartei', type: 'datalist' },
       beleg_referenz: { label: 'Beleg-Nr' },
