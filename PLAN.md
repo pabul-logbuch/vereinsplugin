@@ -175,3 +175,65 @@ Noch ohne Frontend-Pendant, bis dahin als ausgeblendete Admin-Seiten erreichbar:
   Stage 2a final gelöst; Stage 1 kann optisch uneinheitlich wirken.
 - **PWA/Service-Worker** von ProtokollPro erwartet HTTPS; Manifest-Name generisch
   setzen (Stage 2).
+
+---
+
+## v0.7.0 – Sync-REST-API + Offline-Desktop-App
+
+**Plugin:** neue `includes/rest-sync-api.php` – Namespace `vereinsplugin/v1`,
+Auth über WordPress Application Passwords, Rechte `vp_manage_members` /
+`manage_options`.
+
+- `GET /meta` – sync-bare Tabellen + Spalten + PK.
+- `GET /snapshot?since=` – Voll-/Delta-Abzug aller ~30 Tabellen + Pseudo-Tabelle
+  `wp_members` (User + `vp_*`-usermeta). Jede Zeile trägt `_rev`
+  (`hash('crc32b', kanonische Feldserialisierung)`).
+- `POST /mutations` – Batch upsert/delete, Last-Write-Wins mit `conflicts[]` bei
+  `base_rev`-Mismatch; Spalten-Allowlist aus `SHOW COLUMNS`.
+- `GET /nextcloud/users|groups`, `POST /nextcloud/sync`, `GET|POST /nextcloud/beleg`
+  – Proxy auf die bestehenden `vp_nc_*` / `JB_Nextcloud`-Funktionen; die App
+  braucht keinen Nextcloud-Zugang.
+
+Registry `vp_sync_tables()` ist die einzige Definitionsstelle. Eingebunden in
+`vereinsplugin.php` direkt nach `nextcloud-sync.php`.
+
+**Desktop-App:** `desktop/` (Electron + better-sqlite3, Vanilla-JS-Renderer).
+Offline-first Spiegel aller Vereinsdaten; Phase 1 mit Bearbeiten für Mitglieder +
+Buchhaltung (`jb_auslagen/buchungen/budgets/ruecklagen/konten`, `vp_antraege`),
+Rest Nur-Lesen. Konflikt-Ansicht, „Vollabgleich" für serverseitige Löschungen.
+Zugangsdaten via OS-Keychain; lokale SQLite unverschlüsselt → FileVault/BitLocker
+Pflicht. Sync-Kern (`src/sync/`) per `node --test` abgedeckt (revision-Hash ==
+PHP `crc32b`). Setup + Grenzen in `desktop/README.md`.
+
+**Offen (Phase 2):** Bearbeiten für `pp_*` / `wl_*`, Beleg-Up/Download in der
+Oberfläche, gepackte Installer (macOS zuerst), Auto-Sync-Intervall.
+
+---
+
+## v0.9.0 – Nutzerorientierte Bereichsstruktur (App + Plugin gleich)
+
+Navigation in **App und Mitgliederbereich identisch** gegliedert:
+
+- **Mitglied**: Wunschliste · Abstimmung · Sitzungen & Protokolle · Schichtpläne ·
+  Auslage einreichen · Meine Auslagen · Kassenbericht · Mein Profil
+- **Vorstand · Mitgliederverwaltung**: Anträge · Mitglieder · **Newsletter**
+- **Vorstand · Kassier:in** (`jb_view_journal` ODER `jb_approve_auslagen`):
+  Auslagen prüfen · Buchhaltung/Journal · Budgets & Rücklagen · Kontenplan
+- **Vorstand · Sonstige**: Wunschlistenverwaltung · Schichtplanverwaltung ·
+  Protokollverwaltung · Nextcloud-Sync · Veranstaltungen
+- **Admin** (nur App, `manage_options`): Rohlisten aller Tabellen im generischen
+  Editor
+- **System**: Konflikte · Einstellungen
+
+**Newsletter** (`includes/newsletter.php`): Tabelle `vp_newsletter`, Versand als
+BCC-Blöcke per `wp_mail()`, Frontend-Sektion + REST `POST /actions/newsletter-send`.
+
+**Neue REST-Aktionen** (`includes/rest-sync-api.php`, cap-geprüft, `$wpdb`):
+`wunsch-save/-delete`, `vote-cast/-retract`, `schicht-eintragen/-austragen`,
+`protokoll-save`, `top-save/-delete`. `/snapshot` liefert für `wl_votes` /
+`wl_shift_eintragungen` die eigenen Einträge auch ohne Vorstandsrecht;
+`/report/summary` ist für alle angemeldeten Mitglieder offen.
+
+**App**: `renderNav` komplett neu (Gruppenbaum, rechteabhängig); neue Ansichten
+Wunschliste/Abstimmung (Karten + 1–5-Voting + Veto), Protokolle (+ Verwaltung mit
+TOP-Editor), Schichtpläne (ein-/austragen), Newsletter.

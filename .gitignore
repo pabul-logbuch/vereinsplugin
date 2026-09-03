@@ -10,6 +10,12 @@
 /*.xip
 /Xcode*.xip
 
+# Desktop-App (Electron)
+/desktop/node_modules/
+/desktop/dist/
+/desktop/out/
+/desktop/*.sqlite
+
 # OS / Editor
 .DS_Store
 Thumbs.db

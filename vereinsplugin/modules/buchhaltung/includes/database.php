@@ -38,7 +38,7 @@ function jb_create_tables() {
         betrag          DECIMAL(10,2) NOT NULL COMMENT 'Positiv = Einnahme, Negativ = Ausgabe',
         kategorie       VARCHAR(100) NOT NULL,
         beschreibung    TEXT NOT NULL,
-        quelle          ENUM('Bank KSK','Zettle-Bar','Zettle-Karte','Auslage','Manuell') DEFAULT 'Manuell',
+        quelle          VARCHAR(20) NOT NULL DEFAULT 'Manuell',
         beleg_referenz  VARCHAR(255) DEFAULT '',
         beleg_pfad      VARCHAR(500) DEFAULT '',
         auslage_id      BIGINT UNSIGNED DEFAULT NULL,

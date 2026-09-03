@@ -117,15 +117,8 @@ function vp_member_sections() {
 			'cap'    => 'read',
 			'render' => 'vp_render_dashboard_section',
 		),
-		'wuensche' => array(
-			'label'     => __( 'Wünsche', 'vereinsplugin' ),
-			'group'     => 'mitglied',
-			'cap'       => 'wl_manage_wishes',
-			'shortcode' => 'wunschliste_verwaltung',
-			'need_sc'   => true,
-		),
 		'abstimmung' => array(
-			'label'     => __( 'Abstimmung', 'vereinsplugin' ),
+			'label'     => __( 'Wunschliste & Abstimmung', 'vereinsplugin' ),
 			'group'     => 'mitglied',
 			'cap'       => 'wl_manage_wishes',
 			'shortcode' => 'wunschliste_voting',
@@ -141,11 +134,10 @@ function vp_member_sections() {
 			'shortcode' => 'schichtplan',
 		),
 		'protokolle' => array(
-			'label'     => __( 'Sitzungen & Protokolle', 'vereinsplugin' ),
-			'group'     => 'mitglied',
-			'cap'       => 'pp_manage',
-			'shortcode' => 'protokollpro_mitgliederbereich',
-			'need_sc'   => true,
+			'label'  => __( 'Sitzungen & Protokolle', 'vereinsplugin' ),
+			'group'  => 'mitglied',
+			'cap'    => 'pp_manage',
+			'render' => 'vp_render_protokoll_bereich',
 		),
 		'auslage' => array(
 			'label'     => __( 'Auslage einreichen', 'vereinsplugin' ),
@@ -161,6 +153,13 @@ function vp_member_sections() {
 			'shortcode' => 'jb_meine_auslagen',
 			'need_sc'   => true,
 		),
+		'kassenbericht' => array(
+			'label'     => __( 'Kassenbericht', 'vereinsplugin' ),
+			'group'     => 'mitglied',
+			'cap'       => 'read',
+			'shortcode' => 'jb_kassenbericht',
+			'need_sc'   => true,
+		),
 		'profil' => array(
 			'label'  => __( 'Mein Profil', 'vereinsplugin' ),
 			'group'  => 'mitglied',
@@ -168,54 +167,73 @@ function vp_member_sections() {
 			'render' => 'vp_render_profile_section',
 		),
 
-		/* ---- Vorstand ---- */
+		/* ---- Vorstand · Mitgliederverwaltung ---- */
 
 		'antraege' => array(
-			'label'  => __( 'Anträge', 'vereinsplugin' ),
-			'group'  => 'vorstand',
+			'label'  => __( 'Mitgliedsanträge', 'vereinsplugin' ),
+			'group'  => 'vorstand_mv',
 			'cap'    => 'vp_manage_members',
 			'render' => 'vp_render_antraege_section',
 		),
 		'mitglieder' => array(
 			'label'  => __( 'Mitglieder', 'vereinsplugin' ),
-			'group'  => 'vorstand',
+			'group'  => 'vorstand_mv',
 			'cap'    => 'vp_manage_members',
 			'render' => 'vp_render_members_section',
 		),
-		'nextcloud' => array(
-			'label'  => __( 'Nextcloud-Sync', 'vereinsplugin' ),
-			'group'  => 'vorstand',
+		'newsletter' => array(
+			'label'  => __( 'Newsletter', 'vereinsplugin' ),
+			'group'  => 'vorstand_mv',
 			'cap'    => 'vp_manage_members',
-			'render' => 'vp_render_nextcloud_section',
+			'render' => 'vp_render_newsletter_section',
 		),
+
+		/* ---- Vorstand · Kassier:in ---- */
+
 		'auslagen_pruefen' => array(
 			'label'  => __( 'Auslagen prüfen', 'vereinsplugin' ),
-			'group'  => 'vorstand',
+			'group'  => 'vorstand_kasse',
 			'cap'    => 'jb_approve_auslagen',
 			'render' => 'vp_render_auslagen_pruefen_section',
 		),
-		'kasse' => array(
-			'label'     => __( 'Kassenbericht', 'vereinsplugin' ),
-			'group'     => 'vorstand',
-			'cap'       => 'jb_view_journal',
-			'shortcode' => 'jb_kassenbericht',
-			'need_sc'   => true,
-		),
-		'budgets' => array(
-			'label'  => __( 'Budgets', 'vereinsplugin' ),
-			'group'  => 'vorstand',
-			'cap'    => 'jb_view_journal',
-			'render' => 'vp_render_budgets_section',
-		),
 		'buchhaltung' => array(
-			'label'  => __( 'Buchhaltung', 'vereinsplugin' ),
-			'group'  => 'vorstand',
+			'label'  => __( 'Buchhaltung / Journal', 'vereinsplugin' ),
+			'group'  => 'vorstand_kasse',
 			'cap'    => 'jb_view_journal',
 			'render' => function_exists( 'vp_render_buchhaltung_hub' ) ? 'vp_render_buchhaltung_hub' : 'vp_render_backend_links_buchhaltung',
 		),
+		'budgets' => array(
+			'label'  => __( 'Budgets & Rücklagen', 'vereinsplugin' ),
+			'group'  => 'vorstand_kasse',
+			'cap'    => 'jb_view_journal',
+			'render' => 'vp_render_budgets_section',
+		),
+
+		/* ---- Vorstand · Sonstige ---- */
+
+		'wuensche' => array(
+			'label'     => __( 'Wunschlistenverwaltung', 'vereinsplugin' ),
+			'group'     => 'vorstand_sonstige',
+			'cap'       => 'wl_manage_wishes',
+			'shortcode' => 'wunschliste_verwaltung',
+			'need_sc'   => true,
+		),
+		'schichten_verwaltung' => array(
+			'label'     => __( 'Schichtplanverwaltung', 'vereinsplugin' ),
+			'group'     => 'vorstand_sonstige',
+			'cap'       => 'wl_manage_wishes',
+			'shortcode' => 'schichtplan_verwaltung',
+			'need_sc'   => true,
+		),
+		'nextcloud' => array(
+			'label'  => __( 'Nextcloud-Sync', 'vereinsplugin' ),
+			'group'  => 'vorstand_sonstige',
+			'cap'    => 'vp_manage_members',
+			'render' => 'vp_render_nextcloud_section',
+		),
 		'veranstaltungen' => array(
 			'label'  => __( 'Veranstaltungen', 'vereinsplugin' ),
-			'group'  => 'vorstand',
+			'group'  => 'vorstand_sonstige',
 			'cap'    => 'jbf_edit_events',
 			'render' => 'vp_render_backend_links_events',
 		),
@@ -272,6 +290,10 @@ function vp_shortcode_member_area( $atts ) {
 	}
 
 	$active = isset( $_GET['vp_tab'] ) ? sanitize_key( wp_unslash( $_GET['vp_tab'] ) ) : $atts['start'];
+	// ProtokollPro-Unterlinks setzen nur ?pp_view – dann trotzdem im Protokoll-Tab bleiben.
+	if ( isset( $_GET['pp_view'] ) && isset( $sections['protokolle'] ) ) {
+		$active = 'protokolle';
+	}
 	if ( ! isset( $sections[ $active ] ) ) {
 		$active = array_key_first( $sections );
 	}
@@ -308,7 +330,12 @@ function vp_shortcode_member_area( $atts ) {
 		<div class="vp-app-body">
 			<nav class="vp-app-nav" id="vp-app-nav">
 				<?php
-				$groups = array( 'mitglied' => '', 'vorstand' => __( 'Vorstand', 'vereinsplugin' ) );
+				$groups = array(
+					'mitglied'          => '',
+					'vorstand_mv'       => __( 'Vorstand · Mitgliederverwaltung', 'vereinsplugin' ),
+					'vorstand_kasse'    => __( 'Vorstand · Kassier:in', 'vereinsplugin' ),
+					'vorstand_sonstige' => __( 'Vorstand · Sonstige', 'vereinsplugin' ),
+				);
 				foreach ( $groups as $g => $g_label ) {
 					$in_group = array_filter( $sections, function ( $s ) use ( $g ) { return $s['group'] === $g; } );
 					if ( ! $in_group ) {

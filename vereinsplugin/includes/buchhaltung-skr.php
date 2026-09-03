@@ -14,7 +14,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_SKR_DB_VERSION', '3' );
+define( 'VP_SKR_DB_VERSION', '4' );
 
 /* =========================================================================
  * Schema
@@ -71,6 +71,13 @@ function vp_skr_maybe_upgrade() {
 	$add( $j, 'sphaere', "`sphaere` VARCHAR(16) NOT NULL DEFAULT ''" );
 	$add( $j, 'gegenpartei', "`gegenpartei` VARCHAR(200) NOT NULL DEFAULT ''" );
 	$add( $j, 'beleg_nr', "`beleg_nr` VARCHAR(20) NOT NULL DEFAULT ''" );
+
+	// `quelle` von ENUM auf VARCHAR erweitern, damit weitere Geld-Töpfe
+	// (z. B. „PayPal", „Umbuchung") ohne Schema-Änderung möglich sind.
+	$q = $wpdb->get_row( "SHOW COLUMNS FROM `{$j}` LIKE 'quelle'" );
+	if ( $q && 0 === stripos( (string) $q->Type, 'enum' ) ) {
+		$wpdb->query( "ALTER TABLE `{$j}` MODIFY COLUMN `quelle` VARCHAR(20) NOT NULL DEFAULT 'Manuell'" );
+	}
 	if ( function_exists( 'jb_table_auslagen' ) ) {
 		$a = jb_table_auslagen();
 		$add( $a, 'konto', "`konto` VARCHAR(10) NOT NULL DEFAULT ''" );

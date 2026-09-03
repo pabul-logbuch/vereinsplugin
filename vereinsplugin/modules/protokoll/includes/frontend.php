@@ -20,6 +20,9 @@ defined('ABSPATH') || exit;
 function pp_front_url($args = [], $anchor = '') {
     $base = get_permalink();
     if (!$base) $base = home_url(add_query_arg([], $_SERVER['REQUEST_URI'] ?? '/'));
+    // Der Kern-Mitgliederbereich hängt hier ?vp_tab=… an, damit interne
+    // ProtokollPro-Links den richtigen Tab aktiv halten.
+    $base = apply_filters('pp_front_base_url', $base);
     $url = add_query_arg($args, $base);
     return $anchor ? $url . '#' . $anchor : $url;
 }

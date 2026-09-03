@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+    <title>Vereinssync</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside id="nav">
+        <div class="brand">Vereinssync</div>
+        <div id="nav-status" class="nav-status">nicht verbunden</div>
+        <nav id="nav-list"></nav>
+        <div class="nav-foot">
+          <button id="btn-sync" class="primary">Synchronisieren</button>
+          <button id="btn-reconcile" class="ghost">Vollabgleich</button>
+        </div>
+      </aside>
+      <main id="view"></main>
+    </div>
+    <div id="toast" hidden></div>
+
+    <script src="fieldmaps.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
