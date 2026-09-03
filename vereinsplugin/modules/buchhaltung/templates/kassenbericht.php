@@ -48,7 +48,7 @@ $base = get_permalink() ?: remove_query_arg( 'year' );
 				<tr><td><?php esc_html_e( 'Genehmigt, noch nicht ausgezahlt', 'vereinsplugin' ); ?></td><td style="text-align:right">&minus;<?php echo esc_html( $euro( $d['offene_auslagen'] ) ); ?></td></tr>
 
 				<tr><th colspan="2">4. <?php esc_html_e( 'Rücklagen für wiederkehrende Kosten', 'vereinsplugin' ); ?></th></tr>
-				<tr><td><?php esc_html_e( 'Rücklagenbedarf bis heute', 'vereinsplugin' ); ?></td><td style="text-align:right">&minus;<?php echo esc_html( $euro( $d['ruecklagen'] ) ); ?></td></tr>
+				<tr><td><?php echo esc_html( sprintf( /* translators: %d = months */ __( 'Rücklagenbedarf inkl. %d Monate Vorausplanung', 'vereinsplugin' ), (int) get_option( 'jb_ruecklagen_horizont_monate', 9 ) ) ); ?></td><td style="text-align:right">&minus;<?php echo esc_html( $euro( $d['ruecklagen'] ) ); ?></td></tr>
 
 				<tr><th colspan="2">5. <?php esc_html_e( 'Verplantes Budget', 'vereinsplugin' ); ?></th></tr>
 				<tr><td><?php esc_html_e( 'Noch reserviert (Rest)', 'vereinsplugin' ); ?></td><td style="text-align:right">&minus;<?php echo esc_html( $euro( $d['verplantes'] ) ); ?></td></tr>

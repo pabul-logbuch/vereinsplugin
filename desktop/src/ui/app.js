@@ -847,7 +847,7 @@ async function showKassenbericht(year) {
     line('Kontostand gesamt', d.kontostand, true);
     line('Getränke-Warenwert', d.getraenke_wert);
     line('− Offene Auslagen (genehmigt)', -d.offene_auslagen);
-    line('− Rücklagenbedarf bis heute', -d.ruecklagen);
+    line(`− Rücklagenbedarf (inkl. ${d.ruecklagen_horizont ?? 9} Mon. Vorausplanung)`, -d.ruecklagen);
     line('− Verplantes Budget (Rest)', -d.verplantes);
     line('= Freies / verfügbares Budget', d.frei, true);
     view.append(el('div', { class: 'card' }, kv));
@@ -856,18 +856,19 @@ async function showKassenbericht(year) {
     // Rücklagen-Aufschlüsselung aus dem lokalen Spiegel
     try {
       const rl = (await call(api.data.rows('jb_ruecklagen', { limit: 500 }))).rows.filter((x) => String(x.aktiv) !== '0');
+      const horizont = d.ruecklagen_horizont ?? 9;
       if (rl.length) {
         view.append(el('h2', {}, 'Rücklagen im Detail'));
         const t = el('table');
         t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Bezeichnung'), el('th', { style: 'text-align:right' }, 'Betrag/Fällig.'),
-          el('th', {}, 'Intervall'), el('th', {}, 'Letzte Zahlung'), el('th', { style: 'text-align:right' }, 'Rücklage heute'))));
+          el('th', {}, 'Intervall'), el('th', {}, 'Letzte Zahlung'), el('th', { style: 'text-align:right' }, `Bedarf (+${horizont} Mon.)`))));
         const tb = el('tbody');
         let sum = 0;
         for (const r of rl) {
           const betrag = Number(r.betrag) || 0;
           const iv = Math.max(1, Number(r.intervall_monate) || 12);
           const monate = r.letzte_zahlung ? Math.max(0, Math.floor((Date.now() - Date.parse(r.letzte_zahlung)) / (30.44 * 864e5))) : 0;
-          const heute = Math.min(betrag, (betrag / iv) * monate);
+          const heute = Math.min(betrag, (betrag / iv) * (monate + horizont));
           sum += heute;
           tb.append(el('tr', { style: 'cursor:pointer', onclick: () => showDetail('jb_ruecklagen', r.id) },
             el('td', {}, r.bezeichnung), el('td', { style: 'text-align:right' }, eur(betrag)),

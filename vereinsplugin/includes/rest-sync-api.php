@@ -1031,6 +1031,7 @@ function vp_sync_report_summary( WP_REST_Request $req ) {
 			'getraenke_wert'  => round( (float) ( $d['getraenke_wert'] ?? 0 ), 2 ),
 			'offene_auslagen' => round( (float) ( $d['offene_auslagen'] ?? 0 ), 2 ),
 			'ruecklagen'      => round( (float) ( $d['ruecklagen'] ?? 0 ), 2 ),
+			'ruecklagen_horizont' => (int) get_option( 'jb_ruecklagen_horizont_monate', 9 ),
 			'verplantes'      => round( (float) ( $d['verplantes'] ?? 0 ), 2 ),
 			'frei'            => round( (float) ( $d['frei'] ?? 0 ), 2 ),
 		);

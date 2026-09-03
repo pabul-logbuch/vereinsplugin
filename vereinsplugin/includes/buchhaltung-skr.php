@@ -431,22 +431,35 @@ function vp_bh_ruecklagen() {
 			$msg = __( 'Rücklage gelöscht.', 'vereinsplugin' );
 		}
 	}
+	if ( $can_edit && isset( $_POST['vp_rl_horizont'] ) && check_admin_referer( 'vp_bh_rl', 'vp_rl_nonce' ) ) {
+		update_option( 'jb_ruecklagen_horizont_monate', max( 0, min( 24, (int) $_POST['horizont'] ) ) );
+		$msg = __( 'Vorausplanung gespeichert.', 'vereinsplugin' );
+	}
 
+	$horizont = max( 0, (int) get_option( 'jb_ruecklagen_horizont_monate', 9 ) );
 	$rl = jb_ruecklagen_get_all();
 
 	ob_start();
 	if ( $msg ) {
 		echo '<div class="vp-note">' . esc_html( $msg ) . '</div>';
 	}
-	echo '<p class="vp-muted">' . esc_html__( 'Wiederkehrende Kosten (Versicherung, GEMA, DGUV …). Pro Monat wird anteilig zurückgelegt. „Letzte Zahlung“ nach jeder echten Zahlung aktualisieren.', 'vereinsplugin' ) . '</p>';
-	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Bezeichnung', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Betrag/Fällig.', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Intervall', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Letzte Zahlung', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Bedarf/Monat', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Rücklage heute', 'vereinsplugin' ) . '</th>' . ( $can_edit ? '<th></th>' : '' ) . '</tr></thead><tbody>';
+	echo '<p class="vp-muted">' . esc_html__( 'Wiederkehrende Kosten (Versicherung, GEMA, DGUV …). Pro Monat wird anteilig zurückgelegt. „Letzte Zahlung“ zieht bei einer zugeordneten Buchung automatisch nach.', 'vereinsplugin' ) . '</p>';
+
+	if ( $can_edit ) {
+		echo '<form method="post" class="vp-form" style="margin:8px 0 16px">' . wp_nonce_field( 'vp_bh_rl', 'vp_rl_nonce', true, false );
+		echo '<label>' . esc_html__( 'Vorausplanung (Monate)', 'vereinsplugin' )
+			. ' <input type="number" name="horizont" min="0" max="24" value="' . (int) $horizont . '" style="width:70px">'
+			. ' <button class="vp-btn" name="vp_rl_horizont" value="1">' . esc_html__( 'Übernehmen', 'vereinsplugin' ) . '</button></label>';
+		echo ' <span class="vp-muted">' . esc_html__( 'Der Bedarf wird für so viele Monate im Voraus zurückgelegt.', 'vereinsplugin' ) . '</span></form>';
+	}
+
+	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Bezeichnung', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Betrag/Fällig.', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Intervall', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Letzte Zahlung', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Bedarf/Monat', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html( sprintf( /* translators: %d = months */ __( 'Bedarf (+%d Mon.)', 'vereinsplugin' ), $horizont ) ) . '</th>' . ( $can_edit ? '<th></th>' : '' ) . '</tr></thead><tbody>';
 	$sum = 0.0;
 	foreach ( $rl as $r ) {
 		$r = (object) $r;
 		$iv = max( 1, (int) $r->intervall_monate );
-		$pm = (float) $r->betrag / $iv;
-		$monate = $r->letzte_zahlung ? max( 0, (int) floor( ( time() - strtotime( $r->letzte_zahlung ) ) / 2592000 ) ) : 0;
-		$heute = min( (float) $r->betrag, $pm * $monate );
+		$pm = isset( $r->monatlicher_bedarf ) ? (float) $r->monatlicher_bedarf : ( (float) $r->betrag / $iv );
+		$heute = isset( $r->ruecklage_jetzt ) ? (float) $r->ruecklage_jetzt : 0.0;
 		$sum  += $heute;
 
 		$edit_cell = '';

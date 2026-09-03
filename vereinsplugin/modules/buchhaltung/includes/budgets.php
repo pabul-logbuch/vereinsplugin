@@ -61,6 +61,10 @@ function jb_ruecklagen_get_all(): array {
         "SELECT * FROM " . jb_table_ruecklagen() . " WHERE aktiv = 1 ORDER BY id ASC", ARRAY_A
     ) ?: [];
 
+    // Vorausplanung: der Bedarf wird für die nächsten N Monate schon
+    // zurückgelegt (Einnahmen kommen nur ein paar Mal im Jahr).
+    $horizont = max(0, (int) get_option('jb_ruecklagen_horizont_monate', 9));
+
     foreach ($rows as &$r) {
         $betrag      = (float)$r['betrag'];
         $intervall   = max(1, (int)$r['intervall_monate']);
@@ -70,9 +74,12 @@ function jb_ruecklagen_get_all(): array {
         $monate  = max(0, (time() - $letzte) / (30.44 * 86400));
         $monate  = floor($monate);
 
-        $r['monatlicher_bedarf'] = round($pro_monat, 2);
-        $r['monate_seit_zahlung']= (int)$monate;
-        $r['ruecklage_jetzt']    = round(min($betrag, $pro_monat * $monate), 2);
+        $r['monatlicher_bedarf']  = round($pro_monat, 2);
+        $r['monate_seit_zahlung'] = (int)$monate;
+        $r['horizont_monate']     = $horizont;
+        $r['ruecklage_bis_heute'] = round(min($betrag, $pro_monat * $monate), 2);
+        // „Bedarf": was bis in `horizont` Monaten zurückgelegt sein muss.
+        $r['ruecklage_jetzt']     = round(min($betrag, $pro_monat * ($monate + $horizont)), 2);
         $r['naechste_faelligkeit']= date('Y-m-d', strtotime('+' . $intervall . ' months', $letzte));
     }
     return $rows;
