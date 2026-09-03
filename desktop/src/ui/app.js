@@ -48,6 +48,8 @@ function el(tag, attrs = {}, ...kids) {
     if (kid == null) continue;
     n.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
   }
+  // Alle „detail"-Formulare: Enter springt zum nächsten Feld.
+  if (tag === 'form' && String(attrs.class || '').includes('detail')) enterAdvances(n);
   return n;
 }
 
@@ -69,6 +71,37 @@ async function call(promise) {
 }
 
 const fmt = (v) => (v === null || v === undefined || v === '' ? '—' : String(v));
+
+/** Deutsche Zahleneingabe parsen: „1.234,56" / „12,50" / „12.5" → Number. */
+function parseNum(s) {
+  s = String(s ?? '').trim().replace(/[^\d.,-]/g, '');
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
+}
+/** Zahl mit Komma und 2 Nachkommastellen anzeigen (für Eingabefelder). */
+function fmtNum(v) {
+  if (v === '' || v == null) return '';
+  const n = typeof v === 'number' ? v : parseNum(v);
+  return n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+/** Geldbetrag-Eingabefeld (Text, Komma erlaubt). */
+function moneyInput(value, attrs = {}) {
+  return el('input', { type: 'text', inputmode: 'decimal', value: fmtNum(value), ...attrs });
+}
+/** Enter springt zum nächsten Eingabefeld; im letzten Feld wird abgeschickt. */
+function enterAdvances(form) {
+  if (form.dataset.enterAdv) return;
+  form.dataset.enterAdv = '1';
+  form.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.target.tagName === 'TEXTAREA') return;
+    e.preventDefault();
+    const fields = [...form.querySelectorAll('input, select')].filter((n) => !n.disabled && n.type !== 'hidden' && n.offsetParent !== null);
+    const i = fields.indexOf(e.target);
+    if (i > -1 && i < fields.length - 1) fields[i + 1].focus();
+    else form.requestSubmit ? form.requestSubmit() : form.querySelector('[type=submit]')?.click();
+  });
+}
 
 /* ------------------------------------------------------------- boot */
 
@@ -531,6 +564,10 @@ async function showDetail(slug, pk) {
       input = el('textarea', {});
       input.value = val;
       if (!editable) input.setAttribute('readonly', 'readonly');
+    } else if (cf.type === 'money') {
+      input = moneyInput(val);
+      input.dataset.money = '1';
+      if (!editable) input.setAttribute('readonly', 'readonly');
     } else {
       input = el('input', { type: cf.type || 'text', value: val });
       if (!editable) input.setAttribute('readonly', 'readonly');
@@ -564,7 +601,8 @@ async function showDetail(slug, pk) {
     const fields = {};
     for (const c of Object.keys(inputs)) {
       if (!writable.includes(c)) continue;
-      fields[c] = inputs[c].value;
+      const inp = inputs[c];
+      fields[c] = inp.dataset && inp.dataset.money ? String(parseNum(inp.value)) : inp.value;
     }
     try {
       if (isNew) {
@@ -583,6 +621,7 @@ async function showDetail(slug, pk) {
     }
   });
 
+  enterAdvances(form);
   view.append(form);
 }
 
@@ -1010,13 +1049,20 @@ async function showZbon() {
     .map((k) => [String(k.nummer), `${k.nummer} – ${k.bezeichnung}`]);
   const pick = (val) => selectEl(kOpts.length ? kOpts : [['', '—']], val);
 
+  // Nächste Z-Bon-Nummer aus den bereits gebuchten ZBON-Referenzen.
+  const nums = booked
+    .map((x) => String(x.beleg_referenz || '').match(/^ZBON-(\d+)$/))
+    .filter(Boolean)
+    .map((m) => Number(m[1]));
+  const nextNr = nums.length ? Math.max(...nums) + 1 : 1;
+
   const f = el('form', { class: 'detail' });
-  const nr = el('input', { placeholder: '60' });
+  const nr = el('input', { value: String(nextNr), placeholder: '60' });
   const datum = el('input', { type: 'date', value: new Date().toISOString().slice(0, 10) });
-  const bar = el('input', { type: 'number', step: '0.01', placeholder: 'Zahlungsart Bar' });
-  const karte = el('input', { type: 'number', step: '0.01', placeholder: 'Zahlungsart Karte' });
-  const tip = el('input', { type: 'number', step: '0.01', value: '0', placeholder: 'Trinkgelder' });
-  const spende = el('input', { type: 'number', step: '0.01', value: '0', placeholder: 'Produkt „Spende"' });
+  const bar = moneyInput('', { placeholder: 'Zahlungsart Bar' });
+  const karte = moneyInput('', { placeholder: 'Zahlungsart Karte' });
+  const tip = moneyInput(0, { placeholder: 'Trinkgelder' });
+  const spende = moneyInput(0, { placeholder: 'Produkt „Spende"' });
   const spWeg = selectEl([['bar', 'bar bezahlt'], ['karte', 'per Karte bezahlt']], 'bar');
   const kGetr = pick('4600');
   const kSpende = pick('4200');
@@ -1027,11 +1073,12 @@ async function showZbon() {
     'Trinkgeld', tip, 'Produkt „Spende"', spende, 'Spende bezahlt', spWeg,
     'Konto Getränke', kGetr, 'Konto Spende', kSpende, 'Konto Trinkgeld', kTip
   );
+  enterAdvances(f);
   view.append(el('div', { class: 'card' }, f));
 
   const prev = el('div', {});
   view.append(prev);
-  const num = (x) => parseFloat(String(x.value).replace(',', '.')) || 0;
+  const num = (x) => parseNum(x.value);
 
   function computeLines() {
     const spBar = spWeg.value === 'bar' ? num(spende) : 0;
@@ -1089,6 +1136,7 @@ async function showZbon() {
   }
 
   [nr, bar, karte, tip, spende, spWeg, kGetr, kSpende, kTip].forEach((n) => n.addEventListener('input', drawPreview));
+  f.addEventListener('submit', (e) => { e.preventDefault(); book(); });
   drawPreview();
 
   // Bereits gebuchte Z-Bons
@@ -1433,7 +1481,7 @@ function journalForm(konten, ruecklagen = []) {
   const card = el('div', { class: 'card' });
   card.append(el('h2', {}, 'Neue Buchung'));
   const datum = el('input', { type: 'date', value: new Date().toISOString().slice(0, 10) });
-  const betrag = el('input', { type: 'number', step: '0.01', placeholder: 'negativ = Ausgabe' });
+  const betrag = moneyInput('', { placeholder: 'negativ = Ausgabe' });
   const konto = kontoSelect(konten, '', 'kategorie', {
     onchange: (e) => {
       const k = (konten || []).find((x) => String(x.nummer) === e.target.value);
@@ -1459,7 +1507,7 @@ function journalForm(konten, ruecklagen = []) {
   f.append(actions);
   f.addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const amt = parseFloat(String(betrag.value).replace(',', '.'));
+    const amt = parseNum(betrag.value);
     if (!amt) return toast('Betrag fehlt.', true);
     try {
       await call(api.action.run('journal-add', {
@@ -1483,7 +1531,7 @@ function umbuchungForm(konten) {
   const card = el('div', { class: 'card' });
   card.append(el('h2', {}, 'Umbuchung (zwei Zeilen, neutral)'));
   const datum = el('input', { type: 'date', value: new Date().toISOString().slice(0, 10) });
-  const betrag = el('input', { type: 'number', step: '0.01', min: '0', placeholder: 'Betrag > 0' });
+  const betrag = moneyInput('', { placeholder: 'Betrag > 0' });
   const von = kontoSelect(konten, '', 'bestand');
   const nach = kontoSelect(konten, '', 'bestand');
   const zweck = el('input', { type: 'text', value: 'Umbuchung' });
@@ -1495,7 +1543,7 @@ function umbuchungForm(konten) {
   f.append(actions);
   f.addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const amt = Math.abs(parseFloat(String(betrag.value).replace(',', '.')) || 0);
+    const amt = Math.abs(parseNum(betrag.value));
     if (!amt || !von.value || !nach.value || von.value === nach.value) return toast('Betrag und zwei verschiedene Konten nötig.', true);
     const lbl = (n) => `${n} ${((konten.find((k) => String(k.nummer) === n) || {}).bezeichnung) || ''}`.trim();
     try {
@@ -1531,7 +1579,7 @@ function splitForm(row, konten, ruecklagen = []) {
   const restEl = el('div', { class: 'muted', style: 'margin:6px 0' });
 
   function addPart(preset = {}) {
-    const betrag = el('input', { type: 'number', step: '0.01', value: preset.betrag != null ? preset.betrag : '' });
+    const betrag = moneyInput(preset.betrag != null ? preset.betrag : '');
     const konto = kontoSelect(konten, preset.konto || row.konto || '', 'alle');
     const zweck = el('input', { type: 'text', value: preset.beschreibung || row.beschreibung || '' });
     const rl = ruecklagen.length ? selectEl([['', '– keine –'], ...ruecklagen.map((r) => [String(r.id), r.bezeichnung])], preset.ruecklage_id || '') : null;
@@ -1544,7 +1592,7 @@ function splitForm(row, konten, ruecklagen = []) {
     betrag.addEventListener('input', recalc);
   }
   function recalc() {
-    const sum = parts.reduce((s, p) => s + (parseFloat(String(p.betrag.value).replace(',', '.')) || 0), 0);
+    const sum = parts.reduce((s, p) => s + (parseNum(p.betrag.value)), 0);
     const rest = +(ziel - sum).toFixed(2);
     restEl.textContent = `Summe der Teile: ${eur(sum)} · Rest: ${eur(rest)}` + (Math.abs(rest) < 0.005 ? ' ✓' : '');
     restEl.style.color = Math.abs(rest) < 0.005 ? 'var(--accent)' : 'var(--err-ink)';
@@ -1562,7 +1610,7 @@ function splitForm(row, konten, ruecklagen = []) {
   go.addEventListener('click', async () => {
     const teile = parts
       .map((p) => ({
-        betrag: parseFloat(String(p.betrag.value).replace(',', '.')) || 0,
+        betrag: parseNum(p.betrag.value),
         konto: p.konto.value,
         beschreibung: p.zweck.value,
         ruecklage_id: p.rl ? Number(p.rl.value) || 0 : 0,
@@ -1782,7 +1830,7 @@ function auslageEinreichenForm() {
   const card = el('div', { class: 'card' });
   card.append(el('h2', {}, 'Auslage einreichen'));
   const datum = el('input', { type: 'date', value: new Date().toISOString().slice(0, 10) });
-  const betrag = el('input', { type: 'number', step: '0.01', min: '0' });
+  const betrag = moneyInput('');
   const kat = el('input', { type: 'text', placeholder: 'z. B. Material' });
   const beschr = el('textarea', { placeholder: 'Wofür war die Ausgabe?' });
   const modus = selectEl([['erstattung', 'Erstattung (Geld zurück)'], ['beleg', 'Nur Beleg archivieren']], 'erstattung');
@@ -1794,7 +1842,7 @@ function auslageEinreichenForm() {
   f.append(actions);
   f.addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const amt = parseFloat(String(betrag.value).replace(',', '.'));
+    const amt = parseNum(betrag.value);
     if (!amt || !beschr.value.trim()) return toast('Betrag und Beschreibung nötig.', true);
     let fileArg = null;
     if (file.files && file.files[0]) {
@@ -2066,9 +2114,9 @@ function wunschEdit(x) {
   add('kategorie', 'Kategorie');
   add('beschreibung', 'Beschreibung', 'textarea');
   add('begruendung', 'Begründung', 'textarea');
-  add('betrag', 'Festbetrag (€)', 'input', { type: 'number', step: '0.01' });
-  add('preis_von', 'Preis von (€)', 'input', { type: 'number', step: '0.01' });
-  add('preis_bis', 'Preis bis (€)', 'input', { type: 'number', step: '0.01' });
+  add('betrag', 'Festbetrag (€)', 'input', { type: 'text', inputmode: 'decimal' });
+  add('preis_von', 'Preis von (€)', 'input', { type: 'text', inputmode: 'decimal' });
+  add('preis_bis', 'Preis bis (€)', 'input', { type: 'text', inputmode: 'decimal' });
   inp.status = selectEl([['offen', 'offen'], ['in_bearbeitung', 'in Bearbeitung'], ['erfuellt', 'erfüllt']], x.status || 'offen');
   f.append(el('label', {}, 'Status'), inp.status);
   inp.prioritaet = selectEl([['1', 'hoch'], ['2', 'normal'], ['3', 'niedrig']], String(x.prioritaet || 2));

@@ -11,6 +11,8 @@
  * Feldtypen:
  *  (ohne)          – Textfeld
  *  'number'/'date'/'email'/'textarea'
+ *  'money'         – Betragsfeld, Komma erlaubt (Anzeige „12,50"), beim
+ *                    Speichern nach Punkt normalisiert.
  *  'select'        – Dropdown. Optionen aus `options: [['wert','Text'], …]`
  *                    und/oder dynamisch aus `from: { slug, value, label(r) }`.
  *                    `allowEmpty:false` unterdrückt die Leer-Option.
@@ -59,7 +61,7 @@ const T = {
       vp_plz: { label: 'PLZ' },
       vp_ort: { label: 'Ort' },
       vp_land: { label: 'Land' },
-      vp_beitrag: { label: 'Beitrag (€)', type: 'number' },
+      vp_beitrag: { label: 'Beitrag (€)', type: 'money' },
       vp_beitrag_intervall: { label: 'Intervall' },
       vp_sepa_iban: { label: 'IBAN' },
       vp_sepa_kontoinhaber: { label: 'Kontoinhaber' },
@@ -91,7 +93,7 @@ const T = {
       plz: { label: 'PLZ' },
       ort: { label: 'Ort' },
       land: { label: 'Land' },
-      beitrag: { label: 'Beitrag (€)', type: 'number' },
+      beitrag: { label: 'Beitrag (€)', type: 'money' },
       beitrag_intervall: {
         label: 'Intervall',
         type: 'select',
@@ -121,7 +123,7 @@ const T = {
       id: { label: 'ID', readonly: true },
       user_id: { label: 'Mitglied (User-ID)', type: 'number' },
       ausgabe_datum: { label: 'Ausgabedatum', type: 'date' },
-      betrag: { label: 'Betrag (€)', type: 'number' },
+      betrag: { label: 'Betrag (€)', type: 'money' },
       kategorie: {
         label: 'Kategorie',
         type: 'datalist',
@@ -159,7 +161,7 @@ const T = {
     fields: {
       id: { label: 'ID', readonly: true },
       buchung_datum: { label: 'Datum', type: 'date' },
-      betrag: { label: 'Betrag (€, negativ = Ausgabe)', type: 'number' },
+      betrag: { label: 'Betrag (€, negativ = Ausgabe)', type: 'money' },
       kategorie: {
         label: 'Kategorie',
         type: 'datalist',
@@ -205,8 +207,8 @@ const T = {
       id: { label: 'ID', readonly: true },
       zweck: { label: 'Zweck' },
       beschreibung: { label: 'Beschreibung', type: 'textarea' },
-      betrag: { label: 'Budget (€)', type: 'number' },
-      ausgegeben: { label: 'Ausgegeben (€)', type: 'number' },
+      betrag: { label: 'Budget (€)', type: 'money' },
+      ausgegeben: { label: 'Ausgegeben (€)', type: 'money' },
       notiz: { label: 'Notiz', type: 'textarea' },
       verantwortlich_user_id: { label: 'Verantwortlich (User-ID)', type: 'number' },
       jahr: { label: 'Jahr', type: 'number' },
@@ -223,7 +225,7 @@ const T = {
     fields: {
       id: { label: 'ID', readonly: true },
       bezeichnung: { label: 'Bezeichnung' },
-      betrag: { label: 'Betrag (€)', type: 'number' },
+      betrag: { label: 'Betrag (€)', type: 'money' },
       intervall_monate: { label: 'Intervall (Monate)', type: 'number' },
       letzte_zahlung: { label: 'Letzte Zahlung', type: 'date' },
       notiz: { label: 'Notiz', type: 'textarea' },
