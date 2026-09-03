@@ -1272,7 +1272,7 @@ async function showJournal() {
     for (const r of f) {
       const b = Number(r.betrag) || 0;
       saldo += b;
-      tb.append(el('tr', { class: r._dirty ? 'dirty' : '' },
+      tb.append(el('tr', { class: r._dirty ? 'dirty' : '', style: 'cursor:pointer', title: 'Zum Bearbeiten klicken', onclick: () => showDetail('jb_buchungen', r.id) },
         el('td', {}, r.buchung_datum),
         el('td', {}, (r.beleg_nr ? `[${r.beleg_nr}] ` : '') + (r.beschreibung || r.kategorie || '')),
         el('td', {}, r.konto ? `${r.konto} ${kmap[r.konto] ? '– ' + kmap[r.konto] : ''}` : (r.kategorie || '—')),

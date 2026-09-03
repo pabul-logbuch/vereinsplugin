@@ -493,6 +493,29 @@ function vp_bh_journal() {
 		jb_journal_delete( (int) $_POST['id'] );
 		$msg = __( 'Buchung gelöscht.', 'vereinsplugin' );
 	}
+	if ( $can_edit && isset( $_POST['vp_bh_edit'] ) && check_admin_referer( 'vp_bh_journal', 'vp_bh_nonce' ) ) {
+		$eid    = (int) ( $_POST['id'] ?? 0 );
+		$typ    = ( 'einnahme' === ( $_POST['typ'] ?? '' ) ) ? 1 : -1;
+		$betrag = $typ * abs( (float) str_replace( ',', '.', sanitize_text_field( wp_unslash( $_POST['betrag'] ?? '0' ) ) ) );
+		$konto  = sanitize_text_field( wp_unslash( $_POST['konto'] ?? '' ) );
+		if ( $eid && $betrag ) {
+			$upd = array(
+				'buchung_datum' => sanitize_text_field( wp_unslash( $_POST['datum'] ?? gmdate( 'Y-m-d' ) ) ),
+				'betrag'        => $betrag,
+				'beschreibung'  => sanitize_textarea_field( wp_unslash( $_POST['zweck'] ?? '' ) ),
+				'gegenpartei'   => sanitize_text_field( wp_unslash( $_POST['gegenpartei'] ?? '' ) ),
+				'beleg_nr'      => sanitize_text_field( wp_unslash( $_POST['beleg'] ?? '' ) ),
+				'konto'         => $konto,
+				'sphaere'       => $konto ? jb_konto_sphaere( $konto ) : sanitize_text_field( wp_unslash( $_POST['sphaere'] ?? '' ) ),
+				'kategorie'     => $konto ? ( $konto . ' ' . ( jb_konto_get( $konto )->bezeichnung ?? '' ) ) : sanitize_text_field( wp_unslash( $_POST['zweck'] ?? 'Sonstige' ) ),
+			);
+			if ( isset( $_POST['quelle'] ) ) {
+				$upd['quelle'] = sanitize_text_field( wp_unslash( $_POST['quelle'] ) );
+			}
+			$wpdb->update( jb_table_journal(), $upd, array( 'id' => $eid ) );
+			$msg = __( 'Buchung aktualisiert.', 'vereinsplugin' );
+		}
+	}
 	if ( $can_edit && isset( $_POST['vp_bh_beleg_up'] ) && check_admin_referer( 'vp_bh_journal', 'vp_bh_nonce' ) ) {
 		$msg = vp_bh_journal_beleg_upload( (int) $_POST['id'], $_FILES['beleg_file'] ?? array() );
 	}
@@ -557,6 +580,35 @@ function vp_bh_journal() {
 				. '<button class="vp-btn" name="vp_bh_beleg_up" value="1">↑</button></form>';
 		}
 
+		$edit_cell = '';
+		if ( $can_edit ) {
+			$opts = '<option value="">' . esc_html__( '– nicht zugeordnet –', 'vereinsplugin' ) . '</option>';
+			foreach ( $konten as $k ) {
+				$opts .= '<option value="' . esc_attr( $k->nummer ) . '"' . selected( (string) $k->nummer, (string) $r['konto'], false ) . '>'
+					. esc_html( $k->nummer . ' · ' . $k->bezeichnung ) . '</option>';
+			}
+			$q_cur = (string) ( $r['quelle'] ?? '' );
+			$q_opt = '';
+			foreach ( array( 'Bank KSK', 'Zettle-Bar', 'Zettle-Karte', 'PayPal', 'Auslage', 'Umbuchung', 'Manuell' ) as $q ) {
+				$q_opt .= '<option' . selected( $q, $q_cur, false ) . '>' . esc_html( $q ) . '</option>';
+			}
+			$edit_cell = '<td><details class="vp-inline-edit"><summary class="vp-btn">✎</summary>'
+				. '<form method="post" class="vp-form" style="margin-top:8px;min-width:280px">'
+				. wp_nonce_field( 'vp_bh_journal', 'vp_bh_nonce', true, false )
+				. '<input type="hidden" name="id" value="' . $rid . '">'
+				. '<label>' . esc_html__( 'Datum', 'vereinsplugin' ) . '<input type="date" name="datum" value="' . esc_attr( $r['buchung_datum'] ) . '"></label>'
+				. '<label>' . esc_html__( 'Art', 'vereinsplugin' ) . '<select name="typ"><option value="ausgabe"' . selected( $betrag < 0, true, false ) . '>' . esc_html__( 'Ausgabe', 'vereinsplugin' ) . '</option><option value="einnahme"' . selected( $betrag >= 0, true, false ) . '>' . esc_html__( 'Einnahme', 'vereinsplugin' ) . '</option></select></label>'
+				. '<label>' . esc_html__( 'Betrag (€)', 'vereinsplugin' ) . '<input type="text" name="betrag" inputmode="decimal" value="' . esc_attr( number_format( abs( $betrag ), 2, ',', '' ) ) . '"></label>'
+				. '<label>' . esc_html__( 'Konto (SKR 49)', 'vereinsplugin' ) . '<select name="konto">' . $opts . '</select></label>'
+				. '<label>' . esc_html__( 'Topf / Quelle', 'vereinsplugin' ) . '<select name="quelle">' . $q_opt . '</select></label>'
+				. '<label>' . esc_html__( 'Gegenpartei', 'vereinsplugin' ) . '<input type="text" name="gegenpartei" value="' . esc_attr( $r['gegenpartei'] ?? '' ) . '"></label>'
+				. '<label>' . esc_html__( 'Verwendungszweck', 'vereinsplugin' ) . '<input type="text" name="zweck" value="' . esc_attr( $r['beschreibung'] ?? '' ) . '"></label>'
+				. '<label>' . esc_html__( 'Beleg-Nr.', 'vereinsplugin' ) . '<input type="text" name="beleg" value="' . esc_attr( $r['beleg_nr'] ?? '' ) . '"></label>'
+				. '<p><button class="vp-btn vp-btn-primary" name="vp_bh_edit" value="1">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button> '
+				. '<button class="vp-btn vp-btn-danger" name="vp_bh_del" value="1" onclick="return confirm(\'' . esc_js( __( 'Buchung löschen?', 'vereinsplugin' ) ) . '\')">' . esc_html__( 'Löschen', 'vereinsplugin' ) . '</button></p>'
+				. '</form></details></td>';
+		}
+
 		printf(
 			'<tr><td>%s</td><td>%s</td><td>%s</td><td>%s<br><span class="vp-muted">%s</span></td><td style="text-align:right;%s">%s €</td><td>%s</td>%s</tr>',
 			esc_html( $r['beleg_nr'] ?? '' ),
@@ -567,7 +619,7 @@ function vp_bh_journal() {
 			$betrag < 0 ? 'color:#b91c1c' : 'color:#166534',
 			esc_html( number_format( $betrag, 2, ',', '.' ) ),
 			$beleg_cell,
-			$can_edit ? '<td><form method="post" onsubmit="return confirm(\'' . esc_js( __( 'Buchung löschen?', 'vereinsplugin' ) ) . '\')">' . wp_nonce_field( 'vp_bh_journal', 'vp_bh_nonce', true, false ) . '<input type="hidden" name="id" value="' . $rid . '"><button class="vp-btn vp-btn-danger" name="vp_bh_del" value="1">✕</button></form></td>' : ''
+			$edit_cell
 		);
 	}
 	if ( ! $rows ) {
