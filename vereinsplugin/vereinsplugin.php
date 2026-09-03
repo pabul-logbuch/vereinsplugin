@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       Vereinsplugin
- * Plugin URI:        https://github.com/DEIN-GITHUB-NAME/vereinsplugin
+ * Plugin URI:        https://github.com/pabul-logbuch/vereinsplugin
  * Description:        Alles-in-einem-Vereinsverwaltung: Wunschliste & Spenden, Sitzungs-/Protokollverwaltung, Buchhaltung & Auslagen, Veranstaltungs-Publisher – mit gemeinsamem Mitgliederbereich. Im WordPress-Dashboard erscheint bewusst nur eine einzige Seite: die Shortcode-Übersicht. Alle Verwaltung läuft über Shortcodes im Frontend.
  * Version:           0.12.0
  * Requires at least: 6.0
@@ -9,7 +9,7 @@
  * Author:            Verein
  * Text Domain:       vereinsplugin
  * Domain Path:       /languages
- * GitHub Plugin URI: DEIN-GITHUB-NAME/vereinsplugin
+ * GitHub Plugin URI: pabul-logbuch/vereinsplugin
  * Primary Branch:    main
  * Release Asset:     true
  *
@@ -54,7 +54,7 @@ define( 'VP_MODULES_PATH', VP_PATH . 'modules/' );
  * per `define( 'VP_GITHUB_REPO', 'benutzer/repo' );` überschreiben.
  */
 if ( ! defined( 'VP_GITHUB_REPO' ) ) {
-	define( 'VP_GITHUB_REPO', 'DEIN-GITHUB-NAME/vereinsplugin' );
+	define( 'VP_GITHUB_REPO', 'pabul-logbuch/vereinsplugin' );
 }
 
 /**
@@ -73,7 +73,7 @@ function vp_bootstrap_update_checker() {
 	if ( ! is_admin() && ! $is_cli && ! $is_cron ) {
 		return; // Update-Prüfung nur im Backend / per Cron / WP-CLI.
 	}
-	if ( empty( VP_GITHUB_REPO ) || strpos( VP_GITHUB_REPO, 'DEIN-GITHUB-NAME' ) === 0 ) {
+	if ( empty( VP_GITHUB_REPO ) || '' === trim( VP_GITHUB_REPO ) || false === strpos( VP_GITHUB_REPO, '/' ) ) {
 		return; // Noch kein Repo konfiguriert – still nichts tun.
 	}
 	$loader = VP_PATH . 'vendor/plugin-update-checker/load-v5p6.php';

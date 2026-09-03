@@ -20,24 +20,24 @@ Version bereitliegt.
 cd /Users/paul/Vereinsplug-In
 
 # Repo bei GitHub erstellen (Web-UI: https://github.com/new  → Name z. B. "vereinsplugin", leer lassen)
-git remote add origin https://github.com/DEIN-GITHUB-NAME/vereinsplugin.git
+git remote add origin https://github.com/pabul-logbuch/vereinsplugin.git
 git push -u origin main
 ```
 
-(Alternativ mit GitHub CLI: `gh repo create vereinsplugin --private --source=. --push`)
+(Alternativ mit GitHub CLI: (Repo besteht schon: `pabul-logbuch/vereinsplugin`))
 
 ### 2. Repo-Namen im Plugin eintragen
 
 In `vereinsplugin/vereinsplugin.php` an **zwei Stellen** `DEIN-GITHUB-NAME`
 durch deinen tatsächlichen GitHub-Benutzer/Organisation ersetzen:
 
-- Header-Zeile `GitHub Plugin URI: DEIN-GITHUB-NAME/vereinsplugin`
-- `define( 'VP_GITHUB_REPO', 'DEIN-GITHUB-NAME/vereinsplugin' );`
+- Header-Zeile `GitHub Plugin URI: pabul-logbuch/vereinsplugin`
+- `define( 'VP_GITHUB_REPO', 'pabul-logbuch/vereinsplugin' );`
 
 Oder ohne Datei-Änderung: in der `wp-config.php` der Website
 
 ```php
-define( 'VP_GITHUB_REPO', 'DEIN-GITHUB-NAME/vereinsplugin' );
+define( 'VP_GITHUB_REPO', 'pabul-logbuch/vereinsplugin' );
 ```
 
 Bei einem **privaten** Repo zusätzlich einen
