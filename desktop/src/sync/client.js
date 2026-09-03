@@ -124,9 +124,14 @@ class SyncClient {
     return this._req('GET', '/nextcloud/beleg', { query: { path } });
   }
 
-  async ncBelegUpload(destPath, fileBuffer, filename) {
+  /**
+   * Beleg nach Nextcloud hochladen. `destPath` darf leer bleiben – dann baut
+   * der Server aus `meta.jahr` + `meta.ref` selbst einen Pfad.
+   */
+  async ncBelegUpload(destPath, fileBuffer, filename, meta) {
     const fd = new FormData();
-    fd.set('path', destPath);
+    fd.set('path', destPath || '');
+    for (const [k, v] of Object.entries(meta || {})) fd.set(k, v == null ? '' : String(v));
     fd.set('file', new Blob([fileBuffer]), filename || 'beleg');
     const res = await fetch(this._url('/nextcloud/beleg'), {
       method: 'POST',

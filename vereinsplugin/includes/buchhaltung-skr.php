@@ -14,7 +14,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_SKR_DB_VERSION', '6' );
+define( 'VP_SKR_DB_VERSION', '7' );
 
 /* =========================================================================
  * Schema
@@ -73,6 +73,9 @@ function vp_skr_maybe_upgrade() {
 	$add( $j, 'beleg_nr', "`beleg_nr` VARCHAR(20) NOT NULL DEFAULT ''" );
 	$add( $j, 'ruecklage_id', "`ruecklage_id` BIGINT UNSIGNED DEFAULT NULL" );
 	$add( $j, 'gegenkonto', "`gegenkonto` VARCHAR(10) NOT NULL DEFAULT ''" );
+	// v0.21: Buchung direkt auf ein Budget / eine Kostenstelle buchen.
+	$add( $j, 'budget_id', "`budget_id` BIGINT UNSIGNED DEFAULT NULL" );
+	$add( $j, 'kostenstelle', "`kostenstelle` VARCHAR(50) NOT NULL DEFAULT ''" );
 
 	// Geldkonten für die Doppik-Ansicht sicherstellen (idempotent).
 	if ( function_exists( 'jb_table_konten' ) ) {
@@ -551,6 +554,8 @@ function vp_bh_journal() {
 				'sphaere'       => jb_konto_sphaere( $konto ),
 				'gegenpartei'   => sanitize_text_field( wp_unslash( $_POST['gegenpartei'] ?? '' ) ),
 				'ruecklage_id'  => (int) ( $_POST['ruecklage_id'] ?? 0 ),
+				'budget_id'     => (int) ( $_POST['budget_id'] ?? 0 ),
+				'kostenstelle'  => sanitize_text_field( wp_unslash( $_POST['kostenstelle'] ?? '' ) ),
 			) );
 			$msg = __( 'Buchung gespeichert.', 'vereinsplugin' );
 		}
@@ -584,6 +589,13 @@ function vp_bh_journal() {
 				if ( $rlid && function_exists( 'jb_table_ruecklagen' ) ) {
 					$wpdb->update( jb_table_ruecklagen(), array( 'letzte_zahlung' => $upd['buchung_datum'] ), array( 'id' => $rlid ) );
 				}
+			}
+			$jcols = (array) $wpdb->get_col( 'SHOW COLUMNS FROM ' . jb_table_journal() );
+			if ( isset( $_POST['budget_id'] ) && in_array( 'budget_id', $jcols, true ) ) {
+				$upd['budget_id'] = (int) $_POST['budget_id'] ?: null;
+			}
+			if ( isset( $_POST['kostenstelle'] ) && in_array( 'kostenstelle', $jcols, true ) ) {
+				$upd['kostenstelle'] = sanitize_text_field( wp_unslash( $_POST['kostenstelle'] ) );
 			}
 			$wpdb->update( jb_table_journal(), $upd, array( 'id' => $eid ) );
 			$msg = __( 'Buchung aktualisiert.', 'vereinsplugin' );
@@ -630,7 +642,31 @@ function vp_bh_journal() {
 		return $html;
 	};
 
+	$budgets     = function_exists( 'jb_budgets_get_all' ) ? jb_budgets_get_all() : array();
+	$bud_options = static function ( $selected ) use ( $budgets ) {
+		$html = '<option value="0">' . esc_html__( '– kein Budget –', 'vereinsplugin' ) . '</option>';
+		foreach ( $budgets as $bb ) {
+			$bb    = (object) $bb;
+			$label = $bb->zweck . ( $bb->kostenstelle ? ' · ' . $bb->kostenstelle : '' )
+				. ' (' . number_format( (float) ( $bb->rest ?? 0 ), 2, ',', '.' ) . ' € frei)';
+			$html .= '<option value="' . (int) $bb->id . '"' . selected( (int) $selected, (int) $bb->id, false ) . '>' . esc_html( $label ) . '</option>';
+		}
+		return $html;
+	};
+	$ks_liste = function_exists( 'jb_kostenstellen' ) ? jb_kostenstellen() : array();
+	$ks_field = static function ( $name, $value ) use ( $ks_liste ) {
+		$html = '<input type="text" name="' . esc_attr( $name ) . '" value="' . esc_attr( (string) $value ) . '" list="vp_ks_liste">';
+		return $html;
+	};
+
 	ob_start();
+	if ( $ks_liste ) {
+		echo '<datalist id="vp_ks_liste">';
+		foreach ( $ks_liste as $ks ) {
+			echo '<option value="' . esc_attr( $ks ) . '">';
+		}
+		echo '</datalist>';
+	}
 	if ( $msg ) {
 		echo '<div class="vp-note">' . esc_html( $msg ) . '</div>';
 	}
@@ -658,6 +694,11 @@ function vp_bh_journal() {
 					<label><?php esc_html_e( 'Für Rücklage (optional)', 'vereinsplugin' ); ?>
 						<select name="ruecklage_id"><?php echo $rl_options( 0 ); // phpcs:ignore ?></select></label>
 				<?php endif; ?>
+				<?php if ( $budgets ) : ?>
+					<label><?php esc_html_e( 'Budget belasten (optional)', 'vereinsplugin' ); ?>
+						<select name="budget_id"><?php echo $bud_options( 0 ); // phpcs:ignore ?></select></label>
+				<?php endif; ?>
+				<label><?php esc_html_e( 'Kostenstelle', 'vereinsplugin' ); ?><?php echo $ks_field( 'kostenstelle', '' ); // phpcs:ignore ?></label>
 				<label class="vp-col-2"><?php esc_html_e( 'Verwendungszweck', 'vereinsplugin' ); ?><input type="text" name="zweck"></label>
 				<label><?php esc_html_e( 'Beleg-Nr.', 'vereinsplugin' ); ?><input type="text" name="beleg"></label>
 			</div>
@@ -712,6 +753,8 @@ function vp_bh_journal() {
 				. '<label>' . esc_html__( 'Konto (SKR 49)', 'vereinsplugin' ) . '<select name="konto">' . $opts . '</select></label>'
 				. '<label>' . esc_html__( 'Topf / Quelle', 'vereinsplugin' ) . '<select name="quelle">' . $q_opt . '</select></label>'
 				. ( $ruecklagen ? '<label>' . esc_html__( 'Für Rücklage', 'vereinsplugin' ) . '<select name="ruecklage_id">' . $rl_options( (int) ( $r['ruecklage_id'] ?? 0 ) ) . '</select></label>' : '' )
+				. ( $budgets ? '<label>' . esc_html__( 'Budget belasten', 'vereinsplugin' ) . '<select name="budget_id">' . $bud_options( (int) ( $r['budget_id'] ?? 0 ) ) . '</select></label>' : '' )
+				. '<label>' . esc_html__( 'Kostenstelle', 'vereinsplugin' ) . $ks_field( 'kostenstelle', $r['kostenstelle'] ?? '' ) . '</label>'
 				. '<label>' . esc_html__( 'Gegenpartei', 'vereinsplugin' ) . '<input type="text" name="gegenpartei" value="' . esc_attr( $r['gegenpartei'] ?? '' ) . '"></label>'
 				. '<label>' . esc_html__( 'Verwendungszweck', 'vereinsplugin' ) . '<input type="text" name="zweck" value="' . esc_attr( $r['beschreibung'] ?? '' ) . '"></label>'
 				. '<label>' . esc_html__( 'Beleg-Nr.', 'vereinsplugin' ) . '<input type="text" name="beleg" value="' . esc_attr( $r['beleg_nr'] ?? '' ) . '"></label>'

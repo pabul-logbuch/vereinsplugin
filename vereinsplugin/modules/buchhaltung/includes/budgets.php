@@ -5,16 +5,49 @@ defined('ABSPATH') || exit;
 
 function jb_budgets_get_all(): array {
     global $wpdb;
-    return $wpdb->get_results(
-        "SELECT *, (betrag - ausgegeben) as rest FROM " . jb_table_budgets() .
-        " WHERE aktiv = 1 ORDER BY id ASC", ARRAY_A
+    $rows = $wpdb->get_results(
+        "SELECT * FROM " . jb_table_budgets() . " WHERE aktiv = 1 ORDER BY id ASC", ARRAY_A
     ) ?: [];
+
+    // Ausgaben, die im Journal direkt auf ein Budget gebucht wurden (Spalte
+    // budget_id, v0.21). Bewusst abgeleitet statt in `ausgegeben` mitgezählt:
+    // so bleiben nachträgliche Änderungen an einer Buchung konsistent.
+    $gebucht = [];
+    static $has_bid = null;
+    if ($has_bid === null) {
+        $has_bid = in_array('budget_id', (array) $wpdb->get_col('SHOW COLUMNS FROM ' . jb_table_journal()), true);
+    }
+    if ($has_bid) {
+        $res = $wpdb->get_results(
+            "SELECT budget_id, SUM(ABS(betrag)) AS s FROM " . jb_table_journal() .
+            " WHERE budget_id IS NOT NULL AND betrag < 0 GROUP BY budget_id", ARRAY_A
+        ) ?: [];
+        foreach ($res as $r) { $gebucht[(int) $r['budget_id']] = (float) $r['s']; }
+    }
+
+    foreach ($rows as &$r) {
+        $r['gebucht']    = round($gebucht[(int) $r['id']] ?? 0, 2);
+        $r['verbraucht'] = round((float) $r['ausgegeben'] + $r['gebucht'], 2);
+        $r['rest']       = round((float) $r['betrag'] - $r['verbraucht'], 2);
+    }
+    unset($r);
+    return $rows;
 }
 
 function jb_budgets_rest_total(): float {
+    return round(array_sum(array_column(jb_budgets_get_all(), 'rest')), 2);
+}
+
+/** Alle bisher verwendeten Kostenstellen (Budgets + Journal), für Dropdowns. */
+function jb_kostenstellen(): array {
     global $wpdb;
-    $val = $wpdb->get_var("SELECT SUM(betrag - ausgegeben) FROM " . jb_table_budgets() . " WHERE aktiv = 1");
-    return (float)($val ?? 0);
+    $ks = $wpdb->get_col("SELECT DISTINCT kostenstelle FROM " . jb_table_budgets() . " WHERE kostenstelle <> ''") ?: [];
+    if (in_array('kostenstelle', (array) $wpdb->get_col('SHOW COLUMNS FROM ' . jb_table_journal()), true)) {
+        $ks = array_merge($ks, $wpdb->get_col("SELECT DISTINCT kostenstelle FROM " . jb_table_journal() . " WHERE kostenstelle <> ''") ?: []);
+    }
+    $ks = array_values(array_unique(array_filter(array_map('strval', $ks))));
+    sort($ks);
+    return $ks;
 }
 
 function jb_budget_save(array $data): int|false {

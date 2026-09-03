@@ -114,7 +114,9 @@ function vp_render_budgets_section() {
 
 	foreach ( $budgets as $b ) {
 		$b    = (object) $b;
-		$rest = (float) $b->betrag - (float) $b->ausgegeben;
+		// 'verbraucht' enthält auch die direkt aufs Budget gebuchten Journalausgaben.
+		$verbraucht = isset( $b->verbraucht ) ? (float) $b->verbraucht : (float) $b->ausgegeben;
+		$rest = (float) $b->betrag - $verbraucht;
 		$who  = $b->verantwortlich_user_id ? get_userdata( $b->verantwortlich_user_id ) : null;
 		printf(
 			'<tr><td><strong>%s</strong><br><span class="vp-muted">%s</span></td><td>%s</td><td>%s</td><td>%s</td><td style="text-align:right">%s €</td><td style="text-align:right">%s €</td><td style="text-align:right;%s">%s €</td>%s</tr>',
@@ -124,7 +126,7 @@ function vp_render_budgets_section() {
 			$who ? esc_html( $who->display_name ) : '<span class="vp-muted">–</span>',
 			esc_html( trim( ( $b->konto ? $b->konto : '' ) . ' ' . ( $b->kostenstelle ? $b->kostenstelle : '' ) ) ?: '–' ),
 			esc_html( number_format( (float) $b->betrag, 2, ',', '.' ) ),
-			esc_html( number_format( (float) $b->ausgegeben, 2, ',', '.' ) ),
+			esc_html( number_format( $verbraucht, 2, ',', '.' ) ),
 			$rest < 0 ? 'color:#b91c1c;font-weight:700' : '',
 			esc_html( number_format( $rest, 2, ',', '.' ) ),
 			$can_edit ? '<td><a class="vp-btn" href="' . esc_url( add_query_arg( 'vp_budget_edit', (int) $b->id, $base ) ) . '#vp-budget-form">' . esc_html__( 'Bearbeiten', 'vereinsplugin' ) . '</a></td>' : ''

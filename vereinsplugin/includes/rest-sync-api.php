@@ -654,6 +654,11 @@ function vp_sync_apply_one( $slug, $op, $pk, $baserev, array $fields ) {
 		if ( '' === $v && preg_match( '/(datum|_am|_zahlung|_start|_ende|geburtsdatum|faelligkeit)/i', $k ) ) {
 			$v = 'letzte_zahlung' === $k ? current_time( 'Y-m-d' ) : null;
 		}
+		// Leere Fremdschlüssel (budget_id, ruecklage_id, auslage_id …) → NULL,
+		// '' passt sonst nicht in eine BIGINT-Spalte (Strict-Mode).
+		if ( '' === $v && preg_match( '/_id$/', $k ) && $k !== $pkcol ) {
+			$v = null;
+		}
 		$clean[ $k ] = $v;
 	}
 
@@ -798,14 +803,27 @@ function vp_sync_route_beleg_post( WP_REST_Request $req ) {
 	$files = $req->get_file_params();
 	$file  = $files['file'] ?? null;
 	$dest  = ltrim( (string) $req->get_param( 'path' ), '/' ); // relativ zum Basis-Ordner
-	if ( ! $file || ! isset( $file['tmp_name'] ) || '' === $dest ) {
-		return new WP_Error( 'bad_upload', 'Datei oder Zielpfad fehlt.', array( 'status' => 400 ) );
+	if ( ! $file || ! isset( $file['tmp_name'] ) ) {
+		return new WP_Error( 'bad_upload', 'Datei fehlt.', array( 'status' => 400 ) );
+	}
+	// Kein Zielpfad? Dann aus Buchungsdatum + Beleg-Nr. einen erzeugen, damit
+	// die Desktop-App nur „Datei wählen" anbieten muss.
+	if ( '' === $dest ) {
+		$jahr = (string) $req->get_param( 'jahr' );
+		$jahr = preg_match( '/^\d{4}$/', $jahr ) ? $jahr : current_time( 'Y' );
+		$ref  = sanitize_file_name( (string) $req->get_param( 'ref' ) );
+		if ( '' === $ref ) {
+			$ref = 'Beleg-' . current_time( 'Ymd-His' );
+		}
+		$ext  = strtolower( (string) pathinfo( (string) ( $file['name'] ?? '' ), PATHINFO_EXTENSION ) );
+		$ext  = preg_match( '/^[a-z0-9]{1,5}$/', $ext ) ? $ext : 'pdf';
+		$dest = 'Belege/' . $jahr . '/Journal/' . $ref . '.' . $ext;
 	}
 	$res = jb_nc()->upload_beleg( $file['tmp_name'], $dest );
 	if ( is_wp_error( $res ) ) {
 		return $res;
 	}
-	return rest_ensure_response( array( 'path' => $res ) );
+	return rest_ensure_response( array( 'path' => is_string( $res ) && '' !== $res ? $res : $dest ) );
 }
 
 /* =========================================================================

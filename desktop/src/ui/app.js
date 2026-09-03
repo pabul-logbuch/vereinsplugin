@@ -315,6 +315,7 @@ function rerender() {
   else if (c.name === 'zbon') showZbon();
   else if (c.name === 'kontenblaetter') showKontenblaetter();
   else if (c.name === 'kontenblatt') showKontenblatt(c.konto, c.from);
+  else if (c.name === 'buchung') showBuchung(c.pk, c.from);
   else if (c.name === 'auslagen_pruefen') showAuslagenPruefen();
   else if (c.name === 'journal') showJournal();
   else if (c.name === 'mitglieder') showMitglieder();
@@ -1206,7 +1207,7 @@ async function showKontenblatt(konto, from = 'blaetter') {
     el('th', { style: 'text-align:right' }, 'Soll'), el('th', { style: 'text-align:right' }, 'Haben'), el('th', { style: 'text-align:right' }, 'Saldo'))));
   const tb = el('tbody');
   for (const z of kb.zeilen || []) {
-    tb.append(el('tr', { style: z.id ? 'cursor:pointer' : '', onclick: z.id ? () => showDetail('jb_buchungen', z.id) : null },
+    tb.append(el('tr', { style: z.id ? 'cursor:pointer' : '', onclick: z.id ? () => showBuchung(z.id, { name: 'kontenblatt', konto, from }) : null },
       el('td', {}, z.datum || '—'), el('td', {}, z.text || '—'),
       el('td', { style: 'text-align:right' }, z.soll ? eur(z.soll) : ''),
       el('td', { style: 'text-align:right' }, z.haben ? eur(z.haben) : ''),
@@ -1393,12 +1394,14 @@ async function showJournal() {
   let rows = [];
   let konten = [];
   let ruecklagen = [];
+  let budgets = [];
   let dmap = DOPPIK_MAP_DEFAULT;
   try {
-    [rows, konten, ruecklagen] = await Promise.all([
+    [rows, konten, ruecklagen, budgets] = await Promise.all([
       call(api.data.rows('jb_buchungen', { limit: 5000 })).then((r) => r.rows),
       call(api.data.rows('jb_konten', { limit: 2000 })).then((r) => r.rows).catch(() => []),
       call(api.data.rows('jb_ruecklagen', { limit: 500 })).then((r) => r.rows.filter((x) => String(x.aktiv) !== '0')).catch(() => []),
+      call(api.data.rows('jb_budgets', { limit: 500 })).then((r) => r.rows.filter((x) => String(x.aktiv) !== '0')).catch(() => []),
     ]);
     const s = await call(api.report.salden()).catch(() => null);
     if (s && s.map) dmap = { ...DOPPIK_MAP_DEFAULT, ...s.map };
@@ -1411,7 +1414,7 @@ async function showJournal() {
   jState.sel = new Set();
   const acts = el('div', { class: 'toolbar' });
   acts.append(
-    el('button', { class: 'primary small', onclick: () => togglePanel('add', () => journalForm(konten, ruecklagen)) }, '+ Buchung'),
+    el('button', { class: 'primary small', onclick: () => togglePanel('add', () => journalForm(konten, ruecklagen, budgets)) }, '+ Buchung'),
     el('button', { class: 'small', onclick: () => togglePanel('transfer', () => umbuchungForm(konten)) }, '⇄ Umbuchung'),
     el('button', { class: 'small', onclick: () => togglePanel('csv', () => bankCsvForm(konten)) }, '⇑ Bank-CSV importieren'),
     el('span', { style: 'flex:1' }),
@@ -1485,7 +1488,7 @@ async function showJournal() {
     const tb = el('tbody');
     for (const r of f) {
       const s = doppikSatz(r, dmap);
-      tb.append(el('tr', { style: 'cursor:pointer', onclick: () => showDetail('jb_buchungen', r.id) },
+      tb.append(el('tr', { style: 'cursor:pointer', onclick: () => showBuchung(r.id) },
         el('td', {}, s.datum), el('td', {}, lbl(s.soll)), el('td', {}, lbl(s.haben)),
         el('td', { style: 'text-align:right' }, eur(s.betrag)), el('td', {}, s.text || '—')));
     }
@@ -1567,7 +1570,7 @@ async function showJournal() {
         descCell.append(' ');
         descCell.append(el('span', { style: 'cursor:pointer', title: 'Beleg öffnen', onclick: (e) => { e.stopPropagation(); openBeleg(r.beleg_pfad); } }, '📎'));
       }
-      tb.append(el('tr', { class: r._dirty ? 'dirty' : '', style: 'cursor:pointer', onclick: () => showDetail('jb_buchungen', r.id) },
+      tb.append(el('tr', { class: r._dirty ? 'dirty' : '', style: 'cursor:pointer', onclick: () => showBuchung(r.id) },
         el('td', {}, chk),
         el('td', {}, r.buchung_datum),
         descCell,
@@ -1599,7 +1602,260 @@ function togglePanel(kind, builder) {
   host.append(builder());
 }
 
-function journalForm(konten, ruecklagen = []) {
+/* ---------------------------------------- Buchung bearbeiten (Doppik-Form) */
+
+/** Bevorzugte „quelle" je Geldkonto – Umkehrung der Doppik-Zuordnung. */
+const QUELLE_PREF = ['Bank KSK', 'Zettle-Bar', 'PayPal', 'Zettle-Karte', 'Auslage', 'Manuell', 'Bar', 'Umbuchung'];
+function quelleFuerKonto(konto, map) {
+  const m = map || DOPPIK_MAP_DEFAULT;
+  for (const q of QUELLE_PREF) if (String(m[q]) === String(konto)) return q;
+  for (const [q, k] of Object.entries(m)) if (String(k) === String(konto)) return q;
+  return 'Manuell';
+}
+
+/**
+ * Soll/Haben/Betrag → gespeicherte jb_buchungen-Spalten. Genaue Umkehrung von
+ * `doppikSatz()` bzw. `vp_doppik_satz()`, damit ein Bearbeiten die Ansicht
+ * nicht verändert.
+ */
+function satzZuZeile(soll, haben, betrag, konten, map) {
+  const typOf = (nr) => String(((konten || []).find((k) => String(k.nummer) === String(nr)) || {}).typ || '');
+  const erfolg = (nr) => typOf(nr) === 'einnahme' || typOf(nr) === 'ausgabe';
+  const sphOf = (nr) => String(((konten || []).find((k) => String(k.nummer) === String(nr)) || {}).sphaere || '');
+  const b = Math.round(Math.abs(Number(betrag) || 0) * 100) / 100;
+  const sE = erfolg(soll);
+  const hE = erfolg(haben);
+  if (sE && !hE) return { konto: soll, gegenkonto: '', betrag: -b, quelle: quelleFuerKonto(haben, map), sphaere: sphOf(soll) }; // Ausgabe
+  if (!sE && hE) return { konto: haben, gegenkonto: '', betrag: b, quelle: quelleFuerKonto(soll, map), sphaere: sphOf(haben) }; // Einnahme
+  return { konto: soll, gegenkonto: haben, betrag: b, quelle: 'Umbuchung', sphaere: 'neutral' }; // Bestand ↔ Bestand
+}
+
+async function showBuchung(pk, from) {
+  state.current = { name: 'buchung', pk, from };
+  renderNav();
+  view.innerHTML = '';
+  const back = () =>
+    from && from.name === 'kontenblatt' ? showKontenblatt(from.konto, from.from) : showJournal();
+  view.append(el('button', { class: 'ghost small', onclick: back }, '‹ Zurück'));
+  view.append(el('h1', {}, 'Buchung bearbeiten'));
+
+  let data;
+  let konten = [];
+  let budgets = [];
+  let ruecklagen = [];
+  let auslagen = [];
+  let alle = [];
+  let dmap = DOPPIK_MAP_DEFAULT;
+  try {
+    [data, konten, budgets, ruecklagen, auslagen, alle] = await Promise.all([
+      call(api.data.row('jb_buchungen', pk)),
+      call(api.data.rows('jb_konten', { limit: 2000 })).then((r) => r.rows).catch(() => []),
+      call(api.data.rows('jb_budgets', { limit: 500 })).then((r) => r.rows.filter((x) => String(x.aktiv) !== '0')).catch(() => []),
+      call(api.data.rows('jb_ruecklagen', { limit: 500 })).then((r) => r.rows.filter((x) => String(x.aktiv) !== '0')).catch(() => []),
+      call(api.data.rows('jb_auslagen', { limit: 1000 })).then((r) => r.rows).catch(() => []),
+      call(api.data.rows('jb_buchungen', { limit: 5000 })).then((r) => r.rows).catch(() => []),
+    ]);
+    const s = await call(api.report.salden()).catch(() => null);
+    if (s && s.map) dmap = { ...DOPPIK_MAP_DEFAULT, ...s.map };
+  } catch (e) {
+    return view.append(el('div', { class: 'note err' }, e.message));
+  }
+
+  const row = (data && data.row) || {};
+  const cols = new Set((state.meta && state.meta.tables.jb_buchungen && state.meta.tables.jb_buchungen.columns) || Object.keys(row));
+  const satz = doppikSatz(row, dmap);
+  const kname = (nr) => {
+    const k = konten.find((x) => String(x.nummer) === String(nr));
+    return nr ? `${nr}${k ? ' – ' + k.bezeichnung : ''}` : '—';
+  };
+
+  const form = el('form', { class: 'detail' });
+  const sec = (titel, hinweis) => {
+    form.append(el('h2', { style: 'grid-column:1/-1;margin:16px 0 0' }, titel));
+    if (hinweis) form.append(el('p', { class: 'muted', style: 'grid-column:1/-1;margin:0' }, hinweis));
+  };
+  const feld = (label, node) => { form.append(el('label', {}, label), node); };
+
+  /* --- 1. Buchungssatz ---------------------------------------------------- */
+  sec('Buchungssatz', 'Soll an Haben – Betrag immer positiv. Quelle, Gegenkonto und Vorzeichen ergeben sich daraus automatisch.');
+  const fDatum = el('input', { type: 'date', value: row.buchung_datum || '' });
+  const fBetrag = moneyInput(satz.betrag);
+  const fSoll = kontoSelect(konten, satz.soll, 'alle');
+  const fHaben = kontoSelect(konten, satz.haben, 'alle');
+  feld('Datum', fDatum);
+  feld('Betrag (€)', fBetrag);
+  feld('Soll (Empfänger / Aufwand)', fSoll);
+  feld('Haben (Herkunft / Ertrag)', fHaben);
+
+  const vorschau = el('p', { class: 'muted', style: 'grid-column:1/-1;margin:0' });
+  form.append(vorschau);
+
+  /* --- 2. Beschreibung ---------------------------------------------------- */
+  sec('Beschreibung');
+  const fText = el('textarea', {});
+  fText.value = row.beschreibung || '';
+  const dlGp = el('datalist', { id: 'dl_gegenpartei' });
+  for (const g of [...new Set(alle.map((r) => String(r.gegenpartei || '').trim()).filter(Boolean))].sort()) {
+    dlGp.append(el('option', { value: g }));
+  }
+  form.append(dlGp);
+  const fGegenpartei = el('input', { type: 'text', value: row.gegenpartei || '', list: 'dl_gegenpartei', placeholder: 'z. B. Bauhaus, Mitglied Müller' });
+  feld('Beschreibung', fText);
+  feld('Gegenpartei (wer?)', fGegenpartei);
+
+  /* --- 3. Zuordnung ------------------------------------------------------- */
+  sec('Zuordnung');
+  const fSphaere = selectEl(SPHAERE_OPTS, row.sphaere || satz.sphaere || '');
+  let sphaereTouched = false;
+  fSphaere.addEventListener('change', () => { sphaereTouched = true; });
+  const fBudget = selectEl(
+    [['', '— kein Budget —'], ...budgets.map((b) => [String(b.id), `${b.zweck}${b.kostenstelle ? ' · ' + b.kostenstelle : ''} (${eur(Number(b.rest ?? (Number(b.betrag) - Number(b.ausgegeben))) || 0)} frei)`])],
+    row.budget_id == null ? '' : String(row.budget_id)
+  );
+  const ksListe = [...new Set([...budgets.map((b) => b.kostenstelle), ...alle.map((r) => r.kostenstelle)].map((s) => String(s || '').trim()).filter(Boolean))].sort();
+  const fKostenstelle = selectEl([['', '— keine —'], ...ksListe.map((k) => [k, k])], row.kostenstelle || '');
+  const fRuecklage = selectEl(
+    [['', '— keine —'], ...ruecklagen.map((r) => [String(r.id), `${r.bezeichnung} (${eur(Number(r.betrag) || 0)} / ${r.intervall_monate} Mon.)`])],
+    row.ruecklage_id == null ? '' : String(row.ruecklage_id)
+  );
+  const fAuslage = selectEl(
+    [['', '— keine —'], ...auslagen.map((a) => [String(a.id), `#${a.id} ${a.zweck || a.beschreibung || ''} (${eur(Number(a.betrag) || 0)})`])],
+    row.auslage_id == null ? '' : String(row.auslage_id)
+  );
+  feld('Sphäre', fSphaere);
+  if (cols.has('budget_id')) feld('Budget belasten', fBudget);
+  if (cols.has('kostenstelle')) feld('Kostenstelle', fKostenstelle);
+  feld('Für Rücklage', fRuecklage);
+  feld('Auslage', fAuslage);
+  if (!cols.has('budget_id')) {
+    form.append(el('p', { class: 'note', style: 'grid-column:1/-1' },
+      'Budget und Kostenstelle stehen erst nach dem Plugin-Update (ab v0.21.0) zur Verfügung.'));
+  }
+
+  /* --- 4. Beleg ----------------------------------------------------------- */
+  sec('Beleg');
+  const belegNrs = [...new Set(alle.map((r) => String(r.beleg_nr || r.beleg_referenz || '').trim()).filter(Boolean))].sort();
+  const dlBeleg = el('datalist', { id: 'dl_beleg_nr' });
+  for (const b of belegNrs) dlBeleg.append(el('option', { value: b }));
+  form.append(dlBeleg);
+  const fBelegNr = el('input', { type: 'text', value: row.beleg_nr || row.beleg_referenz || '', list: 'dl_beleg_nr' });
+  const nextBelegNr = () => {
+    const jahr = String(fDatum.value || row.buchung_datum || '').slice(0, 4) || String(new Date().getFullYear());
+    let max = 0;
+    for (const b of belegNrs) {
+      const m = /^(\d{4})-(\d+)$/.exec(b);
+      if (m && m[1] === jahr) max = Math.max(max, Number(m[2]));
+    }
+    return `${jahr}-${String(max + 1).padStart(4, '0')}`;
+  };
+  const belegNrZeile = el('div', { class: 'row' }, fBelegNr,
+    el('button', { type: 'button', class: 'small ghost', onclick: () => { fBelegNr.value = nextBelegNr(); } }, 'nächste freie'));
+  feld('Beleg-Nr', belegNrZeile);
+  const belegNrInfo = el('p', { class: 'muted', style: 'grid-column:1/-1;margin:0' },
+    belegNrs.length ? `${belegNrs.length} vergebene Nummern – Feld anklicken zeigt die Liste. Zuletzt: ${belegNrs.slice(-5).join(', ')}` : 'Noch keine Beleg-Nummern vergeben.');
+  form.append(belegNrInfo);
+
+  const fPfad = el('input', { type: 'text', value: row.beleg_pfad || '', placeholder: 'wird beim Hochladen automatisch gesetzt' });
+  const fDatei = el('input', { type: 'file', accept: 'image/*,application/pdf' });
+  const upBtn = el('button', { type: 'button', class: 'small' }, 'Hochladen');
+  const pfadZeile = el('div', { class: 'row' }, fDatei, upBtn);
+  if (row.beleg_pfad) {
+    pfadZeile.append(el('button', { type: 'button', class: 'small ghost', onclick: () => openBeleg(row.beleg_pfad) }, '📎 öffnen'));
+  }
+  upBtn.addEventListener('click', async () => {
+    const f = fDatei.files && fDatei.files[0];
+    if (!f) return toast('Bitte zuerst eine Datei wählen.', true);
+    if (!(api.nc && api.nc.belegUpload)) return toast('App bitte komplett neu starten (npm start), damit der Upload verfügbar ist.', true);
+    upBtn.disabled = true;
+    try {
+      const res = await call(api.nc.belegUpload('', { name: f.name, buffer: new Uint8Array(await f.arrayBuffer()) }, {
+        jahr: String(fDatum.value || '').slice(0, 4),
+        ref: fBelegNr.value || `Buchung-${pk}`,
+      }));
+      fPfad.value = (res && res.path) || fPfad.value;
+      toast('Beleg hochgeladen – bitte noch speichern.');
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      upBtn.disabled = false;
+    }
+  });
+  feld('Beleg-Datei (Nextcloud)', pfadZeile);
+  feld('Beleg-Pfad', fPfad);
+
+  /* --- Vorschau + Sphären-Automatik -------------------------------------- */
+  function updateVorschau() {
+    const z = satzZuZeile(fSoll.value, fHaben.value, parseNum(fBetrag.value), konten, dmap);
+    if (!sphaereTouched && z.sphaere) fSphaere.value = z.sphaere;
+    const art = z.gegenkonto ? 'Umbuchung' : Number(z.betrag) < 0 ? 'Ausgabe' : 'Einnahme';
+    vorschau.textContent =
+      `${kname(fSoll.value)} an ${kname(fHaben.value)} · ${eur(Math.abs(Number(z.betrag) || 0))}` +
+      ` → wird gespeichert als ${art}: Betrag ${eur(z.betrag)}, Konto ${z.konto || '—'}, Quelle ${z.quelle}` +
+      (z.gegenkonto ? `, Gegenkonto ${z.gegenkonto}` : '');
+  }
+  for (const n of [fSoll, fHaben, fBetrag]) n.addEventListener('change', updateVorschau);
+  fBetrag.addEventListener('input', updateVorschau);
+  updateVorschau();
+
+  /* --- Aktionen ----------------------------------------------------------- */
+  const actions = el('div', { class: 'form-actions' });
+  actions.append(el('button', { class: 'primary', type: 'submit' }, 'Speichern'));
+  actions.append(el('button', { type: 'button', class: 'danger', onclick: async () => {
+    if (!confirm('Diese Buchung löschen? Wird beim nächsten Sync auch auf dem Server gelöscht.')) return;
+    try {
+      await call(api.data.remove('jb_buchungen', pk));
+      toast('Zum Löschen vorgemerkt.');
+      await runSyncQuiet();
+      back();
+    } catch (e) { toast(e.message, true); }
+  } }, 'Löschen'));
+  if (data && data.state && data.state.dirty) actions.append(el('span', { class: 'tag' }, 'lokal geändert, noch nicht gesendet'));
+  form.append(actions);
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (!fSoll.value || !fHaben.value) return toast('Soll- und Haben-Konto wählen.', true);
+    if (fSoll.value === fHaben.value) return toast('Soll und Haben dürfen nicht dasselbe Konto sein.', true);
+    const z = satzZuZeile(fSoll.value, fHaben.value, parseNum(fBetrag.value), konten, dmap);
+    const fields = {
+      buchung_datum: fDatum.value,
+      betrag: String(z.betrag),
+      konto: z.konto,
+      gegenkonto: z.gegenkonto,
+      quelle: z.quelle,
+      sphaere: fSphaere.value,
+      beschreibung: fText.value,
+      gegenpartei: fGegenpartei.value,
+      beleg_nr: fBelegNr.value,
+      beleg_referenz: fBelegNr.value,
+      beleg_pfad: fPfad.value,
+      ruecklage_id: fRuecklage.value,
+      auslage_id: fAuslage.value,
+      // `kategorie` ist ein Altfeld – wird aus dem Konto mitgeführt, damit die
+      // alten Kategorie-Auswertungen weiter stimmen (kein eigenes Eingabefeld).
+      kategorie: kname(z.konto),
+    };
+    if (cols.has('budget_id')) fields.budget_id = fBudget.value;
+    if (cols.has('kostenstelle')) fields.kostenstelle = fKostenstelle.value;
+    // Nur Spalten senden, die es auf dem Server wirklich gibt.
+    for (const k of Object.keys(fields)) if (!cols.has(k)) delete fields[k];
+    try {
+      await call(api.data.save('jb_buchungen', pk, fields));
+      toast('Gespeichert (wird beim Sync gesendet).');
+      await runSyncQuiet();
+      showBuchung(pk, from);
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+
+  view.append(form);
+  view.append(el('p', { class: 'muted' },
+    `ID ${row.id ?? pk} · angelegt ${row.erstellt_am || '—'}${row.erstellt_von ? ' von User-ID ' + row.erstellt_von : ''}` +
+    ' · Rohdaten (alle Spalten) unter Admin · Rohdaten → Buchungen.'));
+}
+
+function journalForm(konten, ruecklagen = [], budgets = []) {
   const card = el('div', { class: 'card' });
   const head = el('div', { class: 'row', style: 'justify-content:space-between' });
   head.append(el('h2', {}, 'Neue Buchung'));
@@ -1629,17 +1885,25 @@ function journalForm(konten, ruecklagen = []) {
     },
   });
   const sph = selectEl(SPHAERE_OPTS, '');
-  const kat = el('input', { type: 'text', placeholder: 'Kategorie / Zweck' });
   const quelle = selectEl(QUELLE_OPTS, 'Bank KSK');
   const gegen = el('input', { type: 'text', placeholder: 'Gegenpartei (optional)' });
   const beschr = el('textarea', { placeholder: 'Beschreibung' });
   const rl = selectEl([['', '– keine –'], ...ruecklagen.map((r) => [String(r.id), r.bezeichnung])], '');
+  const bud = selectEl(
+    [['', '– kein Budget –'], ...budgets.map((b) => [String(b.id), `${b.zweck}${b.kostenstelle ? ' · ' + b.kostenstelle : ''}`])], '');
+  const ksListe = [...new Set(budgets.map((b) => String(b.kostenstelle || '').trim()).filter(Boolean))].sort();
+  const ks = selectEl([['', '– keine –'], ...ksListe.map((k) => [k, k])], '');
+  bud.addEventListener('change', () => {
+    const b = budgets.find((x) => String(x.id) === bud.value);
+    if (b && b.kostenstelle) ks.value = b.kostenstelle;
+  });
   const hint = el('div', { class: 'muted' });
   function betragHint(k) {
     hint.textContent = k.typ === 'einnahme' ? 'Einnahme → Betrag positiv.' : k.typ === 'ausgabe' ? 'Ausgabe → Betrag negativ.' : '';
   }
   const f = el('form', { class: 'detail' });
-  f.append('Datum', datum, 'Betrag (€)', betrag, 'Konto (SKR)', konto, 'Sphäre', sph, 'Kategorie', kat, 'Quelle', quelle, 'Gegenpartei', gegen, 'Beschreibung', beschr);
+  f.append('Datum', datum, 'Betrag (€)', betrag, 'Konto (SKR)', konto, 'Sphäre', sph, 'Quelle (Geldtopf)', quelle, 'Gegenpartei', gegen, 'Beschreibung', beschr);
+  if (budgets.length) f.append('Budget belasten', bud, 'Kostenstelle', ks);
   if (ruecklagen.length) f.append('Für Rücklage', rl);
   const actions = el('div', { class: 'form-actions' });
   actions.append(el('button', { class: 'primary', type: 'submit' }, 'Buchen'), hint);
@@ -1651,9 +1915,10 @@ function journalForm(konten, ruecklagen = []) {
     try {
       await call(api.action.run('journal-add', {
         buchung_datum: datum.value, betrag: amt, konto: konto.value, sphaere: sph.value,
-        kategorie: kat.value || (konten.find((k) => String(k.nummer) === konto.value) || {}).bezeichnung || 'Sonstige',
+        kategorie: (konten.find((k) => String(k.nummer) === konto.value) || {}).bezeichnung || 'Sonstige',
         quelle: quelle.value, gegenpartei: gegen.value, beschreibung: beschr.value,
         ruecklage_id: Number(rl.value) || 0,
+        budget_id: Number(bud.value) || 0, kostenstelle: ks.value,
       }));
       toast('Gebucht.');
       await runSyncQuiet();

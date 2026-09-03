@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('api', {
     groups: () => invoke('nc:groups'),
     sync: (dry) => invoke('nc:sync', { dry }),
     beleg: (path) => invoke('nc:beleg', { path }),
+    belegUpload: (path, file, meta) => invoke('nc:beleg-upload', { path, file, meta }),
   },
   app: {
     info: () => invoke('app:info'),

@@ -40,6 +40,22 @@ function jb_journal_add(array $data): int {
             $row['beleg_referenz'] = $beleg_nr;
         }
     }
+    // Optionale Zuordnung zu Budget / Kostenstelle (v0.21).
+    static $has_budget = null;
+    if ($has_budget === null) {
+        $has_budget = in_array('budget_id', (array) $wpdb->get_col('SHOW COLUMNS FROM ' . jb_table_journal()), true);
+    }
+    if ($has_budget) {
+        $row['budget_id']    = !empty($data['budget_id']) ? (int) $data['budget_id'] : null;
+        $row['kostenstelle'] = sanitize_text_field($data['kostenstelle'] ?? '');
+        // Kostenstelle aus dem Budget übernehmen, wenn nicht ausdrücklich gesetzt.
+        if ($row['kostenstelle'] === '' && $row['budget_id'] && function_exists('jb_table_budgets')) {
+            $row['kostenstelle'] = (string) $wpdb->get_var($wpdb->prepare(
+                'SELECT kostenstelle FROM ' . jb_table_budgets() . ' WHERE id = %d', $row['budget_id']
+            ));
+        }
+    }
+
     // Optionale Zuordnung zu einer Rücklage.
     static $has_rl = null;
     if ($has_rl === null) {

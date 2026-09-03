@@ -311,6 +311,15 @@ ipcMain.handle('nc:beleg', async (_e, { path }) => {
   }
 });
 
+ipcMain.handle('nc:beleg-upload', async (_e, { path, file, meta }) => {
+  try {
+    if (!file || !file.buffer) throw new Error('Keine Datei übergeben.');
+    return ok(await client().ncBelegUpload(path || '', file.buffer, file.name, meta || {}));
+  } catch (e) {
+    return fail(e);
+  }
+});
+
 ipcMain.handle('app:info', () => ok({ version: app.getVersion(), userData: userDir() }));
 
 ipcMain.handle('app:open-external', (_e, { url }) => {
