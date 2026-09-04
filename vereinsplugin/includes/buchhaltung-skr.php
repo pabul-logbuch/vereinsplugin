@@ -14,7 +14,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_SKR_DB_VERSION', '8' );
+define( 'VP_SKR_DB_VERSION', '9' );
 
 /* =========================================================================
  * Schema
@@ -22,6 +22,7 @@ define( 'VP_SKR_DB_VERSION', '8' );
 
 function jb_table_konten()  { global $wpdb; return $wpdb->prefix . 'jb_konten'; }
 function jb_table_regeln()  { global $wpdb; return $wpdb->prefix . 'jb_konto_regeln'; }
+function jb_table_anfangsbestaende() { global $wpdb; return $wpdb->prefix . 'jb_anfangsbestaende'; }
 
 add_action( 'plugins_loaded', 'vp_skr_maybe_upgrade', 7 );
 function vp_skr_maybe_upgrade() {
@@ -54,6 +55,19 @@ function vp_skr_maybe_upgrade() {
 		prioritaet INT NOT NULL DEFAULT 10,
 		aktiv TINYINT NOT NULL DEFAULT 1,
 		PRIMARY KEY  (id)
+	) {$collate};" );
+
+	// Jahresanfangsbestände je Konto (v0.23). Ersetzt die vier globalen
+	// jb_anfangsbestand_*-Optionen, die nur EINEN Startzeitpunkt kannten.
+	dbDelta( "CREATE TABLE " . jb_table_anfangsbestaende() . " (
+		id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+		jahr SMALLINT NOT NULL DEFAULT 0,
+		konto VARCHAR(10) NOT NULL DEFAULT '',
+		betrag DECIMAL(12,2) NOT NULL DEFAULT 0,
+		notiz VARCHAR(200) NOT NULL DEFAULT '',
+		erstellt_am DATETIME NULL DEFAULT NULL,
+		PRIMARY KEY  (id),
+		UNIQUE KEY jahr_konto (jahr, konto)
 	) {$collate};" );
 
 	// Spalten an jb_buchungen ergänzen.
@@ -112,7 +126,49 @@ function vp_skr_maybe_upgrade() {
 	}
 
 	vp_skr_seed();
+	vp_skr_migriere_anfangsbestaende();
 	update_option( 'vp_skr_db_version', VP_SKR_DB_VERSION );
+}
+
+/**
+ * Einmalig: die vier alten jb_anfangsbestand_*-Optionen in die Jahrestabelle
+ * übernehmen. Jahr = Jahr des alten Stichtags, sonst das Jahr der ersten
+ * Buchung, sonst das laufende Jahr.
+ */
+function vp_skr_migriere_anfangsbestaende() {
+	global $wpdb;
+	if ( '1' === get_option( 'jb_anfangsbestaende_migr' ) ) {
+		return;
+	}
+	$t = jb_table_anfangsbestaende();
+	if ( (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$t}`" ) > 0 ) {
+		update_option( 'jb_anfangsbestaende_migr', '1' );
+		return;
+	}
+
+	$stichtag = (string) get_option( 'jb_anfangsbestand_datum', '' );
+	$jahr     = preg_match( '/^(\d{4})/', $stichtag, $m ) ? (int) $m[1] : 0;
+	if ( ! $jahr && function_exists( 'jb_table_journal' ) ) {
+		$jahr = (int) $wpdb->get_var( 'SELECT MIN(YEAR(buchung_datum)) FROM ' . jb_table_journal() );
+	}
+	if ( ! $jahr ) {
+		$jahr = (int) current_time( 'Y' );
+	}
+
+	foreach ( array( 'bank' => '1200', 'kasse' => '1000', 'paypal' => '1220', 'zettle' => '1360' ) as $key => $konto ) {
+		$betrag = (float) get_option( 'jb_anfangsbestand_' . $key, 0 );
+		if ( ! $betrag ) {
+			continue;
+		}
+		$wpdb->insert( $t, array(
+			'jahr'        => $jahr,
+			'konto'       => $konto,
+			'betrag'      => round( $betrag, 2 ),
+			'notiz'       => 'übernommen aus den alten Anfangsbestand-Einstellungen',
+			'erstellt_am' => current_time( 'mysql' ),
+		) );
+	}
+	update_option( 'jb_anfangsbestaende_migr', '1' );
 }
 
 /* =========================================================================
@@ -1238,51 +1294,135 @@ function vp_bh_bestaende() {
 	if ( ! function_exists( 'jb_topf_saldo' ) ) {
 		return '<div class="vp-note">' . esc_html__( 'Nicht verfügbar.', 'vereinsplugin' ) . '</div>';
 	}
+	global $wpdb;
 	$can_edit = current_user_can( 'jb_edit_journal' ) || current_user_can( 'manage_options' );
-	$msg = '';
+	$t        = jb_table_anfangsbestaende();
+	$msg      = '';
 
-	if ( $can_edit && isset( $_POST['vp_bestaende_save'] ) && check_admin_referer( 'vp_bestaende', 'vp_bestaende_nonce' ) ) {
-		foreach ( array( 'bank', 'kasse', 'paypal', 'zettle' ) as $k ) {
-			update_option( 'jb_anfangsbestand_' . $k, round( (float) str_replace( ',', '.', sanitize_text_field( wp_unslash( $_POST[ 'anf_' . $k ] ?? '0' ) ) ), 2 ) );
-		}
-		update_option( 'jb_anfangsbestand_datum', sanitize_text_field( wp_unslash( $_POST['anf_datum'] ?? '' ) ) );
-		$msg = __( 'Bestände gespeichert.', 'vereinsplugin' );
-	}
-
-	$stichtag = (string) get_option( 'jb_anfangsbestand_datum', '' );
-	$topfe = array(
-		'bank'   => __( 'Bankkonto (KSK)', 'vereinsplugin' ),
-		'kasse'  => __( 'Barkasse', 'vereinsplugin' ),
-		'paypal' => __( 'PayPal', 'vereinsplugin' ),
-		'zettle' => __( 'Zettle (Karte)', 'vereinsplugin' ),
+	// Standard-Geldkonten; weitere Konten lassen sich frei ergänzen.
+	$geldkonten = array(
+		'1200' => __( 'Bankkonto (KSK)', 'vereinsplugin' ),
+		'1000' => __( 'Barkasse', 'vereinsplugin' ),
+		'1220' => __( 'PayPal', 'vereinsplugin' ),
+		'1360' => __( 'Zettle (Karte)', 'vereinsplugin' ),
 	);
 
+	if ( $can_edit && isset( $_POST['vp_anf_save'] ) && check_admin_referer( 'vp_bestaende', 'vp_bestaende_nonce' ) ) {
+		$jahr    = (int) ( $_POST['anf_jahr'] ?? 0 );
+		$werte   = (array) ( $_POST['anf'] ?? array() );
+		if ( $jahr > 1990 && $jahr < 2200 ) {
+			foreach ( $werte as $konto => $roh ) {
+				$konto  = sanitize_text_field( wp_unslash( (string) $konto ) );
+				$roh    = sanitize_text_field( wp_unslash( (string) $roh ) );
+				if ( '' === $konto ) {
+					continue;
+				}
+				$vorhanden = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM `{$t}` WHERE jahr = %d AND konto = %s", $jahr, $konto ) );
+				if ( '' === trim( $roh ) ) {
+					if ( $vorhanden ) {
+						$wpdb->delete( $t, array( 'id' => (int) $vorhanden ) );
+					}
+					continue;
+				}
+				$betrag = round( (float) str_replace( ',', '.', $roh ), 2 );
+				if ( $vorhanden ) {
+					$wpdb->update( $t, array( 'betrag' => $betrag ), array( 'id' => (int) $vorhanden ) );
+				} else {
+					$wpdb->insert( $t, array( 'jahr' => $jahr, 'konto' => $konto, 'betrag' => $betrag, 'erstellt_am' => current_time( 'mysql' ) ) );
+				}
+			}
+			$msg = sprintf( __( 'Anfangsbestände %d gespeichert.', 'vereinsplugin' ), $jahr );
+		}
+	}
+	if ( $can_edit && isset( $_POST['vp_anf_uebernehmen'] ) && check_admin_referer( 'vp_bestaende', 'vp_bestaende_nonce' ) ) {
+		// Endbestände des Vorjahres als Anfangsbestände des Folgejahres setzen.
+		$von = (int) ( $_POST['anf_von_jahr'] ?? 0 );
+		$nach = $von + 1;
+		if ( $von > 1990 && function_exists( 'vp_doppik_salden' ) ) {
+			foreach ( vp_doppik_salden( $von ) as $s ) {
+				if ( ! in_array( $s['typ'], array( 'bestand', 'neutral' ), true ) ) {
+					continue;
+				}
+				$vorhanden = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM `{$t}` WHERE jahr = %d AND konto = %s", $nach, $s['konto'] ) );
+				$row = array( 'jahr' => $nach, 'konto' => $s['konto'], 'betrag' => round( (float) $s['saldo'], 2 ) );
+				if ( $vorhanden ) {
+					$wpdb->update( $t, $row, array( 'id' => (int) $vorhanden ) );
+				} else {
+					$row['notiz']       = sprintf( __( 'Endbestand %d übernommen', 'vereinsplugin' ), $von );
+					$row['erstellt_am'] = current_time( 'mysql' );
+					$wpdb->insert( $t, $row );
+				}
+			}
+			$msg = sprintf( __( 'Endbestände %1$d als Anfangsbestände %2$d übernommen.', 'vereinsplugin' ), $von, $nach );
+		}
+	}
+
+	$jahre = function_exists( 'vp_doppik_bestand_jahre' ) ? vp_doppik_bestand_jahre() : array();
+	$jahr  = isset( $_GET['anf_jahr'] ) ? (int) $_GET['anf_jahr'] : 0;
+	if ( ! $jahr ) {
+		$jahr = $jahre ? (int) max( $jahre ) : (int) current_time( 'Y' );
+	}
+	$werte = array();
+	foreach ( (array) $wpdb->get_results( $wpdb->prepare( "SELECT konto, betrag, notiz FROM `{$t}` WHERE jahr = %d", $jahr ), ARRAY_A ) as $r ) {
+		$werte[ (string) $r['konto'] ] = $r;
+	}
+	// Auch Konten anzeigen, für die es zwar Werte, aber keinen Standardnamen gibt.
+	foreach ( array_keys( $werte ) as $k ) {
+		if ( ! isset( $geldkonten[ $k ] ) ) {
+			$kk = function_exists( 'jb_konto_get' ) ? jb_konto_get( $k ) : null;
+			$geldkonten[ $k ] = $kk ? $kk->bezeichnung : $k;
+		}
+	}
+	$base = get_permalink() ?: '';
+
 	ob_start();
-	echo '<h2>' . esc_html__( 'Bestände der Geld-Töpfe', 'vereinsplugin' ) . '</h2>';
+	echo '<h2>' . esc_html__( 'Jahresanfangsbestände', 'vereinsplugin' ) . '</h2>';
 	if ( $msg ) {
 		echo '<div class="vp-note">' . esc_html( $msg ) . '</div>';
 	}
-	echo '<p class="vp-muted">' . esc_html__( 'Der aktuelle Stand im Kassenbericht wird berechnet: Anfangsbestand + alle Journalbuchungen mit passender Quelle (ab Stichtag). Trage hier den tatsächlichen Kontostand am Stichtag ein.', 'vereinsplugin' ) . '</p>';
+	echo '<p class="vp-muted">' . esc_html__( 'Je Geschäftsjahr der tatsächliche Kontostand am 1. Januar. Alle Auswertungen rechnen ab dem Anfangsbestand des jüngsten hinterlegten Jahres.', 'vereinsplugin' ) . '</p>';
 
-	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Topf', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Anfangsbestand', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Aktueller Stand (berechnet)', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
-	if ( $can_edit ) {
-		echo '<form method="post">' . wp_nonce_field( 'vp_bestaende', 'vp_bestaende_nonce', true, false );
+	// Jahreswechsler
+	if ( $jahre ) {
+		echo '<p>';
+		foreach ( $jahre as $j ) {
+			$aktiv = ( (int) $j === $jahr ) ? ' vp-btn-primary' : '';
+			echo '<a class="vp-btn' . $aktiv . '" href="' . esc_url( add_query_arg( array( 'vp_tab' => 'buchhaltung', 'vp_bh' => 'bestaende', 'anf_jahr' => (int) $j ), $base ) ) . '">' . (int) $j . '</a> ';
+		}
+		echo '</p>';
 	}
-	foreach ( $topfe as $k => $label ) {
+
+	echo '<form method="post">' . wp_nonce_field( 'vp_bestaende', 'vp_bestaende_nonce', true, false );
+	echo '<p><label>' . esc_html__( 'Geschäftsjahr', 'vereinsplugin' ) . ' <input type="number" name="anf_jahr" value="' . (int) $jahr . '" min="1990" max="2200" style="width:100px"' . ( $can_edit ? '' : ' disabled' ) . '></label></p>';
+	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Konto', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Anfangsbestand 1.1.', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Aktueller Stand (berechnet)', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
+	$topf_key = array( '1200' => 'bank', '1000' => 'kasse', '1220' => 'paypal', '1360' => 'zettle' );
+	foreach ( $geldkonten as $konto => $label ) {
+		$val   = isset( $werte[ $konto ] ) ? number_format( (float) $werte[ $konto ]['betrag'], 2, ',', '' ) : '';
+		$stand = isset( $topf_key[ $konto ] ) ? jb_topf_saldo( $topf_key[ $konto ] ) : null;
 		printf(
-			'<tr><td>%s</td><td style="text-align:right">%s</td><td style="text-align:right"><strong>%s €</strong></td></tr>',
+			'<tr><td>%s<br><span class="vp-muted">%s</span></td><td style="text-align:right">%s</td><td style="text-align:right">%s</td></tr>',
+			esc_html( $konto ),
 			esc_html( $label ),
 			$can_edit
-				? '<input type="text" name="anf_' . esc_attr( $k ) . '" inputmode="decimal" value="' . esc_attr( number_format( (float) get_option( 'jb_anfangsbestand_' . $k, 0 ), 2, ',', '' ) ) . '" style="width:110px;text-align:right">'
-				: esc_html( number_format( (float) get_option( 'jb_anfangsbestand_' . $k, 0 ), 2, ',', '.' ) ),
-			esc_html( number_format( jb_topf_saldo( $k ), 2, ',', '.' ) )
+				? '<input type="text" name="anf[' . esc_attr( $konto ) . ']" inputmode="decimal" value="' . esc_attr( $val ) . '" placeholder="—" style="width:120px;text-align:right">'
+				: esc_html( $val ?: '–' ),
+			null === $stand ? '<span class="vp-muted">–</span>' : '<strong>' . esc_html( number_format( $stand, 2, ',', '.' ) ) . ' €</strong>'
 		);
 	}
 	echo '</tbody></table></div>';
 	if ( $can_edit ) {
-		echo '<p><label>' . esc_html__( 'Stichtag (optional – nur Buchungen ab diesem Datum zählen)', 'vereinsplugin' )
-			. ' <input type="date" name="anf_datum" value="' . esc_attr( $stichtag ) . '"></label></p>';
-		echo '<p><button class="vp-btn vp-btn-primary" name="vp_bestaende_save" value="1">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button></p></form>';
+		echo '<p><button class="vp-btn vp-btn-primary" name="vp_anf_save" value="1">' . esc_html__( 'Anfangsbestände speichern', 'vereinsplugin' ) . '</button> ';
+		echo '<span class="vp-muted">' . esc_html__( 'Leeres Feld = kein Anfangsbestand für dieses Konto/Jahr.', 'vereinsplugin' ) . '</span></p>';
+		echo '<p style="border-top:1px solid #e2e5ea;padding-top:10px">'
+			. '<label>' . esc_html__( 'Jahresabschluss: Endbestände übernehmen aus', 'vereinsplugin' )
+			. ' <input type="number" name="anf_von_jahr" value="' . (int) $jahr . '" min="1990" max="2200" style="width:100px"></label> '
+			. '<button class="vp-btn" name="vp_anf_uebernehmen" value="1">' . esc_html__( 'als Anfangsbestand des Folgejahres setzen', 'vereinsplugin' ) . '</button></p>';
+	}
+	echo '</form>';
+
+	$alt = (string) get_option( 'jb_anfangsbestand_datum', '' );
+	if ( $alt && ! $jahre ) {
+		echo '<p class="vp-muted">' . esc_html( sprintf( __( 'Noch keine Jahreswerte hinterlegt – es gilt weiter der alte Stichtag %s.', 'vereinsplugin' ), $alt ) ) . '</p>';
 	}
 	return ob_get_clean();
 }

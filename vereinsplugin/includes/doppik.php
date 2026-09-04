@@ -96,8 +96,54 @@ function vp_doppik_satz( array $r ) {
 	);
 }
 
-/** Anfangsbestände je Bestandskonto (aus den jb_anfangsbestand_*-Optionen). */
-function vp_doppik_anfangsbestaende() {
+/** Jahre, für die Anfangsbestände hinterlegt sind (aufsteigend). */
+function vp_doppik_bestand_jahre() {
+	global $wpdb;
+	if ( ! function_exists( 'jb_table_anfangsbestaende' ) ) {
+		return array();
+	}
+	$t = jb_table_anfangsbestaende();
+	$j = $wpdb->get_col( "SELECT DISTINCT jahr FROM `{$t}` WHERE jahr > 0 ORDER BY jahr ASC" );
+	return array_map( 'intval', (array) $j );
+}
+
+/**
+ * Basisjahr für eine Auswertung: das jüngste Jahr mit hinterlegten
+ * Anfangsbeständen, das nicht nach $jahr liegt. 0 = keine Bestände hinterlegt.
+ */
+function vp_doppik_basisjahr( $jahr = null ) {
+	$jahr = $jahr ? (int) $jahr : (int) current_time( 'Y' );
+	$basis = 0;
+	foreach ( vp_doppik_bestand_jahre() as $j ) {
+		if ( $j <= $jahr && $j > $basis ) {
+			$basis = $j;
+		}
+	}
+	return $basis;
+}
+
+/**
+ * Anfangsbestände je Bestandskonto zum Beginn des Basisjahres.
+ * Ohne Jahrestabelle (Altbestand) greifen die vier alten Optionen.
+ */
+function vp_doppik_anfangsbestaende( $jahr = null ) {
+	global $wpdb;
+	$basis = vp_doppik_basisjahr( $jahr );
+	if ( $basis ) {
+		$rows = $wpdb->get_results( $wpdb->prepare(
+			'SELECT konto, betrag FROM ' . jb_table_anfangsbestaende() . ' WHERE jahr = %d', $basis
+		), ARRAY_A );
+		$out = array();
+		foreach ( (array) $rows as $r ) {
+			$k = (string) $r['konto'];
+			if ( '' === $k ) {
+				continue;
+			}
+			$out[ $k ] = ( $out[ $k ] ?? 0 ) + (float) $r['betrag'];
+		}
+		return $out;
+	}
+
 	$map = array(
 		'bank'   => '1200',
 		'kasse'  => '1000',
@@ -115,12 +161,40 @@ function vp_doppik_anfangsbestaende() {
 }
 
 /**
+ * Zeitfenster einer Auswertung: ab dem 1.1. des Basisjahres (bzw. ab dem alten
+ * Stichtag) bis Jahresende, wenn ein Jahr ausdrücklich gewählt wurde.
+ * @return array{0:string,1:string}  von / bis, jeweils '' = unbegrenzt
+ */
+function vp_doppik_fenster( $jahr = null ) {
+	$basis = vp_doppik_basisjahr( $jahr );
+	$von   = $basis ? sprintf( '%04d-01-01', $basis ) : sanitize_text_field( (string) get_option( 'jb_anfangsbestand_datum', '' ) );
+	$bis   = $jahr ? sprintf( '%04d-12-31', (int) $jahr ) : '';
+	return array( $von, $bis );
+}
+
+/** SQL-WHERE für das Fenster, an eine Abfrage auf jb_buchungen angehängt. */
+function vp_doppik_fenster_sql( $sql, $jahr = null ) {
+	global $wpdb;
+	list( $von, $bis ) = vp_doppik_fenster( $jahr );
+	if ( $von && $bis ) {
+		return $wpdb->prepare( $sql . ' WHERE buchung_datum >= %s AND buchung_datum <= %s', $von, $bis );
+	}
+	if ( $von ) {
+		return $wpdb->prepare( $sql . ' WHERE buchung_datum >= %s', $von );
+	}
+	if ( $bis ) {
+		return $wpdb->prepare( $sql . ' WHERE buchung_datum <= %s', $bis );
+	}
+	return $sql;
+}
+
+/**
  * Salden je Konto. Soll erhöht, Haben senkt den Saldo. Bestands-/Ausgabekonten
  * haben normalerweise einen positiven (Soll-)Saldo, Einnahmekonten einen
  * negativen (Haben-)Saldo.
  * @return array<int,array{konto,name,typ,soll,haben,saldo}>
  */
-function vp_doppik_salden() {
+function vp_doppik_salden( $jahr = null ) {
 	global $wpdb;
 	$t = $wpdb->prefix . 'jb_buchungen';
 	if ( ! function_exists( 'jb_konten_all' ) ) {
@@ -148,16 +222,13 @@ function vp_doppik_salden() {
 		}
 	};
 
-	foreach ( vp_doppik_anfangsbestaende() as $konto => $v ) {
-		$bump( $konto, $v, 0, false );
+	foreach ( vp_doppik_anfangsbestaende( $jahr ) as $konto => $v ) {
+		// Negativer Anfangsbestand gehört auf die Haben-Seite.
+		$bump( $konto, $v > 0 ? $v : 0, $v < 0 ? -$v : 0, false );
 	}
 
-	$stichtag = sanitize_text_field( (string) get_option( 'jb_anfangsbestand_datum', '' ) );
-	$sql = "SELECT id, buchung_datum, betrag, konto, gegenkonto, quelle, beschreibung, gegenpartei, beleg_nr, beleg_referenz FROM `$t`";
-	if ( $stichtag ) {
-		$sql = $wpdb->prepare( $sql . ' WHERE buchung_datum >= %s', $stichtag );
-	}
-	$rows = $wpdb->get_results( $sql, ARRAY_A );
+	$sql  = "SELECT id, buchung_datum, betrag, konto, gegenkonto, quelle, beschreibung, gegenpartei, beleg_nr, beleg_referenz FROM `$t`";
+	$rows = $wpdb->get_results( vp_doppik_fenster_sql( $sql, $jahr ), ARRAY_A );
 	foreach ( (array) $rows as $r ) {
 		$s = vp_doppik_satz( $r );
 		$bump( $s['soll'], $s['betrag'], 0 );
@@ -184,18 +255,14 @@ function vp_doppik_salden() {
 }
 
 /** Kontenblatt (Ledger) für ein Konto: alle berührenden Buchungen + laufender Saldo. */
-function vp_doppik_kontenblatt( $konto ) {
+function vp_doppik_kontenblatt( $konto, $jahr = null ) {
 	global $wpdb;
 	$t = $wpdb->prefix . 'jb_buchungen';
-	$konto    = sanitize_text_field( (string) $konto );
-	$stichtag = sanitize_text_field( (string) get_option( 'jb_anfangsbestand_datum', '' ) );
-	$sql      = "SELECT id, buchung_datum, betrag, konto, gegenkonto, quelle, beschreibung, gegenpartei, beleg_nr, beleg_referenz FROM `$t`";
-	if ( $stichtag ) {
-		$sql = $wpdb->prepare( $sql . ' WHERE buchung_datum >= %s', $stichtag );
-	}
-	$rows = $wpdb->get_results( $sql . ' ORDER BY buchung_datum ASC, id ASC', ARRAY_A );
+	$konto = sanitize_text_field( (string) $konto );
+	$sql   = "SELECT id, buchung_datum, betrag, konto, gegenkonto, quelle, beschreibung, gegenpartei, beleg_nr, beleg_referenz FROM `$t`";
+	$rows  = $wpdb->get_results( vp_doppik_fenster_sql( $sql, $jahr ) . ' ORDER BY buchung_datum ASC, id ASC', ARRAY_A );
 
-	$anf = vp_doppik_anfangsbestaende();
+	$anf = vp_doppik_anfangsbestaende( $jahr );
 	$saldo = (float) ( $anf[ $konto ] ?? 0 );
 	$zeilen = array();
 	if ( $saldo ) {

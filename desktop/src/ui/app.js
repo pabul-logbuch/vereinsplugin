@@ -271,6 +271,10 @@ function renderNav() {
     if (has('jb_budgets')) tblItem('jb_budgets', 'Budgets');
     if (has('jb_ruecklagen')) tblItem('jb_ruecklagen', 'Rücklagen');
     if (has('jb_konten')) addItem('kontenplan', 'Kontenplan', { onClick: showKontenplan });
+    if (has('jb_anfangsbestaende')) tblItem('jb_anfangsbestaende', 'Anfangsbestände');
+    if (has('vp_rechnungen')) addItem('rechnungen', 'Rechnungen', { slug: 'vp_rechnungen', badge: countFor('vp_rechnungen').count, onClick: () => showRechnungen() });
+    if (has('vp_sepa_mandate')) addItem('sepa', 'SEPA-Lastschrift', { onClick: () => showSepa() });
+    if (has('vp_spenden')) addItem('spenden', 'Spenden & Bescheinigungen', { onClick: () => showSpenden() });
   }
 
   // ============== VORSTAND · Sonstige ==============
@@ -314,7 +318,7 @@ function rerender() {
   else if (c.name === 'kontenplan') showKontenplan();
   else if (c.name === 'zbon') showZbon();
   else if (c.name === 'kontenblaetter') showKontenblaetter();
-  else if (c.name === 'kontenblatt') showKontenblatt(c.konto, c.from);
+  else if (c.name === 'kontenblatt') showKontenblatt(c.konto, c.from, c.jahr);
   else if (c.name === 'buchung') showBuchung(c.pk, c.from);
   else if (c.name === 'auslagen_pruefen') showAuslagenPruefen();
   else if (c.name === 'journal') showJournal();
@@ -328,6 +332,9 @@ function rerender() {
   else if (c.name === 'schichtplaene') showSchichtplaene();
   else if (c.name === 'schicht_verwaltung') showSchichtverwaltung();
   else if (c.name === 'newsletter') showNewsletter();
+  else if (c.name === 'rechnungen') showRechnungen();
+  else if (c.name === 'sepa') showSepa({ sub: c.sub, lauf: c.lauf });
+  else if (c.name === 'spenden') showSpenden({ sub: c.sub });
 }
 
 /* ------------------------------------------------------------- views */
@@ -974,77 +981,144 @@ async function showKassenbericht(year) {
 /* --------------------------------------------------------- Kontenplan */
 
 async function showKontenplan() {
-  state.current = { name: 'kontenplan' };
+  const c = state.current && state.current.name === 'kontenplan' ? state.current : {};
+  const jahr = c.jahr || '';
+  state.current = { name: 'kontenplan', jahr };
   renderNav();
   view.innerHTML = '';
   view.append(el('h1', {}, 'Kontenplan'));
-  view.append(el('p', { class: 'sub' }, 'Alle SKR-49-Konten mit ihrem Saldo. Dieselbe Rechnung wie Kontenblätter und Kassenbericht: jede Buchung wirkt auf beiden Konten (Soll und Haben).'));
+  view.append(el('p', { class: 'sub' }, 'Alle SKR-49-Konten mit Saldo. Gerechnet wie Kontenblätter und Kassenbericht: jede Buchung wirkt auf zwei Konten (Soll und Haben).'));
 
-  let report = null;
   let konten = [];
-  let salden = [];
+  let buchungen = [];
+  let bestaende = [];
+  let dmap = DOPPIK_MAP_DEFAULT;
+  let serverAnfang = null;
+  let serverSalden = null;
+  const warn = [];
   try {
-    [report, konten, salden] = await Promise.all([
-      call(api.report.summary()).catch(() => null),
+    [konten, buchungen] = await Promise.all([
       call(api.data.rows('jb_konten', { limit: 2000 })).then((r) => r.rows),
-      call(api.report.salden()).then((s) => (s && s.salden) || []).catch(() => []),
+      call(api.data.rows('jb_buchungen', { limit: 20000 })).then((r) => r.rows),
     ]);
   } catch (e) {
-    return view.append(el('div', { class: 'note err' }, e.message));
+    return view.append(el('div', { class: 'note err' }, 'Lokale Daten nicht lesbar: ' + e.message));
+  }
+  try {
+    bestaende = (await call(api.data.rows('jb_anfangsbestaende', { limit: 2000 }))).rows;
+  } catch {
+    warn.push('Jahresanfangsbestände noch nicht gespiegelt – Plugin auf v0.23.0 aktualisieren und synchronisieren.');
+  }
+  try {
+    const s = await call(api.report.salden(jahr || undefined));
+    if (s && s.map) dmap = { ...DOPPIK_MAP_DEFAULT, ...s.map };
+    if (s && s.anfang) serverAnfang = s.anfang;
+    if (s && s.salden) serverSalden = s.salden;
+  } catch (e) {
+    warn.push('Server-Salden nicht abrufbar (' + e.message + ') – unten steht die lokal gerechnete Fassung.');
   }
 
-  if (report && (report.topfe || []).length) {
-    const pt = el('div', { class: 'tiles' });
-    for (const p of report.topfe) pt.append(el('div', { class: 'tile' }, el('div', { class: 'tile-v' }, eur(p.saldo)), el('div', { class: 'tile-l' }, p.label)));
-    view.append(pt);
+  // Anfangsbestände: bevorzugt vom Server (kennt auch die alten Optionen),
+  // sonst aus der gespiegelten Jahrestabelle.
+  const lok = anfangFuerJahr(bestaende, jahr || new Date().getFullYear());
+  const anfang = serverAnfang && Object.keys(serverAnfang).length ? serverAnfang : lok.anfang;
+  const basis = lok.basis;
+  const fenster = { von: basis ? `${basis}-01-01` : '', bis: jahr ? `${jahr}-12-31` : '' };
+  const sal = saldenLokal(buchungen, anfang, fenster, dmap);
+
+  for (const w of warn) view.append(el('div', { class: 'note' }, w));
+
+  // Jahresauswahl
+  const jahreBuchung = [...new Set(buchungen.map((r) => String(r.buchung_datum || '').slice(0, 4)).filter(Boolean))];
+  const jahreBestand = [...new Set((bestaende || []).map((r) => String(r.jahr || '')).filter((x) => x && x !== '0'))];
+  const jahre = [...new Set([...jahreBuchung, ...jahreBestand])].sort().reverse();
+  const tb0 = el('div', { class: 'toolbar' });
+  tb0.append('Zeitraum:', selectEl([['', 'Stand heute (laufend)'], ...jahre.map((y) => [y, 'Geschäftsjahr ' + y])], jahr, {
+    onchange: (e) => { state.current = { name: 'kontenplan', jahr: e.target.value }; showKontenplan(); },
+  }));
+  tb0.append(el('span', { class: 'muted' },
+    basis ? `Anfangsbestände ${basis}${jahr ? ' · Buchungen bis 31.12.' + jahr : ' · alle Buchungen ab 1.1.' + basis}`
+          : 'Keine Jahresanfangsbestände hinterlegt – es zählen alle Buchungen.'));
+  if (state.meta && state.meta.tables && state.meta.tables.jb_anfangsbestaende) {
+    tb0.append(el('button', { class: 'small', onclick: () => showTable('jb_anfangsbestaende') }, 'Anfangsbestände bearbeiten'));
+  }
+  view.append(tb0);
+
+  // Geld-Töpfe als Kacheln – direkt aus denselben Salden.
+  const topfe = [['1200', 'Bankkonto (KSK)'], ['1000', 'Barkasse'], ['1220', 'PayPal'], ['1360', 'Zettle (Karte)']];
+  const pt = el('div', { class: 'tiles' });
+  for (const [nr, label] of topfe) {
+    const u = sal[nr];
+    pt.append(el('div', { class: 'tile', style: 'cursor:pointer', onclick: () => showKontenblatt(nr, 'kontenplan') },
+      el('div', { class: 'tile-v', style: u && u.saldo < 0 ? 'color:var(--err-ink)' : '' }, eur((u && u.saldo) || 0)),
+      el('div', { class: 'tile-l' }, label)));
+  }
+  view.append(pt);
+  view.append(el('p', { class: 'muted' }, 'Kachel anklicken → Kontenblatt mit allen Bewegungen.'));
+
+  // Gegenprobe: weichen lokale und Server-Salden ab, stimmt eine Annahme nicht.
+  if (serverSalden) {
+    const diff = [];
+    for (const s of serverSalden) {
+      const l = sal[String(s.konto)];
+      if (Math.abs((l ? l.saldo : 0) - Number(s.saldo || 0)) > 0.02) diff.push(`${s.konto}: App ${eur(l ? l.saldo : 0)} / Server ${eur(s.saldo)}`);
+    }
+    if (diff.length) {
+      view.append(el('div', { class: 'note' },
+        'Abweichung zwischen lokal gerechneten und Server-Salden – meist fehlt noch ein Sync oder das Plugin ist älter: ' + diff.slice(0, 6).join(' · ')));
+    }
   }
 
-  // Salden aus der Doppik: erfasst BEIDE Seiten jeder Buchung, also auch die
-  // Bewegungen auf Bank/Kasse/PayPal (die als `quelle` gespeichert sind und
-  // deshalb in einer reinen „GROUP BY konto"-Auswertung fehlen würden).
-  const sal = Object.fromEntries(salden.map((s) => [String(s.konto), s]));
-  const leer = { soll: 0, haben: 0, saldo: 0, anzahl: 0 };
-
-  // Auffangkonto sichtbar machen: dort landen Buchungen ohne SKR-Konto.
+  // Auffangkonten sichtbar machen.
   for (const nr of ['1590', '1599']) {
     const u = sal[nr];
     if (u && u.anzahl) {
       view.append(el('div', { class: 'note' },
-        `${u.anzahl} Buchung(en) haben noch kein SKR-Konto und liegen auf ${nr} – ${u.name || 'Verrechnung'} (${eur(u.saldo)}). `,
+        `${u.anzahl} Buchung(en) haben kein SKR-Konto und liegen auf ${nr} (${eur(u.saldo)}). `,
         el('button', { class: 'small', onclick: () => showKontenblatt(nr, 'kontenplan') }, 'anzeigen und zuordnen')));
     }
   }
 
   const groups = { '': 'Bank / Kasse / Bestand', einnahme: 'Einnahmen / Erträge', ausgabe: 'Ausgaben / Aufwand' };
-  const byTyp = { einnahme: [], ausgabe: [], '': [] };
+  const byTyp = { '': [], einnahme: [], ausgabe: [] };
+  const bekannt = new Set();
   for (const k of konten.slice().sort((a, b) => String(a.nummer).localeCompare(String(b.nummer), 'de', { numeric: true }))) {
+    bekannt.add(String(k.nummer));
     byTyp[k.typ === 'einnahme' || k.typ === 'ausgabe' ? k.typ : ''].push(k);
   }
+  // Konten, die gebucht wurden, aber nicht im Kontenplan stehen.
+  for (const nr of Object.keys(sal).sort()) {
+    if (!bekannt.has(nr)) byTyp[''].push({ nummer: nr, bezeichnung: '(nicht im Kontenplan)', sphaere: '', aktiv: 1 });
+  }
+
   for (const [typ, label] of Object.entries(groups)) {
     if (!byTyp[typ].length) continue;
     view.append(el('h2', {}, label));
     const t = el('table');
     t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Nr'), el('th', {}, 'Bezeichnung'), el('th', {}, 'Sphäre'),
-      el('th', { style: 'text-align:right' }, 'Soll (Zugang)'), el('th', { style: 'text-align:right' }, 'Haben (Abgang)'),
+      el('th', { style: 'text-align:right' }, 'Soll'), el('th', { style: 'text-align:right' }, 'Haben'),
       el('th', { style: 'text-align:right' }, typ === '' ? 'Bestand' : 'Saldo'), el('th', { style: 'text-align:right' }, 'Buchungen'))));
     const tbb = el('tbody');
+    let sumSaldo = 0;
     for (const k of byTyp[typ]) {
-      const u = sal[String(k.nummer)] || leer;
-      // Erfolgskonten haben einen Haben-Saldo (Erträge) bzw. Soll-Saldo
-      // (Aufwand); für die Anzeige wird der Betrag positiv dargestellt.
-      const anz = typ === 'einnahme' ? -u.saldo : u.saldo;
+      const u = sal[String(k.nummer)];
+      // Ertragskonten haben einen Haben-Saldo – für die Anzeige positiv drehen.
+      const anz = u ? (typ === 'einnahme' ? -u.saldo : u.saldo) : 0;
+      if (u) sumSaldo += anz;
       tbb.append(el('tr', { class: String(k.aktiv) === '0' ? 'muted' : '', style: 'cursor:pointer', title: 'Buchungen dieses Kontos anzeigen', onclick: () => showKontenblatt(String(k.nummer), 'kontenplan') },
         el('td', {}, k.nummer), el('td', {}, k.bezeichnung), el('td', {}, k.sphaere || '—'),
-        el('td', { style: 'text-align:right' }, u.soll ? eur(u.soll) : '—'),
-        el('td', { style: 'text-align:right' }, u.haben ? eur(u.haben) : '—'),
-        el('td', { style: 'text-align:right;font-weight:600' }, u.anzahl || u.soll || u.haben ? eur(anz) : '—'),
-        el('td', { style: 'text-align:right' }, String(u.anzahl || ''))));
+        el('td', { style: 'text-align:right' }, u && u.soll ? eur(u.soll) : '—'),
+        el('td', { style: 'text-align:right' }, u && u.haben ? eur(u.haben) : '—'),
+        el('td', { style: 'text-align:right;font-weight:600' + (anz < 0 ? ';color:var(--err-ink)' : '') }, u ? eur(anz) : '—'),
+        el('td', { style: 'text-align:right' }, u && u.anzahl ? String(u.anzahl) : '')));
     }
     t.append(tbb);
+    t.append(el('tfoot', {}, el('tr', {}, el('td', { colspan: '5' }, 'Summe'),
+      el('td', { style: 'text-align:right;font-weight:700' }, eur(sumSaldo)), el('td', {}))));
     view.append(t);
   }
   view.append(el('p', { class: 'muted', style: 'margin-top:12px' },
-    'Zeile anklicken → alle Buchungen des Kontos (dort einzeln bearbeitbar). Anfangsbestände zählen als Soll auf Bank/Kasse/PayPal/Zettle. ',
+    'Zeile anklicken → alle Buchungen des Kontos. ',
     el('button', { class: 'small', onclick: () => showTable('jb_konten') }, 'Kontenplan bearbeiten')));
 }
 
@@ -1208,8 +1282,8 @@ async function showKontenblaetter() {
   if (!(data.salden || []).length) view.append(el('div', { class: 'note' }, 'Noch keine Buchungen.'));
 }
 
-async function showKontenblatt(konto, from = 'blaetter') {
-  state.current = { name: 'kontenblatt', konto, from };
+async function showKontenblatt(konto, from = 'blaetter', jahr = '') {
+  state.current = { name: 'kontenblatt', konto, from, jahr };
   renderNav();
   view.innerHTML = '';
   const back = from === 'kontenplan' ? showKontenplan : showKontenblaetter;
@@ -1217,20 +1291,56 @@ async function showKontenblatt(konto, from = 'blaetter') {
   view.append(el('h1', {}, `Kontenblatt ${konto}`));
   let kb;
   try {
-    kb = await call(api.report.kontenblatt(konto));
+    kb = await call(api.report.kontenblatt(konto, jahr || undefined));
   } catch (e) {
     return view.append(el('div', { class: 'note err' }, e.message));
   }
+  const zeilen = kb.zeilen || [];
+
+  // Aufschlüsselung nach Gegenkonto – zeigt sofort, welche Vorgänge einen
+  // Bestand treiben (z. B. warum die Barkasse ins Minus läuft).
+  const proGegen = new Map();
+  for (const z of zeilen) {
+    const m = /\(Gegenkonto ([^)]+)\)/.exec(String(z.text || ''));
+    const g = m ? m[1] : '—';
+    const e = proGegen.get(g) || { soll: 0, haben: 0, n: 0 };
+    e.soll += Number(z.soll) || 0;
+    e.haben += Number(z.haben) || 0;
+    e.n++;
+    proGegen.set(g, e);
+  }
+  if (proGegen.size > 1) {
+    const box = el('details', { class: 'card' });
+    box.append(el('summary', {}, 'Woraus setzt sich der Saldo zusammen? (nach Gegenkonto)'));
+    const gt = el('table');
+    gt.append(el('thead', {}, el('tr', {}, el('th', {}, 'Gegenkonto'),
+      el('th', { style: 'text-align:right' }, 'Zugang (Soll)'), el('th', { style: 'text-align:right' }, 'Abgang (Haben)'),
+      el('th', { style: 'text-align:right' }, 'Wirkung'), el('th', { style: 'text-align:right' }, 'Anzahl'))));
+    const gtb = el('tbody');
+    for (const [g, e] of [...proGegen.entries()].sort((a, b) => Math.abs(b[1].soll - b[1].haben) - Math.abs(a[1].soll - a[1].haben))) {
+      const w = Math.round((e.soll - e.haben) * 100) / 100;
+      gtb.append(el('tr', { style: g !== '—' ? 'cursor:pointer' : '', onclick: g !== '—' ? () => showKontenblatt(g, from, jahr) : null },
+        el('td', {}, g),
+        el('td', { style: 'text-align:right' }, e.soll ? eur(e.soll) : '—'),
+        el('td', { style: 'text-align:right' }, e.haben ? eur(e.haben) : '—'),
+        el('td', { style: 'text-align:right;font-weight:600' + (w < 0 ? ';color:var(--err-ink)' : '') }, eur(w)),
+        el('td', { style: 'text-align:right' }, String(e.n))));
+    }
+    gt.append(gtb);
+    box.append(gt);
+    view.append(box);
+  }
+
   const t = el('table');
   t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Datum'), el('th', {}, 'Text'),
     el('th', { style: 'text-align:right' }, 'Soll'), el('th', { style: 'text-align:right' }, 'Haben'), el('th', { style: 'text-align:right' }, 'Saldo'))));
   const tb = el('tbody');
-  for (const z of kb.zeilen || []) {
+  for (const z of zeilen) {
     tb.append(el('tr', { style: z.id ? 'cursor:pointer' : '', onclick: z.id ? () => showBuchung(z.id, { name: 'kontenblatt', konto, from }) : null },
       el('td', {}, z.datum || '—'), el('td', {}, z.text || '—'),
       el('td', { style: 'text-align:right' }, z.soll ? eur(z.soll) : ''),
       el('td', { style: 'text-align:right' }, z.haben ? eur(z.haben) : ''),
-      el('td', { style: 'text-align:right' }, eur(z.saldo))));
+      el('td', { style: 'text-align:right' + (Number(z.saldo) < 0 ? ';color:var(--err-ink)' : '') }, eur(z.saldo))));
   }
   tb.append(el('tr', { style: 'font-weight:700' }, el('td', { colspan: '4' }, 'Endsaldo'), el('td', { style: 'text-align:right' }, eur(kb.endsaldo))));
   t.append(tb);
@@ -1406,6 +1516,61 @@ function doppikSatz(r, map) {
   return { soll, haben, betrag: abs, datum: r.buchung_datum || '', text: `${r.gegenpartei || ''} – ${r.beschreibung || ''}`.replace(/^ – | – $/, '') };
 }
 
+/**
+ * Anfangsbestände für ein Jahr aus den gespiegelten `jb_anfangsbestaende`.
+ * Basisjahr = jüngstes hinterlegtes Jahr, das nicht nach `jahr` liegt.
+ */
+function anfangFuerJahr(bestRows, jahr) {
+  const ziel = Number(jahr) || new Date().getFullYear();
+  let basis = 0;
+  for (const r of bestRows || []) {
+    const j = Number(r.jahr) || 0;
+    if (j && j <= ziel && j > basis) basis = j;
+  }
+  const anfang = {};
+  if (basis) {
+    for (const r of bestRows || []) {
+      if (Number(r.jahr) !== basis) continue;
+      const k = String(r.konto || '');
+      if (k) anfang[k] = (anfang[k] || 0) + (Number(r.betrag) || 0);
+    }
+  }
+  return { basis, anfang };
+}
+
+/**
+ * Salden je Konto aus den gespiegelten Buchungen – Spiegel von
+ * vp_doppik_salden(). Bewusst lokal gerechnet: der Kontenplan funktioniert
+ * damit offline und bleibt auch dann gefüllt, wenn der Report-Endpunkt hakt.
+ */
+function saldenLokal(rows, anfang, fenster, map) {
+  const acc = {};
+  const bump = (k, s, h, zaehlen = true) => {
+    if (!k) return;
+    if (!acc[k]) acc[k] = { konto: k, soll: 0, haben: 0, anzahl: 0 };
+    acc[k].soll += s;
+    acc[k].haben += h;
+    if (zaehlen) acc[k].anzahl++;
+  };
+  for (const [k, v] of Object.entries(anfang || {})) bump(k, v > 0 ? v : 0, v < 0 ? -v : 0, false);
+  const von = (fenster && fenster.von) || '';
+  const bis = (fenster && fenster.bis) || '';
+  for (const r of rows || []) {
+    const d = String(r.buchung_datum || '');
+    if (von && d < von) continue;
+    if (bis && d > bis) continue;
+    const s = doppikSatz(r, map);
+    bump(s.soll, s.betrag, 0);
+    bump(s.haben, 0, s.betrag);
+  }
+  for (const a of Object.values(acc)) {
+    a.soll = Math.round(a.soll * 100) / 100;
+    a.haben = Math.round(a.haben * 100) / 100;
+    a.saldo = Math.round((a.soll - a.haben) * 100) / 100;
+  }
+  return acc;
+}
+
 async function showJournal() {
   state.current = { name: 'journal', slug: 'jb_buchungen' };
   renderNav();
@@ -1460,6 +1625,7 @@ async function showJournal() {
     selBar.append(el('button', { class: 'small danger', onclick: batchDelete }, `${n} löschen`));
     if (n === 1) selBar.append(el('button', { class: 'small', onclick: () => togglePanel('split', () => splitForm(rows.find((x) => String(x.id) === [...jState.sel][0]), konten, ruecklagen)) }, 'Aufteilen'));
     if (n === 1 || n === 2) selBar.append(el('button', { class: 'small', onclick: () => togglePanel('umb', () => zuUmbuchungForm([...jState.sel], rows, konten)) }, 'Zu Umbuchung'));
+    selBar.append(el('button', { class: 'small', onclick: flipSign }, '± Vorzeichen umdrehen'));
     selBar.append(el('button', { class: 'small ghost', onclick: () => { jState.sel.clear(); draw(); renderSelBar(); } }, 'Auswahl aufheben'));
   }
   async function batchDelete() {
@@ -1467,6 +1633,29 @@ async function showJournal() {
     try {
       for (const id of jState.sel) await call(api.data.remove('jb_buchungen', id));
       toast(`${jState.sel.size} zum Löschen vorgemerkt.`);
+      jState.sel.clear();
+      await runSyncQuiet();
+      showJournal();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  /**
+   * Vorzeichen der ausgewählten Buchungen umdrehen. Gedacht für Geld-Transfers,
+   * die versehentlich in die falsche Richtung erfasst wurden (z. B. Wechselgeld
+   * von der Bank in die Kasse als Einnahme statt als Abgang).
+   */
+  async function flipSign() {
+    const ids = [...jState.sel];
+    const betroffen = rows.filter((r) => ids.includes(String(r.id)));
+    const summe = betroffen.reduce((s, r) => s + (Number(r.betrag) || 0), 0);
+    if (!confirm(`Bei ${ids.length} Buchung(en) das Vorzeichen umdrehen?\n\nSumme jetzt: ${eur(summe)}\nSumme danach: ${eur(-summe)}`)) return;
+    try {
+      for (const r of betroffen) {
+        await call(api.data.save('jb_buchungen', r.id, { betrag: String(-(Number(r.betrag) || 0)) }));
+      }
+      toast(`${betroffen.length} Buchung(en) gedreht (wird beim Sync gesendet).`);
       jState.sel.clear();
       await runSyncQuiet();
       showJournal();
@@ -3525,3 +3714,808 @@ boot().catch((e) => {
   view.innerHTML = '';
   view.append(el('div', { class: 'note err' }, 'Startfehler: ' + e.message));
 });
+
+/* =====================================================================
+ * Rechnungen
+ * ================================================================== */
+
+const RE_STATUS = { entwurf: 'Entwurf', offen: 'offen', bezahlt: 'bezahlt', storniert: 'storniert' };
+const RE_ZAHLART = [['ueberweisung', 'Überweisung'], ['lastschrift', 'SEPA-Lastschrift'], ['bar', 'bar']];
+
+async function showRechnungen() {
+  state.current = { name: 'rechnungen' };
+  renderNav();
+  view.innerHTML = '';
+  view.append(el('h1', {}, 'Rechnungen'));
+
+  let rows = [];
+  try {
+    rows = (await call(api.data.rows('vp_rechnungen', { limit: 2000 }))).rows;
+  } catch (e) {
+    return view.append(el('div', { class: 'note err' }, e.message));
+  }
+  rows.sort((a, b) => String(b.datum || '').localeCompare(String(a.datum || '')) || Number(b.id) - Number(a.id));
+
+  const offen = rows.filter((r) => r.status === 'offen').reduce((s, r) => s + Number(r.summe || 0), 0);
+  view.append(el('p', { class: 'sub' }, `${rows.length} Rechnungen · offen: ${eur(offen)}`));
+
+  const neu = el('button', { class: 'primary' }, 'Neue Rechnung');
+  neu.addEventListener('click', () => rechnungEdit(null));
+  view.append(el('p', {}, neu));
+
+  const t = el('table');
+  t.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Nummer'), el('th', {}, 'Datum'), el('th', {}, 'Empfänger:in'),
+    el('th', {}, 'Betreff'), el('th', { style: 'text-align:right' }, 'Summe'),
+    el('th', {}, 'Zahlart'), el('th', {}, 'Status'))));
+  const tb = el('tbody');
+  for (const r of rows) {
+    const tr = el('tr', { style: 'cursor:pointer' },
+      el('td', {}, r.nummer || '(Entwurf)'),
+      el('td', {}, r.datum || ''),
+      el('td', {}, r.empfaenger_name || ''),
+      el('td', {}, r.betreff || ''),
+      el('td', { style: 'text-align:right' }, eur(r.summe)),
+      el('td', {}, (RE_ZAHLART.find((z) => z[0] === r.zahlart) || ['', r.zahlart])[1]),
+      el('td', {}, el('span', { class: `st st-${r.status}` }, RE_STATUS[r.status] || r.status)));
+    tr.addEventListener('click', () => rechnungEdit(r));
+    tb.append(tr);
+  }
+  if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: '7' }, 'Noch keine Rechnungen.')));
+  t.append(tb);
+  view.append(t);
+}
+
+async function rechnungEdit(r) {
+  state.current = { name: 'rechnungen' };
+  view.innerHTML = '';
+  const back = el('button', {}, '← Zurück');
+  back.addEventListener('click', showRechnungen);
+  view.append(el('p', {}, back));
+  view.append(el('h1', {}, r ? `Rechnung ${r.nummer || '(Entwurf)'}` : 'Neue Rechnung'));
+
+  const [konten, members, mandate, posAll] = await Promise.all([
+    call(api.data.rows('jb_konten', { limit: 2000 })).then((x) => x.rows).catch(() => []),
+    membersList(),
+    call(api.data.rows('vp_sepa_mandate', { limit: 2000 })).then((x) => x.rows).catch(() => []),
+    call(api.data.rows('vp_rechnung_positionen', { limit: 5000 })).then((x) => x.rows).catch(() => []),
+  ]);
+  const ertrag = konten.filter((k) => k.typ === 'einnahme')
+    .sort((a, b) => String(a.nummer).localeCompare(String(b.nummer), 'de', { numeric: true }))
+    .map((k) => [String(k.nummer), `${k.nummer} – ${k.bezeichnung}`]);
+  const pos = r ? posAll.filter((p) => String(p.rechnung_id) === String(r.id)).sort((a, b) => Number(a.pos) - Number(b.pos)) : [];
+  const locked = !!r && ['bezahlt', 'storniert'].includes(r.status);
+
+  const f = el('form', { class: 'detail' });
+  const user = userSelect(members, r ? r.user_id : '');
+  const name = el('input', { value: r ? r.empfaenger_name || '' : '' });
+  const email = el('input', { type: 'email', value: r ? r.empfaenger_email || '' : '' });
+  const anschrift = el('textarea', { rows: '3' });
+  anschrift.value = r ? r.empfaenger_anschrift || '' : '';
+  const datum = el('input', { type: 'date', value: (r && r.datum) || new Date().toISOString().slice(0, 10) });
+  const faellig = el('input', { type: 'date', value: (r && r.faellig_am) || '' });
+  const zahlart = selectEl(RE_ZAHLART, r ? r.zahlart : 'ueberweisung');
+  const mandat = selectEl(
+    [['', '— automatisch —'], ...mandate.filter((m) => m.status === 'aktiv').map((m) => [String(m.id), `${m.kontoinhaber} (${m.mandatsref})`])],
+    r ? r.mandat_id : ''
+  );
+  const konto = selectEl([['', '— später —'], ...ertrag], r ? r.konto : '');
+  const kst = el('input', { value: r ? r.kostenstelle || '' : '' });
+  const betreff = el('input', { value: r ? r.betreff || '' : 'Rechnung' });
+  const einleitung = el('textarea', { rows: '2' });
+  einleitung.value = r ? r.einleitung || '' : '';
+  const schluss = el('textarea', { rows: '2' });
+  schluss.value = r ? r.schluss || '' : '';
+  const ust = el('input', { type: 'checkbox' });
+  ust.checked = !!(r && Number(r.ust_ausweisen));
+
+  user.addEventListener('change', () => {
+    const m = members.find((x) => String(x.id) === user.value);
+    if (!m) return;
+    if (!name.value) name.value = m.display_name || m.user_login || '';
+    if (!email.value) email.value = m.user_email || '';
+    if (!anschrift.value.trim()) {
+      anschrift.value = [m.vp_strasse, [m.vp_plz, m.vp_ort].filter(Boolean).join(' ')].filter(Boolean).join('\n');
+    }
+  });
+
+  f.append(
+    'Mitglied', user, 'Empfänger:in', name, 'E-Mail', email, 'Anschrift', anschrift,
+    'Datum', datum, 'Fällig am', faellig, 'Zahlart', zahlart, 'SEPA-Mandat', mandat,
+    'Ertragskonto', konto, 'Kostenstelle', kst, 'Betreff', betreff,
+    'Einleitung', einleitung, 'Schlusstext', schluss, 'Umsatzsteuer ausweisen', ust
+  );
+  view.append(el('div', { class: 'card' }, f));
+
+  /* ---- Positionen ---- */
+  view.append(el('h2', {}, 'Positionen'));
+  const ptab = el('table');
+  ptab.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Bezeichnung'), el('th', {}, 'Menge'), el('th', {}, 'Einheit'),
+    el('th', {}, 'Einzelpreis'), el('th', {}, 'USt %'), el('th', {}, 'Konto'), el('th', {}, ''))));
+  const ptb = el('tbody');
+  ptab.append(ptb);
+  const zeilen = [];
+
+  function addZeile(p) {
+    const bez = el('input', { value: (p && p.bezeichnung) || '', style: 'width:100%' });
+    const menge = el('input', { value: p ? fmtNum(p.menge).replace(/,00$/, '') : '1', size: '4' });
+    const einheit = el('input', { value: (p && p.einheit) || '', size: '6' });
+    const preis = moneyInput(p ? p.einzelpreis : '', { size: '8' });
+    const ustS = el('input', { value: p ? String(Number(p.ust_satz) || 0) : '0', size: '3' });
+    const kt = selectEl([['', '—'], ...ertrag], (p && p.konto) || '');
+    const del = el('button', { type: 'button' }, '✕');
+    const tr = el('tr', {}, el('td', {}, bez), el('td', {}, menge), el('td', {}, einheit),
+      el('td', {}, preis), el('td', {}, ustS), el('td', {}, kt), el('td', {}, del));
+    const entry = { bez, menge, einheit, preis, ustS, kt, tr };
+    del.addEventListener('click', () => { tr.remove(); zeilen.splice(zeilen.indexOf(entry), 1); drawSumme(); });
+    [bez, menge, preis, ustS].forEach((n) => n.addEventListener('input', drawSumme));
+    zeilen.push(entry);
+    ptb.append(tr);
+  }
+  pos.forEach(addZeile);
+  if (!pos.length) addZeile(null);
+  view.append(ptab);
+
+  const plus = el('button', { type: 'button' }, '+ Position');
+  plus.addEventListener('click', () => { addZeile(null); drawSumme(); });
+  const summeEl = el('strong', {}, '');
+  view.append(el('p', {}, plus, ' ', summeEl));
+
+  function sammelPositionen() {
+    return zeilen
+      .filter((z) => z.bez.value.trim() || parseNum(z.preis.value))
+      .map((z) => ({
+        bezeichnung: z.bez.value,
+        menge: parseNum(z.menge.value) || 1,
+        einheit: z.einheit.value,
+        einzelpreis: parseNum(z.preis.value),
+        ust_satz: parseNum(z.ustS.value),
+        konto: z.kt.value,
+      }));
+  }
+  function drawSumme() {
+    const p = sammelPositionen();
+    const netto = p.reduce((s, x) => s + x.menge * x.einzelpreis, 0);
+    const steuer = ust.checked ? p.reduce((s, x) => s + (x.menge * x.einzelpreis * x.ust_satz) / 100, 0) : 0;
+    summeEl.textContent = ust.checked
+      ? `Netto ${eur(netto)} + USt ${eur(steuer)} = ${eur(netto + steuer)}`
+      : `Summe ${eur(netto)}`;
+  }
+  ust.addEventListener('change', drawSumme);
+  drawSumme();
+
+  /* ---- Aktionen ---- */
+  const bar = el('p', { style: 'margin-top:14px' });
+  const btn = (label, cls, fn) => {
+    const b = el('button', cls ? { class: cls } : {}, label);
+    b.addEventListener('click', fn);
+    bar.append(b, ' ');
+    return b;
+  };
+
+  async function speichern() {
+    try {
+      const res = await call(api.action.run('rechnung-save', {
+        rechnung: {
+          id: r ? r.id : 0,
+          user_id: user.value, mandat_id: mandat.value,
+          empfaenger_name: name.value, empfaenger_email: email.value, empfaenger_anschrift: anschrift.value,
+          datum: datum.value, faellig_am: faellig.value, zahlart: zahlart.value,
+          konto: konto.value, kostenstelle: kst.value, betreff: betreff.value,
+          einleitung: einleitung.value, schluss: schluss.value, ust_ausweisen: ust.checked ? 1 : 0,
+        },
+        positionen: sammelPositionen(),
+      }));
+      toast('Rechnung gespeichert.');
+      await runSyncQuiet();
+      rechnungEdit(res.rechnung);
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+  async function status(aktion, extra) {
+    try {
+      const res = await call(api.action.run('rechnung-status', { id: r.id, aktion, ...(extra || {}) }));
+      if (aktion === 'html') {
+        await call(api.app.openHtml(`Rechnung ${r.nummer || r.id}`, res.html, res.css));
+        return;
+      }
+      toast('Erledigt.');
+      await runSyncQuiet();
+      if (aktion === 'loeschen') showRechnungen();
+      else rechnungEdit(res.rechnung || r);
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  if (!locked) btn('Speichern', 'primary', speichern);
+  if (r && r.status === 'entwurf') {
+    btn('Festschreiben', '', () => status('festschreiben'));
+    btn('Löschen', '', () => confirm('Entwurf löschen?') && status('loeschen'));
+  }
+  if (r) btn('Drucken / PDF', '', () => status('html'));
+  if (r && r.status === 'offen') {
+    btn('Per E-Mail senden', '', () => status('mail'));
+    btn('Stornieren', '', () => confirm('Rechnung stornieren?') && status('storno'));
+  }
+  view.append(bar);
+
+  if (r && ['offen', 'entwurf'].includes(r.status)) {
+    const zdat = el('input', { type: 'date', value: new Date().toISOString().slice(0, 10) });
+    const topf = el('input', { value: 'Bank KSK' });
+    const zb = el('button', {}, 'Als bezahlt buchen');
+    zb.addEventListener('click', () => status('bezahlt', { datum: zdat.value, quelle: topf.value }));
+    view.append(el('div', { class: 'card' },
+      el('h3', {}, 'Zahlungseingang buchen'),
+      el('form', { class: 'detail' }, 'Bezahlt am', zdat, 'Geld-Topf', topf),
+      el('p', {}, zb)));
+  }
+  if (r && r.bezahlt_am) {
+    view.append(el('p', { class: 'muted' }, `Bezahlt am ${r.bezahlt_am} · Buchung #${r.buchung_id || '—'}`));
+  }
+}
+
+/* =====================================================================
+ * SEPA-Lastschrift
+ * ================================================================== */
+
+const sepaState = { sub: 'mandate', lauf: 0 };
+
+async function showSepa(opts = {}) {
+  if (opts.sub) sepaState.sub = opts.sub;
+  if (opts.lauf !== undefined) sepaState.lauf = opts.lauf;
+  state.current = { name: 'sepa', sub: sepaState.sub, lauf: sepaState.lauf };
+  renderNav();
+  view.innerHTML = '';
+  view.append(el('h1', {}, 'SEPA-Lastschrift'));
+
+  const nav = el('nav', { class: 'subnav' });
+  for (const [k, label] of [['mandate', 'Mandate'], ['laeufe', 'Einzugsläufe'], ['neu', 'Neuer Lauf']]) {
+    nav.append(el('button', {
+      class: 'chip' + (sepaState.sub === k ? ' is-active' : ''),
+      onclick: () => showSepa({ sub: k, lauf: 0 }),
+    }, label));
+  }
+  view.append(nav);
+
+  if (sepaState.sub === 'laeufe' && sepaState.lauf) return sepaLauf(sepaState.lauf);
+  if (sepaState.sub === 'laeufe') return sepaLaeufe();
+  if (sepaState.sub === 'neu') return sepaNeuerLauf();
+  return sepaMandate();
+}
+
+async function sepaMandate() {
+  const [rows, members] = await Promise.all([
+    call(api.data.rows('vp_sepa_mandate', { limit: 3000 })).then((x) => x.rows).catch(() => []),
+    membersList(),
+  ]);
+  rows.sort((a, b) => String(a.kontoinhaber || '').localeCompare(String(b.kontoinhaber || '')));
+
+  const imp = el('button', {}, 'Aus Mitgliederprofilen übernehmen');
+  imp.addEventListener('click', async () => {
+    try {
+      const r = await call(api.action.run('sepa-mandat-save', { import: true }));
+      toast(`${r.angelegt} Mandate angelegt, ${r.uebersprungen} vorhanden.`);
+      await runSyncQuiet();
+      showSepa({ sub: 'mandate' });
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+  const neu = el('button', { class: 'primary' }, 'Mandat anlegen');
+  neu.addEventListener('click', () => sepaMandatEdit(null, members));
+  view.append(el('p', {}, neu, ' ', imp));
+
+  const t = el('table');
+  t.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Referenz'), el('th', {}, 'Kontoinhaber:in'), el('th', {}, 'IBAN'),
+    el('th', {}, 'Unterschrift'), el('th', {}, 'Seq.'), el('th', {}, 'Letzter Einzug'), el('th', {}, 'Status'))));
+  const tb = el('tbody');
+  for (const m of rows) {
+    const ref = m.letzte_nutzung || m.unterschrift_datum;
+    const alt = ref && new Date(ref).getTime() < Date.now() - 36 * 30.44 * 864e5;
+    const tr = el('tr', { style: 'cursor:pointer' },
+      el('td', {}, m.mandatsref || ''),
+      el('td', {}, m.kontoinhaber || ''),
+      el('td', {}, maskIban(m.iban)),
+      el('td', {}, m.unterschrift_datum || '—'),
+      el('td', {}, m.sequenz || ''),
+      el('td', {}, m.letzte_nutzung || '—'),
+      el('td', {}, (m.status || '') + (alt ? ' ⚠' : '')));
+    tr.addEventListener('click', () => sepaMandatEdit(m, members));
+    tb.append(tr);
+  }
+  if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: '7' }, 'Noch keine Mandate.')));
+  t.append(tb);
+  view.append(t);
+  view.append(el('p', { class: 'muted' }, '⚠ = seit 36 Monaten kein Einzug – das Mandat ist erloschen und muss neu erteilt werden.'));
+}
+
+function maskIban(iban) {
+  const s = String(iban || '').replace(/\s+/g, '');
+  return s.length < 8 ? s : `${s.slice(0, 4)} … ${s.slice(-4)}`;
+}
+
+function sepaMandatEdit(m, members) {
+  view.innerHTML = '';
+  const back = el('button', {}, '← Zurück');
+  back.addEventListener('click', () => showSepa({ sub: 'mandate' }));
+  view.append(el('p', {}, back));
+  view.append(el('h1', {}, m ? `Mandat ${m.mandatsref}` : 'Mandat anlegen'));
+
+  const f = el('form', { class: 'detail' });
+  const user = userSelect(members, m ? m.user_id : '');
+  const inhaber = el('input', { value: (m && m.kontoinhaber) || '' });
+  const iban = el('input', { value: (m && m.iban) || '' });
+  const bic = el('input', { value: (m && m.bic) || '', placeholder: 'optional' });
+  const email = el('input', { type: 'email', value: (m && m.email) || '' });
+  const unter = el('input', { type: 'date', value: (m && m.unterschrift_datum) || '' });
+  const typ = selectEl([['CORE', 'Basislastschrift (CORE)'], ['B2B', 'Firmenlastschrift (B2B)']], m ? m.typ : 'CORE');
+  const seq = selectEl([['FRST', 'Erstlastschrift (FRST)'], ['RCUR', 'Folgelastschrift (RCUR)'], ['OOFF', 'Einmallastschrift (OOFF)'], ['FNAL', 'Letzte (FNAL)']], m ? m.sequenz : 'FRST');
+  const st = selectEl([['aktiv', 'aktiv'], ['widerrufen', 'widerrufen'], ['abgelaufen', 'abgelaufen']], m ? m.status : 'aktiv');
+  const notiz = el('textarea', { rows: '2' });
+  notiz.value = (m && m.notiz) || '';
+
+  user.addEventListener('change', () => {
+    const u = members.find((x) => String(x.id) === user.value);
+    if (!u) return;
+    if (!inhaber.value) inhaber.value = u.vp_sepa_kontoinhaber || u.display_name || '';
+    if (!iban.value) iban.value = u.vp_sepa_iban || '';
+    if (!email.value) email.value = u.user_email || '';
+  });
+
+  f.append('Mitglied', user, 'Kontoinhaber:in', inhaber, 'IBAN', iban, 'BIC', bic, 'E-Mail', email,
+    'Unterschrift am', unter, 'Art', typ, 'Nächste Sequenz', seq, 'Status', st, 'Notiz', notiz);
+  view.append(el('div', { class: 'card' }, f));
+
+  const save = el('button', { class: 'primary' }, 'Speichern');
+  save.addEventListener('click', async () => {
+    try {
+      await call(api.action.run('sepa-mandat-save', {
+        id: m ? m.id : 0, user_id: user.value, kontoinhaber: inhaber.value, iban: iban.value,
+        bic: bic.value, email: email.value, unterschrift_datum: unter.value,
+        typ: typ.value, sequenz: seq.value, status: st.value, notiz: notiz.value,
+      }));
+      toast('Mandat gespeichert.');
+      await runSyncQuiet();
+      showSepa({ sub: 'mandate' });
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+  view.append(el('p', {}, save));
+}
+
+async function sepaLaeufe() {
+  const rows = await call(api.data.rows('vp_sepa_laeufe', { limit: 500 })).then((x) => x.rows).catch(() => []);
+  rows.sort((a, b) => String(b.faellig_am || '').localeCompare(String(a.faellig_am || '')));
+  const t = el('table');
+  t.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Fällig'), el('th', {}, 'Bezeichnung'), el('th', {}, 'Posten'),
+    el('th', { style: 'text-align:right' }, 'Summe'), el('th', {}, 'Status'))));
+  const tb = el('tbody');
+  for (const l of rows) {
+    const tr = el('tr', { style: 'cursor:pointer' },
+      el('td', {}, l.faellig_am || ''), el('td', {}, l.bezeichnung || ''),
+      el('td', {}, String(l.anzahl || 0)), el('td', { style: 'text-align:right' }, eur(l.summe)),
+      el('td', {}, l.status || ''));
+    tr.addEventListener('click', () => showSepa({ sub: 'laeufe', lauf: l.id }));
+    tb.append(tr);
+  }
+  if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: '5' }, 'Noch keine Läufe.')));
+  t.append(tb);
+  view.append(t);
+}
+
+async function sepaNeuerLauf() {
+  const konten = await call(api.data.rows('jb_konten', { limit: 2000 })).then((x) => x.rows).catch(() => []);
+  const ertrag = konten.filter((k) => k.typ === 'einnahme')
+    .sort((a, b) => String(a.nummer).localeCompare(String(b.nummer), 'de', { numeric: true }))
+    .map((k) => [String(k.nummer), `${k.nummer} – ${k.bezeichnung}`]);
+
+  const f = el('form', { class: 'detail' });
+  const bez = el('input', { placeholder: 'Beitragseinzug 2026' });
+  const faellig = el('input', { type: 'date', value: new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10) });
+  const typ = selectEl([['beitrag', 'Mitgliedsbeiträge'], ['rechnung', 'Offene Rechnungen (Lastschrift)'], ['frei', 'Leer']], 'beitrag');
+  const iv = selectEl([['jaehrlich', 'jährlich'], ['halbjaehrlich', 'halbjährlich'], ['vierteljaehrlich', 'vierteljährlich'], ['monatlich', 'monatlich']], 'jaehrlich');
+  const konto = selectEl(ertrag.length ? ertrag : [['4100', '4100']], '4100');
+  const quelle = el('input', { value: 'Bank KSK' });
+  const zweck = el('input', { value: 'Mitgliedsbeitrag {jahr} - {name}' });
+  f.append('Bezeichnung', bez, 'Fällig am', faellig, 'Quelle der Posten', typ,
+    'Einzugsintervall', iv, 'Ertragskonto', konto, 'Geld-Topf', quelle, 'Verwendungszweck', zweck);
+  view.append(el('div', { class: 'card' }, f));
+  view.append(el('p', { class: 'muted' }, 'Platzhalter: {jahr} {monat} {name} {mandatsref} {betrag}. Der Beitrag aus dem Profil wird auf das gewählte Intervall umgerechnet.'));
+
+  const go = el('button', { class: 'primary' }, 'Lauf anlegen');
+  const run = async () => {
+    try {
+      const r = await call(api.action.run('sepa-lauf', {
+        aktion: 'erstellen', bezeichnung: bez.value, faellig_am: faellig.value, typ: typ.value,
+        intervall: iv.value, konto: konto.value, quelle: quelle.value, zweck_vorlage: zweck.value,
+      }));
+      toast(`Lauf mit ${(r.posten || []).length} Posten angelegt.`);
+      await runSyncQuiet();
+      showSepa({ sub: 'laeufe', lauf: r.lauf_id });
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+  go.addEventListener('click', run);
+  f.addEventListener('submit', (e) => { e.preventDefault(); run(); });
+  view.append(el('p', {}, go));
+}
+
+async function sepaLauf(id) {
+  let data;
+  try {
+    data = await call(api.action.run('sepa-lauf', { aktion: 'pruefen', lauf_id: id }));
+  } catch (e) {
+    return view.append(el('div', { class: 'note err' }, e.message));
+  }
+  const { lauf, posten, probleme } = data;
+  const back = el('button', {}, '← Alle Läufe');
+  back.addEventListener('click', () => showSepa({ sub: 'laeufe', lauf: 0 }));
+  view.append(el('p', {}, back));
+  view.append(el('h2', {}, `${lauf.bezeichnung} — ${lauf.faellig_am} · ${lauf.status} · ${eur(lauf.summe)}`));
+
+  if (probleme && probleme.length) {
+    const ul = el('ul');
+    probleme.slice(0, 20).forEach((p) => ul.append(el('li', {}, p)));
+    view.append(el('div', { class: 'note err' }, el('strong', {}, 'Vor dem Export klären:'), ul));
+  }
+
+  const bar = el('p', {});
+  if (!probleme.length) {
+    const x = el('button', { class: 'primary' }, 'SEPA-XML speichern');
+    x.addEventListener('click', async () => {
+      try {
+        const r = await call(api.action.run('sepa-lauf', { aktion: 'xml', lauf_id: id }));
+        const res = await call(api.app.saveFile(r.dateiname, r.xml));
+        if (!res.canceled) toast(`Gespeichert: ${res.path}`);
+        await runSyncQuiet();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    });
+    bar.append(x, ' ');
+  }
+  if (lauf.status !== 'gebucht') {
+    const b = el('button', {}, 'Als eingezogen buchen');
+    b.addEventListener('click', async () => {
+      if (!confirm('Alle Posten als eingezogen ins Journal buchen?')) return;
+      try {
+        const r = await call(api.action.run('sepa-lauf', { aktion: 'buchen', lauf_id: id }));
+        toast(`${r.gebucht} Posten gebucht (${eur(r.summe)}).`);
+        await runSyncQuiet();
+        showSepa({ sub: 'laeufe', lauf: id });
+      } catch (e) {
+        toast(e.message, true);
+      }
+    });
+    const d = el('button', {}, 'Lauf löschen');
+    d.addEventListener('click', async () => {
+      if (!confirm('Lauf wirklich löschen?')) return;
+      try {
+        await call(api.action.run('sepa-lauf', { aktion: 'loeschen', lauf_id: id }));
+        toast('Gelöscht.');
+        await runSyncQuiet();
+        showSepa({ sub: 'laeufe', lauf: 0 });
+      } catch (e) {
+        toast(e.message, true);
+      }
+    });
+    bar.append(b, ' ', d);
+  }
+  view.append(bar);
+
+  const t = el('table');
+  t.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Kontoinhaber:in'), el('th', {}, 'IBAN'), el('th', {}, 'Mandat'),
+    el('th', {}, 'Seq.'), el('th', { style: 'text-align:right' }, 'Betrag'),
+    el('th', {}, 'Verwendungszweck'), el('th', {}, 'Status'))));
+  const tb = el('tbody');
+  for (const p of posten) {
+    tb.append(el('tr', {},
+      el('td', {}, p.kontoinhaber || ''), el('td', {}, maskIban(p.iban)),
+      el('td', {}, `${p.mandatsref || ''} (${p.unterschrift_datum || '—'})`),
+      el('td', {}, p.sequenz || ''), el('td', { style: 'text-align:right' }, eur(p.betrag)),
+      el('td', {}, p.zweck || ''), el('td', {}, p.status || '')));
+  }
+  t.append(tb);
+  view.append(t);
+  view.append(el('p', { class: 'muted' },
+    'Beim Buchen entsteht je Posten eine Einnahme im Journal – die Sammelbuchung auf dem Kontoauszug beim Bank-Import deshalb überspringen. Beträge ändern: in der Weboberfläche unter „SEPA-Lastschrift".'));
+}
+
+/* =====================================================================
+ * Spenden & Zuwendungsbestätigungen
+ * ================================================================== */
+
+const spState = { sub: 'zuwendungen', jahr: new Date().getFullYear() };
+const SPENDE_ART = [['geld', 'Geldzuwendung'], ['beitrag', 'Mitgliedsbeitrag'], ['sach', 'Sachzuwendung'], ['aufwand', 'Aufwandsersatz']];
+const artLabel = (a) => (SPENDE_ART.find((x) => x[0] === a) || [a, a])[1];
+
+async function showSpenden(opts = {}) {
+  if (opts.sub) spState.sub = opts.sub;
+  if (opts.jahr) spState.jahr = opts.jahr;
+  state.current = { name: 'spenden', sub: spState.sub };
+  renderNav();
+  view.innerHTML = '';
+  view.append(el('h1', {}, 'Spenden & Zuwendungsbestätigungen'));
+
+  const nav = el('nav', { class: 'subnav' });
+  for (const [k, label] of [['zuwendungen', 'Zuwendungen'], ['spender', 'Spender:innen'], ['bestaetigungen', 'Bestätigungen']]) {
+    nav.append(el('button', {
+      class: 'chip' + (spState.sub === k ? ' is-active' : ''),
+      onclick: () => showSpenden({ sub: k }),
+    }, label));
+  }
+  view.append(nav);
+
+  const jn = el('p', { class: 'muted' }, 'Jahr: ');
+  const now = new Date().getFullYear();
+  for (let y = now; y >= now - 5; y--) {
+    const b = el('button', { class: y === spState.jahr ? 'primary' : '' }, String(y));
+    b.addEventListener('click', () => showSpenden({ jahr: y }));
+    jn.append(b, ' ');
+  }
+  view.append(jn);
+
+  const [spenden, spender, zuw] = await Promise.all([
+    call(api.data.rows('vp_spenden', { limit: 10000 })).then((x) => x.rows).catch(() => []),
+    call(api.data.rows('vp_spender', { limit: 5000 })).then((x) => x.rows).catch(() => []),
+    call(api.data.rows('vp_zuwendungen', { limit: 5000 })).then((x) => x.rows).catch(() => []),
+  ]);
+
+  if (spState.sub === 'spender') return spViewSpender(spenden, spender);
+  if (spState.sub === 'bestaetigungen') return spViewBestaetigungen(zuw, spender);
+  return spViewZuwendungen(spenden, spender, zuw);
+}
+
+const jahrVon = (d) => Number(String(d || '').slice(0, 4));
+
+function spViewZuwendungen(spenden, spender, zuw) {
+  const rows = spenden.filter((s) => jahrVon(s.datum) === spState.jahr)
+    .sort((a, b) => String(b.datum).localeCompare(String(a.datum)));
+  const nameOf = (id) => (spender.find((p) => String(p.id) === String(id)) || {}).name || '—';
+  const spOf = (id) => spender.find((p) => String(p.id) === String(id));
+  const zbOf = (id) => (zuw.find((z) => String(z.id) === String(id)) || {}).nummer || '—';
+
+  const summe = rows.reduce((s, r) => s + Number(r.betrag || 0), 0);
+  const offen = rows.filter((r) => !r.bescheinigung_id).reduce((s, r) => s + Number(r.betrag || 0), 0);
+  view.append(el('p', { class: 'sub' }, `${spState.jahr}: ${eur(summe)} Zuwendungen, davon ${eur(offen)} noch ohne Bestätigung.`));
+
+  const imp = el('button', {}, 'Aus dem Journal übernehmen');
+  imp.addEventListener('click', async () => {
+    try {
+      const r = await call(api.action.run('spende-save', { import: true, jahr: spState.jahr }));
+      toast(`${r.neu} übernommen, bei ${r.ohne_anschrift} fehlt die Anschrift.`);
+      await runSyncQuiet();
+      showSpenden();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+  const alle = el('button', { class: 'primary' }, 'Sammelbestätigungen für alle');
+  alle.addEventListener('click', async () => {
+    if (!confirm('Für alle Spender:innen mit offenen Zuwendungen eine Sammelbestätigung ausstellen?')) return;
+    try {
+      const r = await call(api.action.run('zuwendung', { aktion: 'alle', jahr: spState.jahr }));
+      toast(`${r.ausgestellt} Bestätigungen ausgestellt.`);
+      if ((r.fehler || []).length) toast(r.fehler.slice(0, 3).join(' · '), true);
+      await runSyncQuiet();
+      showSpenden({ sub: 'bestaetigungen' });
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+  view.append(el('p', {}, imp, ' ', alle));
+
+  /* Von Hand erfassen */
+  const f = el('form', { class: 'detail' });
+  const sel = selectEl([['', '— neu —'], ...spender.map((p) => [String(p.id), p.name])], '');
+  const nname = el('input', { placeholder: 'Name, falls neu' });
+  const dat = el('input', { type: 'date', value: new Date().toISOString().slice(0, 10) });
+  const betrag = moneyInput('');
+  const art = selectEl(SPENDE_ART, 'geld');
+  const besch = el('input', {});
+  const verz = el('input', { type: 'checkbox' });
+  f.append('Spender:in', sel, '… oder neuer Name', nname, 'Datum', dat, 'Betrag', betrag,
+    'Art', art, 'Beschreibung', besch, 'Verzicht auf Aufwendungsersatz', verz);
+  const add = el('button', {}, 'Erfassen');
+  const doAdd = async () => {
+    try {
+      await call(api.action.run('spende-save', {
+        spender_id: sel.value, name: nname.value, datum: dat.value, betrag: parseNum(betrag.value),
+        art: art.value, beschreibung: besch.value, verzicht: verz.checked ? 1 : 0,
+      }));
+      toast('Zuwendung erfasst.');
+      await runSyncQuiet();
+      showSpenden();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+  add.addEventListener('click', doAdd);
+  f.addEventListener('submit', (e) => { e.preventDefault(); doAdd(); });
+  const det = el('details', { class: 'card' }, el('summary', {}, 'Zuwendung von Hand erfassen'), f, el('p', {}, add));
+  view.append(det);
+
+  const t = el('table');
+  t.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Datum'), el('th', {}, 'Spender:in'), el('th', {}, 'Anschrift'),
+    el('th', {}, 'Art'), el('th', { style: 'text-align:right' }, 'Betrag'), el('th', {}, 'Bestätigung'))));
+  const tb = el('tbody');
+  for (const r of rows) {
+    const p = spOf(r.spender_id);
+    const adr = p ? [p.strasse, [p.plz, p.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
+    tb.append(el('tr', {},
+      el('td', {}, r.datum || ''),
+      el('td', {}, nameOf(r.spender_id)),
+      adr ? el('td', {}, adr) : el('td', { class: 'warn' }, 'fehlt'),
+      el('td', {}, artLabel(r.art)),
+      el('td', { style: 'text-align:right' }, eur(r.betrag)),
+      el('td', {}, r.bescheinigung_id ? zbOf(r.bescheinigung_id) : '—')));
+  }
+  if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: '6' }, 'Keine Zuwendungen in diesem Jahr.')));
+  t.append(tb);
+  view.append(t);
+}
+
+function spViewSpender(spenden, spender) {
+  const neu = el('button', { class: 'primary' }, 'Spender:in anlegen');
+  neu.addEventListener('click', () => spSpenderEdit(null));
+  view.append(el('p', {}, neu));
+
+  const t = el('table');
+  t.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Name'), el('th', {}, 'Anschrift'), el('th', {}, 'E-Mail'),
+    el('th', { style: 'text-align:right' }, 'Zuwendungen'), el('th', {}, 'Ohne Bestätigung'))));
+  const tb = el('tbody');
+  for (const p of spender.slice().sort((a, b) => String(a.name).localeCompare(String(b.name)))) {
+    const meine = spenden.filter((s) => String(s.spender_id) === String(p.id));
+    const summe = meine.reduce((s, x) => s + Number(x.betrag || 0), 0);
+    const offen = meine.filter((s) => !s.bescheinigung_id && jahrVon(s.datum) === spState.jahr)
+      .reduce((s, x) => s + Number(x.betrag || 0), 0);
+    const adr = [p.strasse, [p.plz, p.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+
+    const td = el('td', {});
+    if (offen > 0) {
+      const b = el('button', {}, `${eur(offen)} (${spState.jahr}) bestätigen`);
+      b.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        try {
+          const r = await call(api.action.run('zuwendung', { aktion: 'erstellen', spender_id: p.id, typ: 'sammel', jahr: spState.jahr }));
+          toast(`Bestätigung ${r.bestaetigung.nummer} ausgestellt.`);
+          await runSyncQuiet();
+          showSpenden({ sub: 'bestaetigungen' });
+        } catch (e) {
+          toast(e.message, true);
+        }
+      });
+      td.append(b);
+    } else {
+      td.append('—');
+    }
+
+    const tr = el('tr', { style: 'cursor:pointer' },
+      el('td', {}, p.name || ''),
+      adr ? el('td', {}, adr) : el('td', { class: 'warn' }, 'fehlt'),
+      el('td', {}, p.email || ''),
+      el('td', { style: 'text-align:right' }, `${eur(summe)} (${meine.length})`),
+      td);
+    tr.addEventListener('click', () => spSpenderEdit(p));
+    tb.append(tr);
+  }
+  if (!spender.length) tb.append(el('tr', {}, el('td', { colspan: '5' }, 'Noch keine Spender:innen erfasst.')));
+  t.append(tb);
+  view.append(t);
+}
+
+async function spSpenderEdit(p) {
+  const members = await membersList();
+  view.innerHTML = '';
+  const back = el('button', {}, '← Zurück');
+  back.addEventListener('click', () => showSpenden({ sub: 'spender' }));
+  view.append(el('p', {}, back));
+  view.append(el('h1', {}, p ? p.name : 'Spender:in anlegen'));
+
+  const f = el('form', { class: 'detail' });
+  const name = el('input', { value: (p && p.name) || '' });
+  const strasse = el('input', { value: (p && p.strasse) || '' });
+  const plz = el('input', { value: (p && p.plz) || '' });
+  const ort = el('input', { value: (p && p.ort) || '' });
+  const land = el('input', { value: (p && p.land) || '' });
+  const email = el('input', { type: 'email', value: (p && p.email) || '' });
+  const user = userSelect(members, p ? p.user_id : '');
+  user.addEventListener('change', () => {
+    const u = members.find((x) => String(x.id) === user.value);
+    if (!u) return;
+    if (!name.value) name.value = u.display_name || '';
+    if (!strasse.value) strasse.value = u.vp_strasse || '';
+    if (!plz.value) plz.value = u.vp_plz || '';
+    if (!ort.value) ort.value = u.vp_ort || '';
+    if (!email.value) email.value = u.user_email || '';
+  });
+  f.append('Mitglied', user, 'Name', name, 'Straße, Nr.', strasse, 'PLZ', plz, 'Ort', ort, 'Land', land, 'E-Mail', email);
+  view.append(el('div', { class: 'card' }, f));
+
+  const save = el('button', { class: 'primary' }, 'Speichern');
+  const doSave = async () => {
+    try {
+      await call(api.action.run('spender-save', {
+        id: p ? p.id : 0, user_id: user.value, name: name.value, strasse: strasse.value,
+        plz: plz.value, ort: ort.value, land: land.value, email: email.value,
+      }));
+      toast('Gespeichert.');
+      await runSyncQuiet();
+      showSpenden({ sub: 'spender' });
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+  save.addEventListener('click', doSave);
+  f.addEventListener('submit', (e) => { e.preventDefault(); doSave(); });
+  view.append(el('p', {}, save));
+}
+
+function spViewBestaetigungen(zuw, spender) {
+  const rows = zuw.filter((z) => Number(z.jahr) === spState.jahr)
+    .sort((a, b) => String(b.nummer).localeCompare(String(a.nummer)));
+  const nameOf = (id) => (spender.find((p) => String(p.id) === String(id)) || {}).name || '—';
+
+  const t = el('table');
+  t.append(el('thead', {}, el('tr', {},
+    el('th', {}, 'Nummer'), el('th', {}, 'Spender:in'), el('th', {}, 'Art'),
+    el('th', { style: 'text-align:right' }, 'Summe'), el('th', {}, 'Ausgestellt'), el('th', {}, ''))));
+  const tb = el('tbody');
+  for (const z of rows) {
+    const akt = el('td', {});
+    const p = el('button', {}, 'Drucken / PDF');
+    p.addEventListener('click', async () => {
+      try {
+        const r = await call(api.action.run('zuwendung', { aktion: 'html', id: z.id }));
+        await call(api.app.openHtml(`Zuwendungsbestätigung ${z.nummer}`, r.html, r.css));
+      } catch (e) {
+        toast(e.message, true);
+      }
+    });
+    akt.append(p, ' ');
+    if (!Number(z.storniert)) {
+      const m = el('button', {}, 'Mailen');
+      m.addEventListener('click', async () => {
+        try {
+          await call(api.action.run('zuwendung', { aktion: 'mail', id: z.id }));
+          toast('Verschickt.');
+        } catch (e) {
+          toast(e.message, true);
+        }
+      });
+      const s = el('button', {}, 'Stornieren');
+      s.addEventListener('click', async () => {
+        if (!confirm('Bestätigung stornieren?')) return;
+        try {
+          await call(api.action.run('zuwendung', { aktion: 'storno', id: z.id }));
+          toast('Storniert.');
+          await runSyncQuiet();
+          showSpenden({ sub: 'bestaetigungen' });
+        } catch (e) {
+          toast(e.message, true);
+        }
+      });
+      akt.append(m, ' ', s);
+    }
+    tb.append(el('tr', {},
+      el('td', {}, z.nummer + (Number(z.storniert) ? ' (storniert)' : '')),
+      el('td', {}, nameOf(z.spender_id)),
+      el('td', {}, z.typ === 'sammel' ? 'Sammelbestätigung' : 'Einzelbestätigung'),
+      el('td', { style: 'text-align:right' }, eur(z.summe)),
+      el('td', {}, String(z.ausgestellt_am || '').slice(0, 10)),
+      akt));
+  }
+  if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: '6' }, 'Für dieses Jahr wurden noch keine Bestätigungen ausgestellt.')));
+  t.append(tb);
+  view.append(t);
+}

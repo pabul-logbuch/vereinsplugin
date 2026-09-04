@@ -95,10 +95,20 @@ function vp_sync_tables() {
 		'jb_buchungen'           => array( 'jb_buchungen',            'id', 'erstellt_am',   'jb_view_journal', null ),
 		'jb_budgets'             => array( 'jb_budgets',              'id', 'erstellt_am',   'jb_view_journal', null ),
 		'jb_ruecklagen'          => array( 'jb_ruecklagen',           'id', null,            'jb_view_journal', null ),
+		'jb_anfangsbestaende'    => array( 'jb_anfangsbestaende',     'id', 'erstellt_am',   'jb_view_journal', null ),
 		'jb_getraenke'           => array( 'jb_getraenke',            'id', null,            'jb_view_journal', null ),
 		'jb_getraenke_bewegungen'=> array( 'jb_getraenke_bewegungen', 'id', 'erstellt_am',  'jb_view_journal', null ),
 		'jb_konten'              => array( 'jb_konten',               'id', null,            'jb_submit_auslagen', null ), // Konten dürfen auch Einreicher sehen (Kategorie-Auswahl)
 		'jb_konto_regeln'        => array( 'jb_konto_regeln',         'id', null,            'jb_view_journal', null ),
+		// Rechnungen / SEPA / Spenden
+		'vp_rechnungen'          => array( 'vp_rechnungen',           'id', 'geaendert_am',  'jb_view_journal', 'user_id' ),
+		'vp_rechnung_positionen' => array( 'vp_rechnung_positionen',  'id', null,            'jb_view_journal', null ),
+		'vp_sepa_mandate'        => array( 'vp_sepa_mandate',         'id', 'geaendert_am',  'jb_view_journal', 'user_id' ),
+		'vp_sepa_laeufe'         => array( 'vp_sepa_laeufe',          'id', 'erstellt_am',   'jb_view_journal', null ),
+		'vp_sepa_posten'         => array( 'vp_sepa_posten',          'id', null,            'jb_view_journal', 'user_id' ),
+		'vp_spender'             => array( 'vp_spender',              'id', 'erstellt_am',   'jb_view_journal', 'user_id' ),
+		'vp_spenden'             => array( 'vp_spenden',              'id', 'erstellt_am',   'jb_view_journal', null ),
+		'vp_zuwendungen'         => array( 'vp_zuwendungen',          'id', 'ausgestellt_am','jb_view_journal', null, array( 'html' ) ),
 		// Anträge / Newsletter
 		'vp_antraege'            => array( 'vp_antraege',             'id', 'created_at',    'vp_manage_members', '__email' ),
 		'vp_newsletter'          => array( 'vp_newsletter',           'id', 'gesendet_am',   'vp_manage_members', null ),
@@ -106,7 +116,7 @@ function vp_sync_tables() {
 
 	$out = array();
 	foreach ( $defs as $slug => $d ) {
-		$out[ $slug ] = array( 'table' => $d[0], 'pk' => $d[1], 'time' => $d[2], 'cap' => $d[3] ?? '', 'self' => $d[4] ?? null );
+		$out[ $slug ] = array( 'table' => $d[0], 'pk' => $d[1], 'time' => $d[2], 'cap' => $d[3] ?? '', 'self' => $d[4] ?? null, 'hide' => $d[5] ?? array() );
 	}
 	return apply_filters( 'vp_sync_tables', $out );
 }
@@ -272,10 +282,15 @@ add_action( 'rest_api_init', function () {
 	register_rest_route( VP_SYNC_API_NS, '/report/salden', array(
 		'methods'             => 'GET',
 		'permission_callback' => $cap( 'jb_view_journal' ),
-		'callback'            => function () {
+		'callback'            => function ( WP_REST_Request $r ) {
+			$jahr = (int) $r->get_param( 'jahr' ) ?: null;
 			return rest_ensure_response( array(
-				'salden' => function_exists( 'vp_doppik_salden' ) ? vp_doppik_salden() : array(),
-				'map'    => function_exists( 'vp_doppik_map' ) ? vp_doppik_map() : array(),
+				'salden'    => function_exists( 'vp_doppik_salden' ) ? vp_doppik_salden( $jahr ) : array(),
+				'map'       => function_exists( 'vp_doppik_map' ) ? vp_doppik_map() : array(),
+				'jahr'      => $jahr,
+				'basisjahr' => function_exists( 'vp_doppik_basisjahr' ) ? vp_doppik_basisjahr( $jahr ) : 0,
+				'jahre'     => function_exists( 'vp_doppik_bestand_jahre' ) ? vp_doppik_bestand_jahre() : array(),
+				'anfang'    => function_exists( 'vp_doppik_anfangsbestaende' ) ? vp_doppik_anfangsbestaende( $jahr ) : array(),
 			) );
 		},
 	) );
@@ -287,7 +302,7 @@ add_action( 'rest_api_init', function () {
 			if ( ! function_exists( 'vp_doppik_kontenblatt' ) ) {
 				return new WP_Error( 'no_fn', 'Doppik-Modul nicht geladen.', array( 'status' => 400 ) );
 			}
-			return rest_ensure_response( vp_doppik_kontenblatt( (string) $r->get_param( 'konto' ) ) );
+			return rest_ensure_response( vp_doppik_kontenblatt( (string) $r->get_param( 'konto' ), (int) $r->get_param( 'jahr' ) ?: null ) );
 		},
 		'args'                => array( 'konto' => array( 'type' => 'string', 'required' => true ) ),
 	) );
@@ -328,6 +343,14 @@ add_action( 'rest_api_init', function () {
 	$route( '/actions/zbon-import',        'jb_view_journal', 'vp_sync_action_zbon_import' );
 	$route( '/actions/split-buchung',      'jb_view_journal', 'vp_sync_action_split_buchung' );
 	$route( '/actions/zu-umbuchung',       'jb_view_journal', 'vp_sync_action_zu_umbuchung' );
+	// Rechnungen / SEPA / Spenden (v0.22)
+	$route( '/actions/rechnung-save',      'jb_view_journal', 'vp_sync_action_rechnung_save' );
+	$route( '/actions/rechnung-status',    'jb_view_journal', 'vp_sync_action_rechnung_status' );
+	$route( '/actions/sepa-mandat-save',   'jb_view_journal', 'vp_sync_action_sepa_mandat_save' );
+	$route( '/actions/sepa-lauf',          'jb_view_journal', 'vp_sync_action_sepa_lauf' );
+	$route( '/actions/spende-save',        'jb_view_journal', 'vp_sync_action_spende_save' );
+	$route( '/actions/spender-save',       'jb_view_journal', 'vp_sync_action_spender_save' );
+	$route( '/actions/zuwendung',          'jb_view_journal', 'vp_sync_action_zuwendung' );
 
 	register_rest_route( VP_SYNC_API_NS, '/nextcloud/users', array(
 		'methods'             => 'GET',
@@ -524,7 +547,12 @@ function vp_sync_route_snapshot( WP_REST_Request $req ) {
 		}
 		$rows = $wpdb->get_results( $sql, ARRAY_A ); // phpcs:ignore
 		$rows = is_array( $rows ) ? $rows : array();
+		$hide = (array) ( $def['hide'] ?? array() );
 		foreach ( $rows as &$r ) {
+			// Große Felder (z. B. eingefrorene Beleg-HTML) nicht mitspiegeln.
+			foreach ( $hide as $h ) {
+				unset( $r[ $h ] );
+			}
 			$r['_rev'] = vp_sync_rev( $r );
 		}
 		unset( $r );
@@ -2049,4 +2077,226 @@ function vp_sync_action_zu_umbuchung( WP_REST_Request $req ) {
 		) );
 	}
 	return rest_ensure_response( array( 'ok' => true, 'updated' => array( (int) $src['id'] ), 'created' => $new ? array( $new ) : array() ) );
+}
+
+/* =========================================================================
+ * Aktionen: Rechnungen, SEPA, Spenden (v0.22)
+ * ====================================================================== */
+
+/** POST /actions/rechnung-save — Kopf + Positionen in einem Rutsch. */
+function vp_sync_action_rechnung_save( WP_REST_Request $req ) {
+	if ( ! function_exists( 'vp_rechnung_save' ) ) {
+		return new WP_Error( 'no_fn', 'Rechnungsmodul nicht geladen.', array( 'status' => 400 ) );
+	}
+	$b   = vp_sync_json( $req );
+	$pos = isset( $b['positionen'] ) && is_array( $b['positionen'] ) ? $b['positionen'] : null;
+	$id  = vp_rechnung_save( is_array( $b['rechnung'] ?? null ) ? $b['rechnung'] : $b, $pos );
+	if ( is_wp_error( $id ) ) {
+		return $id;
+	}
+	return rest_ensure_response( array( 'ok' => true, 'id' => (int) $id, 'rechnung' => vp_rechnung_get( $id ) ) );
+}
+
+/**
+ * POST /actions/rechnung-status — { id, aktion: festschreiben|bezahlt|storno|loeschen|mail,
+ *                                   datum?, quelle? }
+ */
+function vp_sync_action_rechnung_status( WP_REST_Request $req ) {
+	if ( ! function_exists( 'vp_rechnung_get' ) ) {
+		return new WP_Error( 'no_fn', 'Rechnungsmodul nicht geladen.', array( 'status' => 400 ) );
+	}
+	$b  = vp_sync_json( $req );
+	$id = (int) ( $b['id'] ?? 0 );
+	if ( ! $id ) {
+		return new WP_Error( 'bad_req', 'id fehlt.', array( 'status' => 400 ) );
+	}
+	switch ( (string) ( $b['aktion'] ?? '' ) ) {
+		case 'festschreiben':
+			$r = vp_rechnung_festschreiben( $id );
+			break;
+		case 'bezahlt':
+			$r = vp_rechnung_mark_bezahlt( $id, (string) ( $b['datum'] ?? '' ), 0, (string) ( $b['quelle'] ?? 'Bank KSK' ) );
+			break;
+		case 'storno':
+			$r = vp_rechnung_storno( $id );
+			break;
+		case 'loeschen':
+			$r = vp_rechnung_delete( $id );
+			break;
+		case 'mail':
+			$r = vp_rechnung_mail( $id );
+			break;
+		case 'html':
+			return rest_ensure_response( array(
+				'ok'   => true,
+				'html' => vp_rechnung_html( $id ),
+				'css'  => function_exists( 'vp_doc_css' ) ? vp_doc_css() : '',
+			) );
+		default:
+			return new WP_Error( 'bad_req', 'Unbekannte Aktion.', array( 'status' => 400 ) );
+	}
+	if ( is_wp_error( $r ) ) {
+		return $r;
+	}
+	return rest_ensure_response( array( 'ok' => true, 'ergebnis' => $r, 'rechnung' => vp_rechnung_get( $id ) ) );
+}
+
+/** POST /actions/sepa-mandat-save */
+function vp_sync_action_sepa_mandat_save( WP_REST_Request $req ) {
+	if ( ! function_exists( 'vp_sepa_mandat_save' ) ) {
+		return new WP_Error( 'no_fn', 'SEPA-Modul nicht geladen.', array( 'status' => 400 ) );
+	}
+	$b = vp_sync_json( $req );
+	if ( ! empty( $b['import'] ) ) {
+		return rest_ensure_response( array( 'ok' => true ) + vp_sepa_mandate_import_from_users() );
+	}
+	$r = vp_sepa_mandat_save( $b );
+	if ( is_wp_error( $r ) ) {
+		return $r;
+	}
+	return rest_ensure_response( array( 'ok' => true, 'id' => (int) $r, 'mandat' => vp_sepa_mandat_get( $r ) ) );
+}
+
+/**
+ * POST /actions/sepa-lauf — { aktion: erstellen|pruefen|xml|buchen|loeschen, … }
+ * `xml` liefert die fertige Datei als Text zurück (der Client speichert sie).
+ */
+function vp_sync_action_sepa_lauf( WP_REST_Request $req ) {
+	if ( ! function_exists( 'vp_sepa_lauf_create' ) ) {
+		return new WP_Error( 'no_fn', 'SEPA-Modul nicht geladen.', array( 'status' => 400 ) );
+	}
+	$b      = vp_sync_json( $req );
+	$aktion = (string) ( $b['aktion'] ?? 'erstellen' );
+	$id     = (int) ( $b['lauf_id'] ?? 0 );
+
+	if ( 'erstellen' === $aktion ) {
+		$r = vp_sepa_lauf_create( $b );
+		if ( is_wp_error( $r ) ) {
+			return $r;
+		}
+		return rest_ensure_response( array(
+			'ok'       => true,
+			'lauf_id'  => (int) $r,
+			'lauf'     => vp_sepa_lauf_get( $r ),
+			'posten'   => vp_sepa_posten_of( $r ),
+			'probleme' => vp_sepa_lauf_pruefen( $r ),
+		) );
+	}
+	if ( ! $id ) {
+		return new WP_Error( 'bad_req', 'lauf_id fehlt.', array( 'status' => 400 ) );
+	}
+	switch ( $aktion ) {
+		case 'pruefen':
+			return rest_ensure_response( array(
+				'ok'       => true,
+				'lauf'     => vp_sepa_lauf_get( $id ),
+				'posten'   => vp_sepa_posten_of( $id ),
+				'probleme' => vp_sepa_lauf_pruefen( $id ),
+			) );
+		case 'xml':
+			$xml = vp_sepa_lauf_xml( $id );
+			if ( is_wp_error( $xml ) ) {
+				return $xml;
+			}
+			return rest_ensure_response( array(
+				'ok'       => true,
+				'dateiname' => 'sepa-lastschrift-' . $id . '-' . gmdate( 'Ymd' ) . '.xml',
+				'xml'      => $xml,
+			) );
+		case 'buchen':
+			$r = vp_sepa_lauf_buchen( $id );
+			return is_wp_error( $r ) ? $r : rest_ensure_response( array( 'ok' => true ) + $r );
+		case 'loeschen':
+			$r = vp_sepa_lauf_delete( $id );
+			return is_wp_error( $r ) ? $r : rest_ensure_response( array( 'ok' => true ) );
+	}
+	return new WP_Error( 'bad_req', 'Unbekannte Aktion.', array( 'status' => 400 ) );
+}
+
+/** POST /actions/spender-save */
+function vp_sync_action_spender_save( WP_REST_Request $req ) {
+	if ( ! function_exists( 'vp_spender_save' ) ) {
+		return new WP_Error( 'no_fn', 'Spendenmodul nicht geladen.', array( 'status' => 400 ) );
+	}
+	$r = vp_spender_save( vp_sync_json( $req ) );
+	if ( is_wp_error( $r ) ) {
+		return $r;
+	}
+	return rest_ensure_response( array( 'ok' => true, 'id' => (int) $r, 'spender' => vp_spender_get( $r ) ) );
+}
+
+/** POST /actions/spende-save — einzelne Zuwendung oder Journal-Import. */
+function vp_sync_action_spende_save( WP_REST_Request $req ) {
+	if ( ! function_exists( 'vp_spende_add' ) ) {
+		return new WP_Error( 'no_fn', 'Spendenmodul nicht geladen.', array( 'status' => 400 ) );
+	}
+	$b = vp_sync_json( $req );
+	if ( ! empty( $b['import'] ) ) {
+		return rest_ensure_response( array( 'ok' => true ) + vp_spenden_import_from_journal( (int) ( $b['jahr'] ?? current_time( 'Y' ) ) ) );
+	}
+	if ( empty( $b['spender_id'] ) && ! empty( $b['name'] ) ) {
+		$b['spender_id'] = vp_spender_find_or_create( (string) $b['name'], (int) ( $b['user_id'] ?? 0 ) );
+	}
+	if ( empty( $b['spender_id'] ) ) {
+		return new WP_Error( 'bad_req', 'Spender:in fehlt.', array( 'status' => 400 ) );
+	}
+	$id = vp_spende_add( $b );
+	return rest_ensure_response( array( 'ok' => true, 'id' => (int) $id ) );
+}
+
+/**
+ * POST /actions/zuwendung — { aktion: erstellen|alle|storno|mail|html, … }
+ */
+function vp_sync_action_zuwendung( WP_REST_Request $req ) {
+	if ( ! function_exists( 'vp_zuwendung_erstellen' ) ) {
+		return new WP_Error( 'no_fn', 'Spendenmodul nicht geladen.', array( 'status' => 400 ) );
+	}
+	global $wpdb;
+	$b    = vp_sync_json( $req );
+	$jahr = (int) ( $b['jahr'] ?? current_time( 'Y' ) );
+
+	switch ( (string) ( $b['aktion'] ?? 'erstellen' ) ) {
+		case 'erstellen':
+			$r = vp_zuwendung_erstellen(
+				(int) ( $b['spender_id'] ?? 0 ),
+				array_map( 'intval', (array) ( $b['spende_ids'] ?? array() ) ),
+				(string) ( $b['typ'] ?? 'sammel' ),
+				$jahr
+			);
+			return is_wp_error( $r ) ? $r : rest_ensure_response( array( 'ok' => true, 'id' => (int) $r, 'bestaetigung' => vp_zuwendung_get( $r ) ) );
+
+		case 'alle':
+			$sids = $wpdb->get_col( $wpdb->prepare(
+				'SELECT DISTINCT spender_id FROM ' . vp_spenden_table() . ' WHERE bescheinigung_id IS NULL AND spender_id IS NOT NULL AND YEAR(datum) = %d',
+				$jahr
+			) );
+			$ok = 0;
+			$fehler = array();
+			foreach ( $sids as $sid ) {
+				$r = vp_zuwendung_erstellen( (int) $sid, array(), 'sammel', $jahr );
+				if ( is_wp_error( $r ) ) {
+					$sp = vp_spender_get( $sid );
+					$fehler[] = ( $sp ? $sp->name : '#' . $sid ) . ': ' . $r->get_error_message();
+				} else {
+					$ok++;
+				}
+			}
+			return rest_ensure_response( array( 'ok' => true, 'ausgestellt' => $ok, 'fehler' => $fehler ) );
+
+		case 'storno':
+			vp_zuwendung_storno( (int) ( $b['id'] ?? 0 ) );
+			return rest_ensure_response( array( 'ok' => true ) );
+
+		case 'mail':
+			$r = vp_zuwendung_mail( (int) ( $b['id'] ?? 0 ) );
+			return is_wp_error( $r ) ? $r : rest_ensure_response( array( 'ok' => true ) );
+
+		case 'html':
+			return rest_ensure_response( array(
+				'ok'   => true,
+				'html' => vp_zuwendung_html( (int) ( $b['id'] ?? 0 ) ),
+				'css'  => function_exists( 'vp_doc_css' ) ? vp_doc_css() : '',
+			) );
+	}
+	return new WP_Error( 'bad_req', 'Unbekannte Aktion.', array( 'status' => 400 ) );
 }

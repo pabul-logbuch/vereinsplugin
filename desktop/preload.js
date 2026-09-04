@@ -13,8 +13,8 @@ contextBridge.exposeInMainWorld('api', {
   me: () => invoke('me:get'),
   report: {
     summary: (year) => invoke('report:summary', { year }),
-    salden: () => invoke('report:salden'),
-    kontenblatt: (konto) => invoke('report:kontenblatt', { konto }),
+    salden: (jahr) => invoke('report:salden', { jahr }),
+    kontenblatt: (konto, jahr) => invoke('report:kontenblatt', { konto, jahr }),
   },
   action: {
     run: (name, body) => invoke('action:run', { name, body }),
@@ -50,5 +50,7 @@ contextBridge.exposeInMainWorld('api', {
   app: {
     info: () => invoke('app:info'),
     openExternal: (url) => invoke('app:open-external', { url }),
+    saveFile: (defaultName, content) => invoke('app:save-file', { defaultName, content }),
+    openHtml: (title, html, css) => invoke('app:open-html', { title, html, css }),
   },
 });

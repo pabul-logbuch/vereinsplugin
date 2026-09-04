@@ -3,7 +3,7 @@
  * Plugin Name:       Vereinsplugin
  * Plugin URI:        https://github.com/pabul-logbuch/vereinsplugin
  * Description:        Alles-in-einem-Vereinsverwaltung: Wunschliste & Spenden, Sitzungs-/Protokollverwaltung, Buchhaltung & Auslagen, Veranstaltungs-Publisher – mit gemeinsamem Mitgliederbereich. Im WordPress-Dashboard erscheint bewusst nur eine einzige Seite: die Shortcode-Übersicht. Alle Verwaltung läuft über Shortcodes im Frontend.
- * Version:           0.22.0
+ * Version:           0.23.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Verein
@@ -42,7 +42,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_VERSION', '0.22.0' );
+define( 'VP_VERSION', '0.23.0' );
 define( 'VP_FILE', __FILE__ );
 define( 'VP_PATH', plugin_dir_path( __FILE__ ) );
 define( 'VP_URL', plugin_dir_url( __FILE__ ) );

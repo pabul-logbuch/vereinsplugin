@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const Database = require('better-sqlite3');
@@ -139,17 +139,17 @@ ipcMain.handle('report:summary', async (_e, { year } = {}) => {
   }
 });
 
-ipcMain.handle('report:salden', async () => {
+ipcMain.handle('report:salden', async (_e, { jahr } = {}) => {
   try {
-    return ok(await client().salden());
+    return ok(await client().salden(jahr));
   } catch (e) {
     return fail(e);
   }
 });
 
-ipcMain.handle('report:kontenblatt', async (_e, { konto }) => {
+ipcMain.handle('report:kontenblatt', async (_e, { konto, jahr }) => {
   try {
-    return ok(await client().kontenblatt(konto));
+    return ok(await client().kontenblatt(konto, jahr));
   } catch (e) {
     return fail(e);
   }
@@ -315,6 +315,48 @@ ipcMain.handle('nc:beleg-upload', async (_e, { path, file, meta }) => {
   try {
     if (!file || !file.buffer) throw new Error('Keine Datei übergeben.');
     return ok(await client().ncBelegUpload(path || '', file.buffer, file.name, meta || {}));
+  } catch (e) {
+    return fail(e);
+  }
+});
+
+/**
+ * Datei speichern (SEPA-XML, Exporte). Öffnet den Speichern-Dialog und legt
+ * den übergebenen Text ab.
+ */
+ipcMain.handle('app:save-file', async (_e, { defaultName, content }) => {
+  try {
+    const res = await dialog.showSaveDialog(win, {
+      defaultPath: path.join(app.getPath('downloads'), defaultName || 'export.txt'),
+    });
+    if (res.canceled || !res.filePath) return ok({ canceled: true });
+    fs.writeFileSync(res.filePath, String(content ?? ''), 'utf8');
+    return ok({ canceled: false, path: res.filePath });
+  } catch (e) {
+    return fail(e);
+  }
+});
+
+/**
+ * Ein Dokument (Rechnung, Zuwendungsbestätigung) im Standardbrowser öffnen –
+ * dort lässt es sich drucken bzw. als PDF sichern.
+ */
+ipcMain.handle('app:open-html', async (_e, { title, html, css }) => {
+  try {
+    const dir = path.join(app.getPath('temp'), 'vereinsplugin-docs');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `doc-${Date.now()}.html`);
+    fs.writeFileSync(
+      file,
+      `<!doctype html><html lang="de"><head><meta charset="utf-8">` +
+        `<title>${String(title || 'Dokument')}</title>` +
+        `<style>body{background:#f4f4f4;margin:0}${css || ''}</style></head><body>` +
+        `<div class="vp-doc-print"><button onclick="window.print()">Drucken / als PDF sichern</button></div>` +
+        `${html || ''}</body></html>`,
+      'utf8'
+    );
+    await shell.openPath(file);
+    return ok({ path: file });
   } catch (e) {
     return fail(e);
   }

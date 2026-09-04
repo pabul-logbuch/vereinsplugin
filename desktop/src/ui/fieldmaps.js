@@ -247,6 +247,20 @@ const T = {
       aktiv: { label: 'Aktiv', type: 'select', allowEmpty: false, options: JA_NEIN },
     },
   },
+  jb_anfangsbestaende: {
+    label: 'Anfangsbestände (je Jahr)',
+    group: 'Bearbeiten',
+    editable: true,
+    title: (r) => `${r.jahr} · ${r.konto} · ${r.betrag} €`,
+    fields: {
+      id: { label: 'ID', readonly: true },
+      jahr: { label: 'Geschäftsjahr', type: 'number' },
+      konto: { label: 'Konto (SKR 49)', type: 'select', from: KONTO_FROM },
+      betrag: { label: 'Bestand am 1.1. (€)', type: 'money' },
+      notiz: { label: 'Notiz' },
+      erstellt_am: { label: 'Erstellt am', readonly: true },
+    },
+  },
   jb_konten: {
     label: 'Kontenplan (SKR 49)',
     group: 'Bearbeiten',
@@ -298,6 +312,14 @@ const READ_ONLY_LABELS = {
   jb_getraenke: 'Getränke-Produkte',
   jb_getraenke_bewegungen: 'Getränke-Lagerbewegungen',
   jb_konto_regeln: 'Konto-Regeln',
+  vp_rechnungen: 'Rechnungen',
+  vp_rechnung_positionen: 'Rechnungspositionen',
+  vp_sepa_mandate: 'SEPA-Mandate',
+  vp_sepa_laeufe: 'SEPA-Einzugsläufe',
+  vp_sepa_posten: 'SEPA-Lastschriftposten',
+  vp_spender: 'Spender:innen',
+  vp_spenden: 'Zuwendungen',
+  vp_zuwendungen: 'Zuwendungsbestätigungen',
 };
 
 window.FIELDMAPS = {
