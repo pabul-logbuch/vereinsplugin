@@ -94,6 +94,14 @@ form.detail input, form.detail textarea, form.detail select {
 form.detail textarea { min-height: 72px; resize: vertical; }
 form.detail input[readonly], form.detail select[disabled] { background: var(--bg); color: var(--muted); }
 form.detail datalist { display: none; }
+form.detail label .hint { display: block; font-size: 12px; line-height: 1.35; margin-top: 3px; opacity: .8; }
+.hilfe { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+.hilfe summary { cursor: pointer; font-weight: 600; }
+.hilfe dl { display: grid; grid-template-columns: 170px 1fr; gap: 6px 14px; margin: 10px 0 0; }
+.hilfe dt { font-weight: 600; }
+.hilfe dd { margin: 0; color: var(--muted); }
+.hilfe .bsp { margin-top: 10px; font-size: 13px; color: var(--muted); }
+
 form.detail select { appearance: auto; background: var(--panel); }
 .form-actions { grid-column: 1 / -1; display: flex; gap: 8px; margin-top: 8px; }
 

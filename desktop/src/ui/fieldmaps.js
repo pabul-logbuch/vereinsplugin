@@ -18,6 +18,8 @@
  *                    `allowEmpty:false` unterdrückt die Leer-Option.
  *  'datalist'      – Textfeld mit Vorschlägen aus vorhandenen Werten der Spalte
  *                    `suggest` (Standard: dieselbe Spalte).
+ *
+ *  hint     : Erklärtext, der klein unter der Beschriftung steht.
  */
 
 const SPHAEREN = [
@@ -169,7 +171,8 @@ const T = {
       },
       beschreibung: { label: 'Beschreibung', type: 'textarea' },
       quelle: {
-        label: 'Quelle (Geldtopf)',
+        label: 'Geldtopf (Quelle) – wo?',
+        hint: 'Welches Geld sich bewegt. Negativer Betrag = raus aus diesem Topf, positiver = rein. Dahinter steht ein Bestandskonto (Bank 1200, Kasse 1000 …).',
         type: 'select',
         options: [
           ['', '—'],
@@ -182,10 +185,26 @@ const T = {
           ['Manuell', 'Manuell'],
         ],
       },
-      konto: { label: 'Konto (SKR 49)', type: 'select', from: KONTO_FROM },
-      gegenkonto: { label: 'Gegenkonto (Umbuchung)', type: 'select', from: KONTO_FROM },
-      sphaere: { label: 'Sphäre', type: 'select', options: SPHAEREN },
-      gegenpartei: { label: 'Gegenpartei', type: 'datalist' },
+      konto: {
+        label: 'SKR-Konto – wofür?',
+        hint: 'Der Grund der Bewegung (4100 Beiträge, 5600 Wareneinkauf …). Nur dieses Konto steht in der EÜR, der Geldtopf nicht.',
+        type: 'select', from: KONTO_FROM,
+      },
+      gegenkonto: {
+        label: 'Gegenkonto (nur Umbuchung)',
+        hint: 'Nur wenn Geld zwischen zwei Töpfen wandert: der zweite Geldtopf. Sonst leer lassen.',
+        type: 'select', from: KONTO_FROM,
+      },
+      sphaere: {
+        label: 'Sphäre',
+        hint: 'Steuerlicher Bereich: ideell, Zweckbetrieb, Vermögensverwaltung, wirtschaftlicher Geschäftsbetrieb. Folgt normalerweise dem SKR-Konto.',
+        type: 'select', options: SPHAEREN,
+      },
+      gegenpartei: {
+        label: 'Gegenpartei – mit wem?',
+        hint: 'Freitext, kein Konto (z. B. „Bauhaus", „Anna Müller"). Nur für Suche und Beleg, beeinflusst keine Auswertung.',
+        type: 'datalist',
+      },
       beleg_nr: { label: 'Beleg-Nr', type: 'datalist' },
       beleg_referenz: { label: 'Beleg-Referenz (alt, = Beleg-Nr)', readonly: true },
       beleg_pfad: { label: 'Beleg-Pfad (Nextcloud)' },

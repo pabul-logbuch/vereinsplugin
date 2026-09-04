@@ -587,7 +587,7 @@ async function showDetail(slug, pk) {
     }
 
     inputs[c] = input;
-    form.append(el('label', {}, cf.label || c), input);
+    form.append(labelMitHilfe(cf.label || c, cf.hint), input);
   }
 
   if (!fm.editable) {
@@ -1883,6 +1883,71 @@ function togglePanel(kind, builder) {
   host.append(builder());
 }
 
+/* ------------------------------------------- Erklärtexte zu den Buchungsfeldern */
+
+/**
+ * Eine Buchung beantwortet drei verschiedene Fragen. Die Kurztexte hängen an
+ * den Feldern, der ausführliche Block klappt darüber auf.
+ */
+const FELD_HILFE = {
+  quelle:
+    'WO das Geld liegt. Bei negativem Betrag geht es aus diesem Topf raus, bei positivem rein. '
+    + 'Dahinter steht ein Bestandskonto (Bank 1200, Kasse 1000 …).',
+  konto:
+    'WOFÜR das Geld geflossen ist – der Zweck (z. B. 4100 Mitgliedsbeiträge, 5600 Wareneinkauf). '
+    + 'Dieses Konto steht in der EÜR, der Geldtopf nicht.',
+  gegenkonto:
+    'Nur bei Umbuchungen: der zweite Geldtopf. Beispiel Bargeld zur Bank gebracht – Konto 1200, Gegenkonto 1000.',
+  gegenpartei:
+    'MIT WEM – reiner Text, kein Konto (z. B. „Bauhaus", „Anna Müller"). Nur für Suche und Beleg, '
+    + 'verändert keine Auswertung.',
+  sphaere:
+    'Steuerlicher Bereich des Zwecks: ideell, Zweckbetrieb, Vermögensverwaltung oder wirtschaftlicher '
+    + 'Geschäftsbetrieb. Ergibt sich normalerweise aus dem SKR-Konto.',
+  soll:
+    'Wohin der Betrag fließt: das Geldkonto bei einer Einnahme, das Aufwandskonto bei einer Ausgabe.',
+  haben:
+    'Woher der Betrag kommt: das Ertragskonto bei einer Einnahme, das Geldkonto bei einer Ausgabe.',
+};
+
+/** Aufklappbarer Erklärblock „Geldtopf, Konto und Gegenpartei". */
+function buchungsHilfe(offen) {
+  const d = el('details', { class: 'hilfe' });
+  if (offen) d.setAttribute('open', 'open');
+  d.append(el('summary', {}, 'Geldtopf, SKR-Konto und Gegenpartei – was ist was?'));
+  d.append(el('p', { class: 'muted', style: 'margin:8px 0 0' },
+    'Jede Buchung beantwortet drei verschiedene Fragen. Nur die ersten beiden sind Konten.'));
+  const dl = el('dl', {});
+  const zeile = (t, txt) => { dl.append(el('dt', {}, t), el('dd', {}, txt)); };
+  zeile('Geldtopf (Quelle) — wo?',
+    'Welches Geld sich bewegt: Bank KSK, Barkasse, PayPal, Zettle-Karte. Negativer Betrag = raus aus diesem Topf, '
+    + 'positiver = rein. Der Geldtopf ist ein Bestandskonto – er sagt, wie viel Geld ihr habt. '
+    + 'Welches Konto dahinter liegt, steht unter „Geld-Töpfe → Konten".');
+  zeile('SKR-Konto — wofür?',
+    'Der Grund der Bewegung: 4100 Mitgliedsbeiträge, 4600 Getränkeumsatz, 5600 Wareneinkauf. '
+    + 'Das ist ein Erfolgskonto – es sagt, ob ihr etwas eingenommen oder ausgegeben habt, und nur dieses '
+    + 'Konto erscheint in der EÜR.');
+  zeile('Gegenpartei — mit wem?',
+    'Freitext, kein Konto: „Bauhaus", „Stadt Riedlingen", „Anna Müller". Dient nur dem Wiederfinden und dem '
+    + 'Beleg und beeinflusst keine Auswertung.');
+  d.append(dl);
+  d.append(el('p', { class: 'bsp' },
+    'Beispiel Einnahme: Beitrag 30 € per Überweisung → Betrag +30, Geldtopf Bank KSK, Konto 4100 Mitgliedsbeiträge, '
+    + 'Gegenpartei „Anna Müller".'));
+  d.append(el('p', { class: 'bsp' },
+    'Beispiel Ausgabe: Getränke bar gekauft für 84,20 € → Betrag −84,20, Geldtopf Barkasse, Konto 5600 Wareneinkauf, '
+    + 'Gegenpartei „Getränke Müller GmbH".'));
+  d.append(el('p', { class: 'bsp' },
+    'Jede Buchung berührt genau einen Geldtopf und ein SKR-Konto – das sind die beiden Seiten des Buchungssatzes '
+    + '(Soll und Haben). Nur Umbuchungen berühren zwei Geldtöpfe und gar kein SKR-Konto.'));
+  return d;
+}
+
+/** Beschriftung mit Erklärung darunter (funktioniert in allen detail-Formularen). */
+function labelMitHilfe(text, hint) {
+  return el('label', {}, text, hint ? el('span', { class: 'hint' }, hint) : null);
+}
+
 /* ---------------------------------------- Buchung bearbeiten (Doppik-Form) */
 
 /** Bevorzugte „quelle" je Geldkonto – Umkehrung der Doppik-Zuordnung. */
@@ -2000,7 +2065,8 @@ async function showBuchung(pk, from) {
     form.append(el('h2', { style: 'grid-column:1/-1;margin:16px 0 0' }, titel));
     if (hinweis) form.append(el('p', { class: 'muted', style: 'grid-column:1/-1;margin:0' }, hinweis));
   };
-  const feld = (label, node) => { form.append(el('label', {}, label), node); };
+  const feld = (label, node, hint) => { form.append(labelMitHilfe(label, hint), node); };
+  view.append(buchungsHilfe(false));
 
   /* --- 1. Buchungssatz ---------------------------------------------------- */
   sec('Buchungssatz', 'Soll an Haben – Betrag immer positiv. Quelle, Gegenkonto und Vorzeichen ergeben sich daraus automatisch.');
@@ -2010,8 +2076,8 @@ async function showBuchung(pk, from) {
   const fHaben = kontoSelect(konten, satz.haben, 'alle');
   feld('Datum', fDatum);
   feld('Betrag (€)', fBetrag);
-  feld('Soll (Empfänger / Aufwand)', fSoll);
-  feld('Haben (Herkunft / Ertrag)', fHaben);
+  feld('Soll (Empfänger / Aufwand)', fSoll, FELD_HILFE.soll);
+  feld('Haben (Herkunft / Ertrag)', fHaben, FELD_HILFE.haben);
 
   const vorschau = el('p', { class: 'muted', style: 'grid-column:1/-1;margin:0' });
   form.append(vorschau);
@@ -2033,7 +2099,7 @@ async function showBuchung(pk, from) {
   form.append(dlGp);
   const fGegenpartei = el('input', { type: 'text', value: row.gegenpartei || '', list: 'dl_gegenpartei', placeholder: 'z. B. Bauhaus, Mitglied Müller' });
   feld('Beschreibung', fText);
-  feld('Gegenpartei (wer?)', fGegenpartei);
+  feld('Gegenpartei (mit wem?)', fGegenpartei, FELD_HILFE.gegenpartei);
 
   /* --- 3. Zuordnung ------------------------------------------------------- */
   sec('Zuordnung');
@@ -2054,7 +2120,7 @@ async function showBuchung(pk, from) {
     [['', '— keine —'], ...auslagen.map((a) => [String(a.id), `#${a.id} ${a.zweck || a.beschreibung || ''} (${eur(Number(a.betrag) || 0)})`])],
     row.auslage_id == null ? '' : String(row.auslage_id)
   );
-  feld('Sphäre', fSphaere);
+  feld('Sphäre', fSphaere, FELD_HILFE.sphaere);
   if (cols.has('budget_id')) feld('Budget belasten', fBudget);
   if (cols.has('kostenstelle')) feld('Kostenstelle', fKostenstelle);
   feld('Für Rücklage', fRuecklage);
@@ -2223,6 +2289,7 @@ function journalForm(konten, ruecklagen = [], budgets = []) {
       el('button', { type: 'button', class: 'small' + (m === 'sh' ? ' primary' : ''), onclick: () => setMode('sh') }, 'Soll-Haben')
     );
     body.innerHTML = '';
+    body.append(buchungsHilfe(false));
     body.append(m === 'sh' ? sollHabenForm(konten) : euerForm());
   };
 
@@ -2254,7 +2321,15 @@ function journalForm(konten, ruecklagen = [], budgets = []) {
     hint.textContent = k.typ === 'einnahme' ? 'Einnahme → Betrag positiv.' : k.typ === 'ausgabe' ? 'Ausgabe → Betrag negativ.' : '';
   }
   const f = el('form', { class: 'detail' });
-  f.append('Datum', datum, 'Betrag (€)', betrag, 'Konto (SKR)', konto, 'Sphäre', sph, 'Quelle (Geldtopf)', quelle, 'Gegenpartei', gegen, 'Beschreibung', beschr);
+  f.append(
+    'Datum', datum,
+    'Betrag (€)', betrag,
+    labelMitHilfe('Konto (SKR) – wofür?', FELD_HILFE.konto), konto,
+    labelMitHilfe('Sphäre', FELD_HILFE.sphaere), sph,
+    labelMitHilfe('Geldtopf (Quelle) – wo?', FELD_HILFE.quelle), quelle,
+    labelMitHilfe('Gegenpartei – mit wem?', FELD_HILFE.gegenpartei), gegen,
+    'Beschreibung', beschr
+  );
   if (budgets.length) f.append('Budget belasten', bud, 'Kostenstelle', ks);
   if (ruecklagen.length) f.append('Für Rücklage', rl);
   const actions = el('div', { class: 'form-actions' });
