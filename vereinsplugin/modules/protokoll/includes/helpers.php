@@ -37,13 +37,117 @@ function pp_oeffentlichkeit_label($stufe) {
     return $labels[$stufe] ?? $stufe;
 }
 
-function pp_verfahren_label($verfahren) {
-    $labels = [
-        'konsent'      => 'Konsent',
-        'mehrheit'     => 'Mehrheitsentscheid',
-        'geheime_wahl' => 'Geheime Wahl',
+/**
+ * Alle Entscheidungsverfahren.
+ *
+ *  art      – 'konsent'  : über Einwände, kein Auszählen
+ *             'mehrheit' : Ja/Nein/Enthaltung werden ausgezählt
+ *  basis    – woran die Schwelle gemessen wird:
+ *             'abgegeben' (Ja+Nein, Enthaltungen zählen nicht mit) oder
+ *             'stimmberechtigt' (alle Anwesenden bzw. Stimmberechtigten)
+ *  schwelle – nötiger Anteil (0.5 = mehr als die Hälfte)
+ */
+function pp_verfahren_liste() {
+    return [
+        'konsent' => [
+            'label' => 'Konsent (kein schwerwiegender Einwand)',
+            'art' => 'konsent', 'basis' => 'abgegeben', 'schwelle' => 0.0,
+            'hinweis' => 'Beschlossen, wenn niemand einen schwerwiegenden Einwand hat.',
+        ],
+        'systemisches_konsentieren' => [
+            'label' => 'Systemisches Konsentieren (geringster Widerstand)',
+            'art' => 'widerstand', 'basis' => 'stimmberechtigt', 'schwelle' => 0.0,
+            'hinweis' => 'Nicht Zustimmung wird gezählt, sondern Widerstand (0–10 je Person). Der Vorschlag mit dem geringsten Gesamtwiderstand gewinnt.',
+        ],
+        'einfache_mehrheit' => [
+            'label' => 'Einfache Mehrheit (mehr Ja als Nein)',
+            'art' => 'mehrheit', 'basis' => 'abgegeben', 'schwelle' => 0.5,
+            'hinweis' => 'Enthaltungen zählen nicht mit.',
+        ],
+        'absolute_mehrheit' => [
+            'label' => 'Absolute Mehrheit (mehr als die Hälfte aller Stimmberechtigten)',
+            'art' => 'mehrheit', 'basis' => 'stimmberechtigt', 'schwelle' => 0.5,
+            'hinweis' => 'Enthaltungen wirken wie Nein-Stimmen.',
+        ],
+        'zweidrittel' => [
+            'label' => 'Zwei-Drittel-Mehrheit',
+            'art' => 'mehrheit', 'basis' => 'abgegeben', 'schwelle' => 2 / 3,
+            'hinweis' => '',
+        ],
+        'dreiviertel' => [
+            'label' => 'Drei-Viertel-Mehrheit',
+            'art' => 'mehrheit', 'basis' => 'abgegeben', 'schwelle' => 0.75,
+            'hinweis' => '',
+        ],
+        'vierfuenftel' => [
+            'label' => 'Vier-Fünftel-Mehrheit',
+            'art' => 'mehrheit', 'basis' => 'abgegeben', 'schwelle' => 0.8,
+            'hinweis' => '',
+        ],
+        'einstimmig' => [
+            'label' => 'Einstimmig (keine Gegenstimme)',
+            'art' => 'mehrheit', 'basis' => 'abgegeben', 'schwelle' => 1.0,
+            'hinweis' => 'Enthaltungen sind erlaubt, Nein-Stimmen nicht.',
+        ],
+        'offene_wahl' => [
+            'label' => 'Offene Wahl',
+            'art' => 'mehrheit', 'basis' => 'abgegeben', 'schwelle' => 0.5,
+            'hinweis' => 'Abstimmung per Handzeichen, Ergebnis wird protokolliert.',
+        ],
+        'geheime_wahl' => [
+            'label' => 'Geheime Wahl',
+            'art' => 'mehrheit', 'basis' => 'abgegeben', 'schwelle' => 0.5,
+            'hinweis' => 'Stimmzettel; hier wird nur das Ergebnis festgehalten.',
+        ],
+        // Altwert aus früheren Versionen, bleibt lesbar.
+        'mehrheit' => [
+            'label' => 'Mehrheitsentscheid',
+            'art' => 'mehrheit', 'basis' => 'abgegeben', 'schwelle' => 0.5,
+            'hinweis' => '',
+        ],
     ];
-    return $labels[$verfahren] ?? $verfahren;
+}
+
+function pp_verfahren_label($verfahren) {
+    $liste = pp_verfahren_liste();
+    return $liste[$verfahren]['label'] ?? $verfahren;
+}
+
+/**
+ * Wertet eine Abstimmung aus.
+ * @return array{basis:int,erforderlich:float,erreicht:bool,text:string}|null
+ *         null, wenn das Verfahren nicht ausgezählt wird (Konsent).
+ */
+function pp_verfahren_ergebnis($verfahren, $ja, $nein, $enthaltung, $stimmberechtigt) {
+    $v = pp_verfahren_liste()[$verfahren] ?? null;
+    if (!$v || $v['art'] !== 'mehrheit') return null;
+
+    $ja   = max(0, intval($ja));
+    $nein = max(0, intval($nein));
+    $enth = max(0, intval($enthaltung));
+    $ber  = max(0, intval($stimmberechtigt));
+
+    $basis = $v['basis'] === 'stimmberechtigt' ? max($ber, $ja + $nein + $enth) : ($ja + $nein);
+    if ($basis <= 0) {
+        return ['basis' => 0, 'erforderlich' => 0.0, 'erreicht' => false, 'text' => 'Noch keine Stimmen erfasst.'];
+    }
+
+    $erforderlich = $v['schwelle'] * $basis;
+    // „Mehr als die Hälfte" heißt echt mehr; bei 2/3, 3/4, 4/5 und einstimmig
+    // genügt das Erreichen des Anteils.
+    $erreicht = ($v['schwelle'] < 1.0 && abs($v['schwelle'] - 0.5) < 1e-9)
+        ? ($ja > $erforderlich)
+        : ($ja + 1e-9 >= $erforderlich);
+    if ($verfahren === 'einstimmig') $erreicht = ($nein === 0 && $ja > 0);
+
+    $bezeichnung = $v['basis'] === 'stimmberechtigt' ? 'aller Stimmberechtigten' : 'der abgegebenen Stimmen';
+    $text = sprintf(
+        '%d Ja / %d Nein / %d Enthaltung — nötig: %s von %d (%s). %s',
+        $ja, $nein, $enth,
+        number_format_i18n($erforderlich, 2), $basis, $bezeichnung,
+        $erreicht ? 'Mehrheit erreicht.' : 'Mehrheit nicht erreicht.'
+    );
+    return ['basis' => $basis, 'erforderlich' => $erforderlich, 'erreicht' => $erreicht, 'text' => $text];
 }
 
 function pp_konsent_status_label($status) {

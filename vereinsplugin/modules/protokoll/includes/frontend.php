@@ -29,7 +29,7 @@ function pp_front_url($args = [], $anchor = '') {
 
 function pp_front_current_view() {
     $view = sanitize_key($_GET['pp_view'] ?? 'dashboard');
-    $erlaubt = ['dashboard', 'protokolle', 'protokoll', 'live', 'themen', 'aufgaben', 'termine', 'kalender', 'kreise', 'kreis', 'sets'];
+    $erlaubt = ['dashboard', 'protokolle', 'protokoll', 'live', 'themen', 'aufgaben', 'termine', 'kalender', 'kreise', 'kreis', 'sets', 'entscheide', 'ablaeufe', 'dokumente', 'dokument'];
     return in_array($view, $erlaubt, true) ? $view : 'dashboard';
 }
 
@@ -486,6 +486,339 @@ function pp_handle_front_top_unterlage_delete() {
     pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => $ziel, 'id' => $protokoll_id], 'top-' . $top_id);
 }
 
+/* ─── ABSTIMMUNG ZU EINEM TOP ───────────────────────────────────────────────
+ * Verfahren wählen und – bei auszählenden Verfahren – Ja/Nein/Enthaltung
+ * festhalten. Die Auswertung macht pp_verfahren_ergebnis(); hier wird nur
+ * gespeichert, damit das Protokoll nachvollziehbar bleibt.
+ */
+add_action('admin_post_pp_front_top_abstimmung', 'pp_handle_front_top_abstimmung');
+function pp_handle_front_top_abstimmung() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_top_abstimmung');
+    global $wpdb;
+
+    $id           = intval($_POST['id'] ?? 0);
+    $protokoll_id = intval($_POST['protokoll_id'] ?? 0);
+    $ziel         = sanitize_key($_POST['ziel_view'] ?? 'live');
+    $verfahren    = sanitize_key($_POST['verfahren'] ?? '');
+    $liste        = pp_verfahren_liste();
+
+    $daten = [];
+    if (isset($liste[$verfahren])) $daten['verfahren'] = $verfahren;
+
+    foreach (['stimmen_ja', 'stimmen_nein', 'stimmen_enthaltung', 'stimmberechtigt'] as $feld) {
+        if (isset($_POST[$feld])) {
+            $wert = trim((string) $_POST[$feld]);
+            $daten[$feld] = ($wert === '') ? null : max(0, intval($wert));
+        }
+    }
+    if (isset($_POST['evaluationsdatum'])) {
+        $ev = sanitize_text_field($_POST['evaluationsdatum']);
+        $daten['evaluationsdatum'] = $ev !== '' ? $ev : null;
+    }
+
+    if ($daten) $wpdb->update($wpdb->prefix . 'pp_tops', $daten, ['id' => $id]);
+
+    pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => $ziel, 'id' => $protokoll_id], 'top-' . $id);
+}
+
+/**
+ * Abstimmungsblock eines TOPs: Verfahren, Stimmen, Ergebnis, Evaluationsdatum.
+ */
+function pp_render_top_abstimmung($t, $p, $bearbeitbar = true, $ziel_view = 'live') {
+    $liste     = pp_verfahren_liste();
+    $verfahren = $t->verfahren ?: 'konsent';
+    $def       = $liste[$verfahren] ?? null;
+    $zaehlend  = $def && $def['art'] === 'mehrheit';
+    $ergebnis  = $zaehlend
+        ? pp_verfahren_ergebnis($verfahren, $t->stimmen_ja ?? 0, $t->stimmen_nein ?? 0, $t->stimmen_enthaltung ?? 0, $t->stimmberechtigt ?? 0)
+        : null;
+    ?>
+    <div class="pp-top-abstimmung">
+        <div class="pp-abstimmung-kopf">
+            <strong>Abstimmung</strong>
+            <span class="pp-meta"><?php echo esc_html(pp_verfahren_label($verfahren)); ?></span>
+            <?php if ($ergebnis && ($t->stimmen_ja !== null || $t->stimmen_nein !== null)) : ?>
+                <span class="pp-badge <?php echo $ergebnis['erreicht'] ? 'pp-badge-ok' : 'pp-badge-warn'; ?>">
+                    <?php echo $ergebnis['erreicht'] ? 'angenommen' : 'nicht angenommen'; ?>
+                </span>
+            <?php endif; ?>
+        </div>
+        <?php if ($def && $def['hinweis']) : ?>
+            <p class="pp-meta pp-abstimmung-hinweis"><?php echo esc_html($def['hinweis']); ?></p>
+        <?php endif; ?>
+        <?php if ($ergebnis && ($t->stimmen_ja !== null || $t->stimmen_nein !== null)) : ?>
+            <p class="pp-abstimmung-ergebnis"><?php echo esc_html($ergebnis['text']); ?></p>
+        <?php endif; ?>
+        <?php if ($t->evaluationsdatum) : ?>
+            <p class="pp-meta">Evaluation am <?php echo esc_html(mysql2date('d.m.Y', $t->evaluationsdatum)); ?></p>
+        <?php endif; ?>
+
+        <?php if ($bearbeitbar) : ?>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-form pp-abstimmung-form">
+                <?php wp_nonce_field('pp_front_top_abstimmung'); ?>
+                <input type="hidden" name="action" value="pp_front_top_abstimmung">
+                <input type="hidden" name="id" value="<?php echo esc_attr($t->id); ?>">
+                <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($p->id); ?>">
+                <input type="hidden" name="ziel_view" value="<?php echo esc_attr($ziel_view); ?>">
+                <?php pp_front_return_field(); ?>
+
+                <label>Verfahren
+                    <select name="verfahren" class="pp-verfahren-wahl">
+                        <?php foreach ($liste as $slug => $v) :
+                            // Der Altwert „mehrheit" nur, wenn er gerade gesetzt ist.
+                            if ($slug === 'mehrheit' && $verfahren !== 'mehrheit') continue; ?>
+                            <option value="<?php echo esc_attr($slug); ?>"
+                                    data-zaehlend="<?php echo $v['art'] === 'mehrheit' ? '1' : '0'; ?>"
+                                    <?php selected($verfahren, $slug); ?>><?php echo esc_html($v['label']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+
+                <div class="pp-stimmen" <?php echo $zaehlend ? '' : 'hidden'; ?>>
+                    <label>Ja <input type="number" name="stimmen_ja" min="0" value="<?php echo esc_attr($t->stimmen_ja); ?>"></label>
+                    <label>Nein <input type="number" name="stimmen_nein" min="0" value="<?php echo esc_attr($t->stimmen_nein); ?>"></label>
+                    <label>Enthaltung <input type="number" name="stimmen_enthaltung" min="0" value="<?php echo esc_attr($t->stimmen_enthaltung); ?>"></label>
+                    <label>Stimmberechtigt <input type="number" name="stimmberechtigt" min="0" value="<?php echo esc_attr($t->stimmberechtigt); ?>"></label>
+                </div>
+
+                <label>Evaluationsdatum (optional)
+                    <input type="date" name="evaluationsdatum" value="<?php echo esc_attr($t->evaluationsdatum); ?>">
+                </label>
+
+                <div class="pp-form-actions">
+                    <button type="submit" class="pp-btn pp-btn-small">Abstimmung speichern</button>
+                </div>
+            </form>
+        <?php endif; ?>
+    </div>
+    <?php
+    static $script_raus = false;
+    if ($bearbeitbar && !$script_raus) {
+        $script_raus = true;
+        ?>
+        <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            document.querySelectorAll('.pp-abstimmung-form').forEach(function (f) {
+                var wahl = f.querySelector('.pp-verfahren-wahl');
+                var box  = f.querySelector('.pp-stimmen');
+                if (!wahl || !box) return;
+                var zeigen = function () {
+                    var opt = wahl.options[wahl.selectedIndex];
+                    box.hidden = !(opt && opt.getAttribute('data-zaehlend') === '1');
+                };
+                wahl.addEventListener('change', zeigen);
+                zeigen();
+            });
+        });
+        </script>
+        <?php
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * ABLAUF-SCHRITTE EINES TOPS
+ * Eine Diskussion in Abschnitte gliedern (Meinungsrunde, Konsentrunde …),
+ * damit während der Sitzung an der richtigen Stelle mitgeschrieben wird.
+ * Vorlagen liefern die Gliederung, kopiert wird sie einmalig pro TOP.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+function pp_get_ablauf_vorlagen() {
+    global $wpdb;
+    $t = $wpdb->prefix . 'pp_ablauf_vorlagen';
+    if ($wpdb->get_var("SHOW TABLES LIKE '$t'") !== $t) return [];
+    return $wpdb->get_results("SELECT * FROM $t WHERE aktiv = 1 ORDER BY name ASC") ?: [];
+}
+
+function pp_get_vorlage_schritte($vorlage_id) {
+    global $wpdb;
+    return $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$wpdb->prefix}pp_ablauf_vorlage_schritte WHERE vorlage_id = %d ORDER BY sortierung ASC, id ASC",
+        intval($vorlage_id)
+    )) ?: [];
+}
+
+function pp_get_top_schritte($top_id) {
+    global $wpdb;
+    $t = $wpdb->prefix . 'pp_top_schritte';
+    if ($wpdb->get_var("SHOW TABLES LIKE '$t'") !== $t) return [];
+    return $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM $t WHERE top_id = %d ORDER BY sortierung ASC, id ASC", intval($top_id)
+    )) ?: [];
+}
+
+add_action('admin_post_pp_front_top_ablauf_anwenden', 'pp_handle_front_top_ablauf_anwenden');
+function pp_handle_front_top_ablauf_anwenden() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_top_ablauf');
+    global $wpdb;
+
+    $top_id       = intval($_POST['top_id'] ?? 0);
+    $protokoll_id = intval($_POST['protokoll_id'] ?? 0);
+    $vorlage_id   = intval($_POST['vorlage_id'] ?? 0);
+    $ziel         = sanitize_key($_POST['ziel_view'] ?? 'live');
+
+    $schritte = pp_get_vorlage_schritte($vorlage_id);
+    if (!$schritte) {
+        pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => $ziel, 'id' => $protokoll_id, 'pp_error' => 'Vorlage+ohne+Schritte'], 'top-' . $top_id);
+    }
+
+    // An bestehende Schritte anhängen statt ersetzen – Mitgeschriebenes geht
+    // sonst verloren, wenn jemand versehentlich zweimal anwendet.
+    $t   = $wpdb->prefix . 'pp_top_schritte';
+    $max = (int) $wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(sortierung),0) FROM $t WHERE top_id = %d", $top_id));
+    foreach ($schritte as $s) {
+        $wpdb->insert($t, [
+            'top_id'       => $top_id,
+            'protokoll_id' => $protokoll_id,
+            'titel'        => $s->titel,
+            'hinweis'      => $s->hinweis,
+            'inhalt'       => '',
+            'sortierung'   => ++$max,
+        ]);
+    }
+    pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => $ziel, 'id' => $protokoll_id], 'top-' . $top_id);
+}
+
+add_action('admin_post_pp_front_top_schritt_save', 'pp_handle_front_top_schritt_save');
+function pp_handle_front_top_schritt_save() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_top_schritt_save');
+    global $wpdb;
+
+    $protokoll_id = intval($_POST['protokoll_id'] ?? 0);
+    $top_id       = intval($_POST['top_id'] ?? 0);
+    $ziel         = sanitize_key($_POST['ziel_view'] ?? 'live');
+
+    // Alle Schritte eines TOPs in einem Rutsch – während der Sitzung will
+    // niemand jeden Abschnitt einzeln speichern.
+    foreach ((array) ($_POST['schritt'] ?? []) as $sid => $werte) {
+        $sid = intval($sid);
+        if (!$sid) continue;
+        $wpdb->update($wpdb->prefix . 'pp_top_schritte', [
+            'inhalt'   => wp_kses_post($werte['inhalt'] ?? ''),
+            'erledigt' => !empty($werte['erledigt']) ? 1 : 0,
+        ], ['id' => $sid, 'top_id' => $top_id]);
+    }
+
+    $neu = sanitize_text_field($_POST['neuer_schritt'] ?? '');
+    if ($neu !== '') {
+        $t   = $wpdb->prefix . 'pp_top_schritte';
+        $max = (int) $wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(sortierung),0) FROM $t WHERE top_id = %d", $top_id));
+        $wpdb->insert($t, [
+            'top_id' => $top_id, 'protokoll_id' => $protokoll_id,
+            'titel' => $neu, 'hinweis' => '', 'inhalt' => '', 'sortierung' => $max + 1,
+        ]);
+    }
+
+    pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => $ziel, 'id' => $protokoll_id], 'top-' . $top_id);
+}
+
+add_action('admin_post_pp_front_top_schritt_delete', 'pp_handle_front_top_schritt_delete');
+function pp_handle_front_top_schritt_delete() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_top_schritt_delete');
+    global $wpdb;
+    $protokoll_id = intval($_POST['protokoll_id'] ?? 0);
+    $top_id       = intval($_POST['top_id'] ?? 0);
+    $ziel         = sanitize_key($_POST['ziel_view'] ?? 'live');
+    $wpdb->delete($wpdb->prefix . 'pp_top_schritte', ['id' => intval($_POST['id'] ?? 0)]);
+    pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => $ziel, 'id' => $protokoll_id], 'top-' . $top_id);
+}
+
+/** Ablauf-Block eines TOPs. */
+function pp_render_top_schritte($t, $p, $bearbeitbar = true, $ziel_view = 'live') {
+    $schritte = pp_get_top_schritte($t->id);
+    if (!$schritte && !$bearbeitbar) return;
+    $vorlagen = $bearbeitbar ? pp_get_ablauf_vorlagen() : [];
+    ?>
+    <div class="pp-top-ablauf">
+        <div class="pp-ablauf-kopf">
+            <strong>Ablauf</strong>
+            <?php if ($schritte) : ?>
+                <span class="pp-meta"><?php
+                    $fertig = count(array_filter($schritte, function ($s) { return (int) $s->erledigt === 1; }));
+                    echo intval($fertig) . ' von ' . count($schritte) . ' Schritten';
+                ?></span>
+            <?php endif; ?>
+        </div>
+
+        <?php if (!$schritte && $bearbeitbar && $vorlagen) : ?>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-inline-form">
+                <?php wp_nonce_field('pp_front_top_ablauf'); ?>
+                <input type="hidden" name="action" value="pp_front_top_ablauf_anwenden">
+                <input type="hidden" name="top_id" value="<?php echo esc_attr($t->id); ?>">
+                <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($p->id); ?>">
+                <input type="hidden" name="ziel_view" value="<?php echo esc_attr($ziel_view); ?>">
+                <?php pp_front_return_field(); ?>
+                <select name="vorlage_id">
+                    <?php foreach ($vorlagen as $v) : ?>
+                        <option value="<?php echo esc_attr($v->id); ?>"><?php echo esc_html($v->name); ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <button type="submit" class="pp-btn pp-btn-small">Vorlage anwenden</button>
+                <span class="pp-meta">gliedert die Diskussion in Abschnitte</span>
+            </form>
+        <?php endif; ?>
+
+        <?php if ($schritte) : ?>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-form pp-ablauf-form">
+                <?php wp_nonce_field('pp_front_top_schritt_save'); ?>
+                <input type="hidden" name="action" value="pp_front_top_schritt_save">
+                <input type="hidden" name="top_id" value="<?php echo esc_attr($t->id); ?>">
+                <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($p->id); ?>">
+                <input type="hidden" name="ziel_view" value="<?php echo esc_attr($ziel_view); ?>">
+                <?php pp_front_return_field(); ?>
+                <ol class="pp-schritt-liste">
+                    <?php foreach ($schritte as $i => $s) : ?>
+                        <li class="pp-schritt <?php echo $s->erledigt ? 'is-erledigt' : ''; ?>">
+                            <div class="pp-schritt-kopf">
+                                <strong><?php echo esc_html($s->titel); ?></strong>
+                                <?php if ($s->hinweis) : ?><span class="pp-meta"><?php echo esc_html($s->hinweis); ?></span><?php endif; ?>
+                            </div>
+                            <?php if ($bearbeitbar) : ?>
+                                <textarea name="schritt[<?php echo esc_attr($s->id); ?>][inhalt]" rows="3"
+                                          placeholder="Mitschrift zu diesem Schritt…"><?php echo esc_textarea($s->inhalt); ?></textarea>
+                                <label class="pp-schritt-erledigt">
+                                    <input type="checkbox" name="schritt[<?php echo esc_attr($s->id); ?>][erledigt]" value="1" <?php checked($s->erledigt, 1); ?>>
+                                    erledigt
+                                </label>
+                            <?php elseif ($s->inhalt !== '') : ?>
+                                <div class="pp-schritt-text"><?php echo wpautop(wp_kses_post($s->inhalt)); ?></div>
+                            <?php endif; ?>
+                        </li>
+                    <?php endforeach; ?>
+                </ol>
+                <?php if ($bearbeitbar) : ?>
+                    <div class="pp-ablauf-fuss">
+                        <input type="text" name="neuer_schritt" placeholder="Weiterer Schritt (optional)">
+                        <button type="submit" class="pp-btn pp-btn-small">Ablauf speichern</button>
+                    </div>
+                <?php endif; ?>
+            </form>
+
+            <?php if ($bearbeitbar) : ?>
+                <details class="pp-ablauf-verwalten">
+                    <summary class="pp-meta">Schritte entfernen</summary>
+                    <?php foreach ($schritte as $s) : ?>
+                        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-inline-form">
+                            <?php wp_nonce_field('pp_front_top_schritt_delete'); ?>
+                            <input type="hidden" name="action" value="pp_front_top_schritt_delete">
+                            <input type="hidden" name="id" value="<?php echo esc_attr($s->id); ?>">
+                            <input type="hidden" name="top_id" value="<?php echo esc_attr($t->id); ?>">
+                            <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($p->id); ?>">
+                            <input type="hidden" name="ziel_view" value="<?php echo esc_attr($ziel_view); ?>">
+                            <?php pp_front_return_field(); ?>
+                            <button type="submit" class="pp-link-danger" onclick="return confirm('Schritt „<?php echo esc_js($s->titel); ?>" samt Mitschrift entfernen?')"><?php echo esc_html($s->titel); ?> ×</button>
+                        </form>
+                    <?php endforeach; ?>
+                </details>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+    <?php
+}
+
 add_action('admin_post_pp_front_top_konsent', 'pp_handle_front_top_konsent');
 function pp_handle_front_top_konsent() {
     if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
@@ -508,6 +841,8 @@ function pp_handle_front_top_konsent() {
             $wpdb->update($table, [
                 'konsent_status' => 'beschlossen',
                 'beschluss'      => sanitize_textarea_field($_POST['beschluss'] ?? $top->beschluss),
+                // Zeitpunkt festhalten, damit die Entscheide-Übersicht sortieren kann.
+                'beschlossen_am' => current_time('mysql'),
             ], ['id' => $id]);
 
             // Beschlossene Tagesordnungsänderung jetzt wirksam werden lassen
@@ -709,6 +1044,34 @@ function pp_handle_front_quick_termin() {
     }
 
     pp_front_redirect($_POST['pp_return'] ?? '', $args + ['pp_saved' => 'termin']);
+}
+
+add_action('admin_post_pp_front_quick_thema', 'pp_handle_front_quick_thema');
+function pp_handle_front_quick_thema() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_quick_thema');
+    global $wpdb;
+
+    $protokoll_id = intval($_POST['protokoll_id'] ?? 0);
+    $args = ['pp_view' => sanitize_key($_POST['ziel_view'] ?? 'themen')];
+    if ($protokoll_id) $args['id'] = $protokoll_id;
+
+    $titel = sanitize_text_field($_POST['titel'] ?? '');
+    if ($titel === '') {
+        pp_front_redirect($_POST['pp_return'] ?? '', $args + ['pp_error' => 'Thema+braucht+einen+Titel']);
+    }
+
+    $ok = $wpdb->insert($wpdb->prefix . 'pp_themen', [
+        'titel'        => $titel,
+        'beschreibung' => sanitize_textarea_field($_POST['beschreibung'] ?? ''),
+        'gremium_id'   => !empty($_POST['gremium_id']) ? intval($_POST['gremium_id']) : null,
+        'erstellt_von' => get_current_user_id(),
+    ]);
+    if ($ok === false) {
+        pp_front_redirect($_POST['pp_return'] ?? '', $args + ['pp_error' => 'Thema+konnte+nicht+gespeichert+werden+(Datenbankfehler)']);
+    }
+
+    pp_front_redirect($_POST['pp_return'] ?? '', $args + ['pp_saved' => 'thema']);
 }
 
 add_action('admin_post_pp_front_regenerate_ics', 'pp_handle_front_regenerate_ics');
@@ -1153,7 +1516,7 @@ function pp_handle_front_save_kreis() {
         'name'              => $name,
         'typ'               => in_array($_POST['typ'] ?? '', ['mv','vorstand','leitungskreis','kreis','kreisversammlung'], true) ? $_POST['typ'] : 'kreis',
         'beschreibung'      => sanitize_textarea_field($_POST['beschreibung'] ?? ''),
-        'standardverfahren' => in_array($_POST['standardverfahren'] ?? '', ['konsent','mehrheit','geheime_wahl'], true) ? $_POST['standardverfahren'] : 'konsent',
+        'standardverfahren' => array_key_exists($_POST['standardverfahren'] ?? '', pp_verfahren_liste()) ? $_POST['standardverfahren'] : 'konsent',
         'oeffentlichkeit'   => in_array($_POST['oeffentlichkeit'] ?? '', ['oeffentlich','vereinsintern','nur_gremium'], true) ? $_POST['oeffentlichkeit'] : 'vereinsintern',
         'parent_gremium_id' => !empty($_POST['parent_gremium_id']) ? intval($_POST['parent_gremium_id']) : null,
     ];
@@ -1325,6 +1688,10 @@ function pp_shortcode_mitgliederbereich($atts) {
         switch ($view) {
             case 'protokolle': pp_render_view_protokolle(); break;
             case 'protokoll':  pp_render_view_protokoll_detail(); break;
+            case 'entscheide': pp_render_view_entscheide(); break;
+            case 'ablaeufe':   pp_render_view_ablaeufe(); break;
+            case 'dokumente':  pp_render_view_dokumente(); break;
+            case 'dokument':   pp_render_view_dokument_detail(); break;
             case 'kreise':     pp_render_view_kreise(); break;
             case 'kreis':      pp_render_view_kreis_detail(); break;
             case 'sets':       pp_render_view_sets(); break;
@@ -1392,8 +1759,11 @@ function pp_render_nav_sidebar($view) {
     $punkte = [
         'dashboard'  => ['Übersicht', ''],
         'protokolle' => ['Protokolle', $entwuerfe ? $entwuerfe . ' Entwürfe' : ''],
+        'entscheide' => ['Entscheide', pp_entscheide_evaluation_faellig() ?: ''],
         'kreise'     => ['Kreise & Rollen', ''],
         'sets'       => ['Aufgaben-Sets', ''],
+        'ablaeufe'   => ['Ablauf-Vorlagen', ''],
+        'dokumente'  => ['Dokumente', ''],
         'themen'     => ['Themenspeicher', ''],
         'aufgaben'   => ['Aufgaben', $offene_aufgaben ? (string) $offene_aufgaben : ''],
         'termine'    => ['Termine', ''],
@@ -1657,6 +2027,786 @@ function pp_render_view_protokolle() {
 
 // ─── ANSICHT: EINZELNES PROTOKOLL ──────────────────────────────────────────
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * ENTSCHEIDE — alle Beschlüsse quer über die Protokolle
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** Anzahl der Beschlüsse, deren Evaluationsdatum erreicht ist (für das Menü). */
+function pp_entscheide_evaluation_faellig() {
+    global $wpdb;
+    $tops = $wpdb->prefix . 'pp_tops';
+    $cols = $wpdb->get_col("SHOW COLUMNS FROM $tops", 0);
+    if (!in_array('evaluationsdatum', $cols)) return 0;
+    return (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $tops WHERE evaluationsdatum IS NOT NULL AND evaluationsdatum <= %s
+         AND (konsent_status = 'beschlossen' OR (beschluss IS NOT NULL AND beschluss <> ''))",
+        current_time('Y-m-d')
+    ));
+}
+
+/**
+ * Beschlüsse mit Filtern. Absichtlich eine eigene Abfrage statt der
+ * TOP-Helfer: hier wird protokollübergreifend gesucht und sortiert.
+ */
+function pp_get_entscheide($args = []) {
+    global $wpdb;
+    $tops  = $wpdb->prefix . 'pp_tops';
+    $prot  = $wpdb->prefix . 'pp_protokolle';
+    $grem  = $wpdb->prefix . 'pp_gremien';
+    $cols  = $wpdb->get_col("SHOW COLUMNS FROM $tops", 0);
+    $hat_ev = in_array('evaluationsdatum', $cols);
+
+    $where  = ["(t.konsent_status = 'beschlossen' OR (t.beschluss IS NOT NULL AND t.beschluss <> ''))"];
+    $params = [];
+
+    if (!empty($args['gremium_id'])) { $where[] = 'p.gremium_id = %d'; $params[] = intval($args['gremium_id']); }
+    if (!empty($args['verfahren']))  { $where[] = 't.verfahren = %s';  $params[] = sanitize_key($args['verfahren']); }
+    if (!empty($args['jahr']))       { $where[] = 'YEAR(p.datum) = %d'; $params[] = intval($args['jahr']); }
+    if (!empty($args['suche'])) {
+        $like = '%' . $wpdb->esc_like($args['suche']) . '%';
+        $where[] = '(t.titel LIKE %s OR t.beschluss LIKE %s)';
+        $params[] = $like; $params[] = $like;
+    }
+    if ($hat_ev && !empty($args['evaluation'])) {
+        if ($args['evaluation'] === 'faellig') {
+            $where[] = 't.evaluationsdatum IS NOT NULL AND t.evaluationsdatum <= %s';
+            $params[] = current_time('Y-m-d');
+        } elseif ($args['evaluation'] === 'geplant') {
+            $where[] = 't.evaluationsdatum IS NOT NULL AND t.evaluationsdatum > %s';
+            $params[] = current_time('Y-m-d');
+        } elseif ($args['evaluation'] === 'ohne') {
+            $where[] = 't.evaluationsdatum IS NULL';
+        }
+    }
+
+    $sortier = [
+        'datum'       => 'p.datum DESC, t.sortierung ASC',
+        'datum_alt'   => 'p.datum ASC, t.sortierung ASC',
+        'evaluation'  => ($hat_ev ? 't.evaluationsdatum IS NULL, t.evaluationsdatum ASC' : 'p.datum DESC'),
+        'kreis'       => 'g.name ASC, p.datum DESC',
+        'titel'       => 't.titel ASC',
+    ];
+    $order = $sortier[$args['sort'] ?? 'datum'] ?? $sortier['datum'];
+
+    $sql = "SELECT t.*, p.titel AS protokoll_titel, p.datum AS protokoll_datum, p.id AS p_id,
+                   g.name AS gremium_name, g.id AS gremium_id
+            FROM $tops t
+            INNER JOIN $prot p ON p.id = t.protokoll_id
+            LEFT JOIN $grem g ON g.id = p.gremium_id
+            WHERE " . implode(' AND ', $where) . " ORDER BY $order LIMIT 500";
+    if ($params) $sql = $wpdb->prepare($sql, ...$params);
+    return $wpdb->get_results($sql) ?: [];
+}
+
+function pp_render_view_entscheide() {
+    global $wpdb;
+    $args = [
+        'gremium_id' => intval($_GET['e_kreis'] ?? 0),
+        'verfahren'  => sanitize_key($_GET['e_verfahren'] ?? ''),
+        'jahr'       => intval($_GET['e_jahr'] ?? 0),
+        'evaluation' => sanitize_key($_GET['e_eval'] ?? ''),
+        'suche'      => sanitize_text_field($_GET['e_suche'] ?? ''),
+        'sort'       => sanitize_key($_GET['e_sort'] ?? 'datum'),
+    ];
+    $entscheide = pp_get_entscheide($args);
+    $gremien    = pp_get_gremien();
+    $jahre      = $wpdb->get_col("SELECT DISTINCT YEAR(datum) j FROM {$wpdb->prefix}pp_protokolle WHERE datum IS NOT NULL ORDER BY j DESC");
+    $heute      = current_time('Y-m-d');
+    ?>
+    <div class="pp-page-head">
+        <h2>Entscheide</h2>
+        <span class="pp-meta">Alle Beschlüsse aus allen Sitzungen — unabhängig vom einzelnen Protokoll.</span>
+    </div>
+
+    <form method="get" class="pp-filterleiste">
+        <?php foreach ($_GET as $k => $v) :
+            if (strpos($k, 'e_') === 0 || $k === 'pp_view') continue; ?>
+            <input type="hidden" name="<?php echo esc_attr($k); ?>" value="<?php echo esc_attr(is_array($v) ? '' : $v); ?>">
+        <?php endforeach; ?>
+        <input type="hidden" name="pp_view" value="entscheide">
+
+        <label>Kreis
+            <select name="e_kreis">
+                <option value="">alle</option>
+                <?php foreach ($gremien as $g) : ?>
+                    <option value="<?php echo esc_attr($g->id); ?>" <?php selected($args['gremium_id'], $g->id); ?>><?php echo esc_html($g->name); ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label>Jahr
+            <select name="e_jahr">
+                <option value="">alle</option>
+                <?php foreach ($jahre as $j) : ?>
+                    <option value="<?php echo esc_attr($j); ?>" <?php selected($args['jahr'], $j); ?>><?php echo esc_html($j); ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label>Verfahren
+            <select name="e_verfahren">
+                <option value="">alle</option>
+                <?php foreach (pp_verfahren_liste() as $slug => $v) : ?>
+                    <option value="<?php echo esc_attr($slug); ?>" <?php selected($args['verfahren'], $slug); ?>><?php echo esc_html($v['label']); ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label>Evaluation
+            <select name="e_eval">
+                <option value="">alle</option>
+                <option value="faellig"  <?php selected($args['evaluation'], 'faellig'); ?>>fällig</option>
+                <option value="geplant"  <?php selected($args['evaluation'], 'geplant'); ?>>geplant</option>
+                <option value="ohne"     <?php selected($args['evaluation'], 'ohne'); ?>>ohne Datum</option>
+            </select>
+        </label>
+        <label>Sortierung
+            <select name="e_sort">
+                <option value="datum"      <?php selected($args['sort'], 'datum'); ?>>Datum, neueste zuerst</option>
+                <option value="datum_alt"  <?php selected($args['sort'], 'datum_alt'); ?>>Datum, älteste zuerst</option>
+                <option value="evaluation" <?php selected($args['sort'], 'evaluation'); ?>>Evaluationsdatum</option>
+                <option value="kreis"      <?php selected($args['sort'], 'kreis'); ?>>Kreis</option>
+                <option value="titel"      <?php selected($args['sort'], 'titel'); ?>>Titel</option>
+            </select>
+        </label>
+        <label>Suche
+            <input type="search" name="e_suche" value="<?php echo esc_attr($args['suche']); ?>" placeholder="Titel oder Beschlusstext">
+        </label>
+        <button type="submit" class="pp-btn pp-btn-small">Filtern</button>
+        <a class="pp-btn pp-btn-small pp-btn-ghost" href="<?php echo esc_url(pp_front_url(['pp_view' => 'entscheide'])); ?>">Zurücksetzen</a>
+    </form>
+
+    <p class="pp-meta"><?php echo count($entscheide); ?> Entscheid(e)<?php echo count($entscheide) >= 500 ? ' (Anzeige auf 500 begrenzt)' : ''; ?></p>
+
+    <?php if (!$entscheide) : ?>
+        <p class="pp-empty">Keine Entscheide gefunden.</p>
+    <?php else : ?>
+        <div class="pp-table-wrap">
+        <table class="pp-table pp-entscheide">
+            <thead><tr>
+                <th>Datum</th><th>Kreis</th><th>Beschluss</th><th>Verfahren</th><th>Evaluation</th><th>Sitzung</th>
+            </tr></thead>
+            <tbody>
+            <?php foreach ($entscheide as $e) :
+                $faellig = $e->evaluationsdatum && $e->evaluationsdatum <= $heute;
+                $erg = pp_verfahren_ergebnis($e->verfahren, $e->stimmen_ja ?? 0, $e->stimmen_nein ?? 0, $e->stimmen_enthaltung ?? 0, $e->stimmberechtigt ?? 0);
+                ?>
+                <tr class="<?php echo $faellig ? 'is-faellig' : ''; ?>">
+                    <td><?php echo esc_html($e->protokoll_datum ? mysql2date('d.m.Y', $e->protokoll_datum) : '—'); ?></td>
+                    <td><?php echo esc_html($e->gremium_name ?: '—'); ?></td>
+                    <td>
+                        <strong><?php echo esc_html($e->titel); ?></strong>
+                        <?php if ($e->beschluss) : ?>
+                            <div class="pp-entscheid-text"><?php echo nl2br(esc_html($e->beschluss)); ?></div>
+                        <?php endif; ?>
+                    </td>
+                    <td>
+                        <?php echo esc_html(pp_verfahren_label($e->verfahren)); ?>
+                        <?php if ($erg && ($e->stimmen_ja !== null || $e->stimmen_nein !== null)) : ?>
+                            <div class="pp-meta"><?php echo esc_html(sprintf('%d/%d/%d', intval($e->stimmen_ja), intval($e->stimmen_nein), intval($e->stimmen_enthaltung))); ?>
+                                — <?php echo $erg['erreicht'] ? 'angenommen' : 'nicht angenommen'; ?></div>
+                        <?php endif; ?>
+                    </td>
+                    <td><?php
+                        if ($e->evaluationsdatum) {
+                            echo '<span class="' . ($faellig ? 'pp-badge pp-badge-warn' : '') . '">'
+                                . esc_html(mysql2date('d.m.Y', $e->evaluationsdatum)) . '</span>';
+                        } else { echo '<span class="pp-meta">—</span>'; }
+                    ?></td>
+                    <td><a href="<?php echo esc_url(pp_front_url(['pp_view' => 'protokoll', 'id' => $e->p_id]) . '#top-' . $e->id); ?>"><?php echo esc_html($e->protokoll_titel); ?></a></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        </div>
+    <?php endif;
+}
+
+/* ─── VERWALTUNG DER ABLAUF-VORLAGEN ──────────────────────────────────────── */
+
+add_action('admin_post_pp_front_vorlage_save', 'pp_handle_front_vorlage_save');
+function pp_handle_front_vorlage_save() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_vorlage_save');
+    global $wpdb;
+
+    $id    = intval($_POST['id'] ?? 0);
+    $name  = sanitize_text_field($_POST['name'] ?? '');
+    $besch = sanitize_textarea_field($_POST['beschreibung'] ?? '');
+    if ($name === '') {
+        pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => 'ablaeufe', 'pp_error' => 'Name+fehlt']);
+    }
+
+    $daten = ['name' => $name, 'beschreibung' => $besch];
+    if ($id) {
+        $wpdb->update($wpdb->prefix . 'pp_ablauf_vorlagen', $daten, ['id' => $id]);
+    } else {
+        $wpdb->insert($wpdb->prefix . 'pp_ablauf_vorlagen', $daten + ['aktiv' => 1]);
+        $id = (int) $wpdb->insert_id;
+    }
+
+    // Schritte: bestehende aktualisieren, leere entfernen, neue anhängen.
+    foreach ((array) ($_POST['schritt'] ?? []) as $sid => $w) {
+        $sid   = intval($sid);
+        $titel = sanitize_text_field($w['titel'] ?? '');
+        if (!$sid) continue;
+        if ($titel === '') {
+            $wpdb->delete($wpdb->prefix . 'pp_ablauf_vorlage_schritte', ['id' => $sid]);
+            continue;
+        }
+        $wpdb->update($wpdb->prefix . 'pp_ablauf_vorlage_schritte', [
+            'titel'      => $titel,
+            'hinweis'    => sanitize_text_field($w['hinweis'] ?? ''),
+            'sortierung' => intval($w['sortierung'] ?? 0),
+        ], ['id' => $sid]);
+    }
+    $neu = sanitize_text_field($_POST['neuer_schritt'] ?? '');
+    if ($neu !== '') {
+        $tbl = $wpdb->prefix . 'pp_ablauf_vorlage_schritte';
+        $max = (int) $wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(sortierung),0) FROM $tbl WHERE vorlage_id = %d", $id));
+        $wpdb->insert($tbl, [
+            'vorlage_id' => $id,
+            'titel'      => $neu,
+            'hinweis'    => sanitize_text_field($_POST['neuer_schritt_hinweis'] ?? ''),
+            'sortierung' => $max + 1,
+        ]);
+    }
+
+    pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => 'ablaeufe', 'v' => $id, 'pp_saved' => '1']);
+}
+
+add_action('admin_post_pp_front_vorlage_delete', 'pp_handle_front_vorlage_delete');
+function pp_handle_front_vorlage_delete() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_vorlage_delete');
+    global $wpdb;
+    $id = intval($_POST['id'] ?? 0);
+    // Deaktivieren statt löschen: bereits angewandte Abläufe bleiben davon
+    // unberührt, aber die Vorlage taucht nicht mehr in der Auswahl auf.
+    $wpdb->update($wpdb->prefix . 'pp_ablauf_vorlagen', ['aktiv' => 0], ['id' => $id]);
+    pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => 'ablaeufe']);
+}
+
+function pp_render_view_ablaeufe() {
+    $vorlagen = pp_get_ablauf_vorlagen();
+    $aktiv_id = intval($_GET['v'] ?? 0);
+    $aktiv    = null;
+    foreach ($vorlagen as $v) { if ((int) $v->id === $aktiv_id || (!$aktiv_id && !$aktiv)) $aktiv = $v; }
+    $schritte = $aktiv ? pp_get_vorlage_schritte($aktiv->id) : [];
+    $darf     = pp_can_manage();
+    ?>
+    <div class="pp-page-head">
+        <h2>Ablauf-Vorlagen</h2>
+        <span class="pp-meta">Gliederungen für die Diskussion eines TOPs — im Live-Modus mit einem Klick anwendbar.</span>
+    </div>
+
+    <div class="pp-vorlagen-layout">
+        <nav class="pp-vorlagen-liste">
+            <?php foreach ($vorlagen as $v) : ?>
+                <a class="pp-sidebar-link <?php echo ($aktiv && $v->id === $aktiv->id) ? 'is-active' : ''; ?>"
+                   href="<?php echo esc_url(pp_front_url(['pp_view' => 'ablaeufe', 'v' => $v->id])); ?>">
+                    <span><?php echo esc_html($v->name); ?></span>
+                </a>
+            <?php endforeach; ?>
+            <?php if ($darf) : ?>
+                <a class="pp-sidebar-link" href="<?php echo esc_url(pp_front_url(['pp_view' => 'ablaeufe', 'v' => 'neu'])); ?>">+ Neue Vorlage</a>
+            <?php endif; ?>
+        </nav>
+
+        <div class="pp-vorlagen-detail">
+            <?php if (!$darf) : ?>
+                <?php if ($aktiv) : ?>
+                    <h3><?php echo esc_html($aktiv->name); ?></h3>
+                    <p class="pp-meta"><?php echo esc_html($aktiv->beschreibung); ?></p>
+                    <ol><?php foreach ($schritte as $s) : ?>
+                        <li><strong><?php echo esc_html($s->titel); ?></strong>
+                            <?php if ($s->hinweis) : ?><span class="pp-meta"> — <?php echo esc_html($s->hinweis); ?></span><?php endif; ?></li>
+                    <?php endforeach; ?></ol>
+                <?php endif; ?>
+            <?php else :
+                $neu = (($_GET['v'] ?? '') === 'neu');
+                if ($neu) { $aktiv = null; $schritte = []; } ?>
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-form">
+                    <?php wp_nonce_field('pp_front_vorlage_save'); ?>
+                    <input type="hidden" name="action" value="pp_front_vorlage_save">
+                    <input type="hidden" name="id" value="<?php echo esc_attr($aktiv->id ?? 0); ?>">
+                    <?php pp_front_return_field(); ?>
+                    <label>Name <input type="text" name="name" value="<?php echo esc_attr($aktiv->name ?? ''); ?>" required></label>
+                    <label>Kurzbeschreibung <input type="text" name="beschreibung" value="<?php echo esc_attr($aktiv->beschreibung ?? ''); ?>"></label>
+
+                    <?php if ($schritte) : ?>
+                        <h4>Schritte</h4>
+                        <p class="pp-meta">Titel leeren und speichern entfernt einen Schritt.</p>
+                        <?php foreach ($schritte as $s) : ?>
+                            <div class="pp-vorlage-schritt">
+                                <input type="number" name="schritt[<?php echo esc_attr($s->id); ?>][sortierung]" value="<?php echo esc_attr($s->sortierung); ?>" style="width:4.5em" title="Reihenfolge">
+                                <input type="text" name="schritt[<?php echo esc_attr($s->id); ?>][titel]" value="<?php echo esc_attr($s->titel); ?>" placeholder="Titel">
+                                <input type="text" name="schritt[<?php echo esc_attr($s->id); ?>][hinweis]" value="<?php echo esc_attr($s->hinweis); ?>" placeholder="Hinweis / Leitfrage">
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+
+                    <div class="pp-vorlage-schritt">
+                        <span class="pp-meta">neu</span>
+                        <input type="text" name="neuer_schritt" placeholder="Weiterer Schritt">
+                        <input type="text" name="neuer_schritt_hinweis" placeholder="Hinweis / Leitfrage">
+                    </div>
+
+                    <div class="pp-form-actions">
+                        <button type="submit" class="pp-btn pp-btn-primary">Vorlage speichern</button>
+                    </div>
+                </form>
+
+                <?php if ($aktiv) : ?>
+                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-inline-form"
+                          onsubmit="return confirm('Vorlage ausblenden? Bereits angewandte Abläufe bleiben erhalten.');">
+                        <?php wp_nonce_field('pp_front_vorlage_delete'); ?>
+                        <input type="hidden" name="action" value="pp_front_vorlage_delete">
+                        <input type="hidden" name="id" value="<?php echo esc_attr($aktiv->id); ?>">
+                        <?php pp_front_return_field(); ?>
+                        <button type="submit" class="pp-link-danger">Vorlage ausblenden</button>
+                    </form>
+                <?php endif; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * DOKUMENTE — Satzung, Verträge und Ordnungen paragraphenweise durchgehen
+ * Jeder Paragraph hat einen eigenen Status, ein eigenes Evaluationsdatum und
+ * eine eigene Kommentarspur. So lässt sich ein Dokument über mehrere Sitzungen
+ * abarbeiten, ohne den Überblick zu verlieren.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+function pp_dokument_arten() {
+    return [
+        'satzung'   => 'Satzung',
+        'ordnung'   => 'Ordnung / Geschäftsordnung',
+        'vertrag'   => 'Vertrag',
+        'konzept'   => 'Konzept / Leitbild',
+        'sonstiges' => 'Sonstiges',
+    ];
+}
+
+function pp_paragraph_status_liste() {
+    return [
+        'aktuell'     => 'aktuell',
+        'in_pruefung' => 'in Prüfung',
+        'geaendert'   => 'geändert',
+        'strittig'    => 'strittig',
+        'gestrichen'  => 'gestrichen',
+    ];
+}
+
+function pp_get_dokumente() {
+    global $wpdb;
+    $t = $wpdb->prefix . 'pp_dokumente';
+    if ($wpdb->get_var("SHOW TABLES LIKE '$t'") !== $t) return [];
+    $g = $wpdb->prefix . 'pp_gremien';
+    return $wpdb->get_results(
+        "SELECT d.*, g.name AS gremium_name FROM $t d LEFT JOIN $g g ON g.id = d.gremium_id ORDER BY d.titel ASC"
+    ) ?: [];
+}
+
+function pp_get_dokument($id) {
+    global $wpdb;
+    return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$wpdb->prefix}pp_dokumente WHERE id = %d", intval($id)));
+}
+
+function pp_get_paragraphen($dokument_id) {
+    global $wpdb;
+    return $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$wpdb->prefix}pp_dokument_paragraphen WHERE dokument_id = %d ORDER BY sortierung ASC, id ASC",
+        intval($dokument_id)
+    )) ?: [];
+}
+
+function pp_get_paragraph_kommentare($paragraph_id) {
+    global $wpdb;
+    return $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$wpdb->prefix}pp_paragraph_kommentare WHERE paragraph_id = %d ORDER BY erstellt_am ASC",
+        intval($paragraph_id)
+    )) ?: [];
+}
+
+/* --- Handler ------------------------------------------------------------- */
+
+add_action('admin_post_pp_front_dokument_save', 'pp_handle_front_dokument_save');
+function pp_handle_front_dokument_save() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_dokument_save');
+    global $wpdb;
+
+    $id    = intval($_POST['id'] ?? 0);
+    $titel = sanitize_text_field($_POST['titel'] ?? '');
+    if ($titel === '') {
+        pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => 'dokumente', 'pp_error' => 'Titel+fehlt']);
+    }
+    $art = sanitize_key($_POST['art'] ?? 'satzung');
+    $ev  = sanitize_text_field($_POST['evaluationsdatum'] ?? '');
+
+    $daten = [
+        'titel'            => $titel,
+        'art'              => array_key_exists($art, pp_dokument_arten()) ? $art : 'sonstiges',
+        'beschreibung'     => sanitize_textarea_field($_POST['beschreibung'] ?? ''),
+        'gremium_id'       => !empty($_POST['gremium_id']) ? intval($_POST['gremium_id']) : null,
+        'evaluationsdatum' => $ev !== '' ? $ev : null,
+    ];
+    if ($id) {
+        $wpdb->update($wpdb->prefix . 'pp_dokumente', $daten, ['id' => $id]);
+    } else {
+        $daten['erstellt_von'] = get_current_user_id();
+        $wpdb->insert($wpdb->prefix . 'pp_dokumente', $daten);
+        $id = (int) $wpdb->insert_id;
+    }
+    pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => 'dokument', 'id' => $id, 'pp_saved' => '1']);
+}
+
+add_action('admin_post_pp_front_dokument_delete', 'pp_handle_front_dokument_delete');
+function pp_handle_front_dokument_delete() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_dokument_delete');
+    global $wpdb;
+    $id = intval($_POST['id'] ?? 0);
+    // Paragraphen und Kommentare hängen am Dokument und gehen mit.
+    $wpdb->delete($wpdb->prefix . 'pp_paragraph_kommentare', ['dokument_id' => $id]);
+    $wpdb->delete($wpdb->prefix . 'pp_dokument_paragraphen', ['dokument_id' => $id]);
+    $wpdb->delete($wpdb->prefix . 'pp_dokumente', ['id' => $id]);
+    pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => 'dokumente']);
+}
+
+add_action('admin_post_pp_front_paragraph_save', 'pp_handle_front_paragraph_save');
+function pp_handle_front_paragraph_save() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_paragraph_save');
+    global $wpdb;
+
+    $dokument_id = intval($_POST['dokument_id'] ?? 0);
+    $id          = intval($_POST['id'] ?? 0);
+    $status      = sanitize_key($_POST['status'] ?? 'aktuell');
+    $ev          = sanitize_text_field($_POST['evaluationsdatum'] ?? '');
+    $gepr        = sanitize_text_field($_POST['geprueft_am'] ?? '');
+
+    $daten = [
+        'nummer'           => sanitize_text_field($_POST['nummer'] ?? ''),
+        'titel'            => sanitize_text_field($_POST['titel'] ?? ''),
+        'inhalt'           => wp_kses_post($_POST['inhalt'] ?? ''),
+        'status'           => array_key_exists($status, pp_paragraph_status_liste()) ? $status : 'aktuell',
+        'evaluationsdatum' => $ev !== '' ? $ev : null,
+        'geprueft_am'      => $gepr !== '' ? $gepr : null,
+        'geaendert_am'     => current_time('mysql'),
+    ];
+
+    if ($id) {
+        $wpdb->update($wpdb->prefix . 'pp_dokument_paragraphen', $daten, ['id' => $id]);
+    } else {
+        $tbl = $wpdb->prefix . 'pp_dokument_paragraphen';
+        $max = (int) $wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(sortierung),0) FROM $tbl WHERE dokument_id = %d", $dokument_id));
+        $daten['dokument_id'] = $dokument_id;
+        $daten['sortierung']  = $max + 1;
+        $wpdb->insert($tbl, $daten);
+        $id = (int) $wpdb->insert_id;
+    }
+    pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => 'dokument', 'id' => $dokument_id], 'para-' . $id);
+}
+
+add_action('admin_post_pp_front_paragraph_delete', 'pp_handle_front_paragraph_delete');
+function pp_handle_front_paragraph_delete() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_paragraph_delete');
+    global $wpdb;
+    $id          = intval($_POST['id'] ?? 0);
+    $dokument_id = intval($_POST['dokument_id'] ?? 0);
+    $wpdb->delete($wpdb->prefix . 'pp_paragraph_kommentare', ['paragraph_id' => $id]);
+    $wpdb->delete($wpdb->prefix . 'pp_dokument_paragraphen', ['id' => $id]);
+    pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => 'dokument', 'id' => $dokument_id]);
+}
+
+add_action('admin_post_pp_front_paragraph_kommentar', 'pp_handle_front_paragraph_kommentar');
+function pp_handle_front_paragraph_kommentar() {
+    // Kommentieren darf jedes angemeldete Mitglied – das ist der Sinn der
+    // Durchsicht. Ändern des Textes bleibt bei pp_can_manage().
+    if (!is_user_logged_in()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_paragraph_kommentar');
+    global $wpdb;
+
+    $paragraph_id = intval($_POST['paragraph_id'] ?? 0);
+    $dokument_id  = intval($_POST['dokument_id'] ?? 0);
+    $text         = sanitize_textarea_field($_POST['text'] ?? '');
+    if ($text !== '' && $paragraph_id) {
+        $wpdb->insert($wpdb->prefix . 'pp_paragraph_kommentare', [
+            'paragraph_id' => $paragraph_id,
+            'dokument_id'  => $dokument_id,
+            'user_id'      => get_current_user_id(),
+            'text'         => $text,
+        ]);
+    }
+    pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => 'dokument', 'id' => $dokument_id], 'para-' . $paragraph_id);
+}
+
+add_action('admin_post_pp_front_paragraph_kommentar_toggle', 'pp_handle_front_paragraph_kommentar_toggle');
+function pp_handle_front_paragraph_kommentar_toggle() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_paragraph_kommentar_toggle');
+    global $wpdb;
+    $id           = intval($_POST['id'] ?? 0);
+    $dokument_id  = intval($_POST['dokument_id'] ?? 0);
+    $paragraph_id = intval($_POST['paragraph_id'] ?? 0);
+    $tbl = $wpdb->prefix . 'pp_paragraph_kommentare';
+    $ist = (int) $wpdb->get_var($wpdb->prepare("SELECT erledigt FROM $tbl WHERE id = %d", $id));
+    $wpdb->update($tbl, ['erledigt' => $ist ? 0 : 1], ['id' => $id]);
+    pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => 'dokument', 'id' => $dokument_id], 'para-' . $paragraph_id);
+}
+
+/* --- Ansichten ----------------------------------------------------------- */
+
+function pp_render_view_dokumente() {
+    $dokumente = pp_get_dokumente();
+    $arten     = pp_dokument_arten();
+    $gremien   = pp_get_gremien();
+    $heute     = current_time('Y-m-d');
+    $darf      = pp_can_manage();
+    ?>
+    <div class="pp-page-head">
+        <h2>Dokumente</h2>
+        <span class="pp-meta">Satzung, Ordnungen und Verträge — paragraphenweise durchgehen, kommentieren und wiedervorlegen.</span>
+    </div>
+
+    <?php if (!$dokumente) : ?>
+        <p class="pp-empty">Noch keine Dokumente angelegt.</p>
+    <?php else : ?>
+        <div class="pp-table-wrap">
+        <table class="pp-table">
+            <thead><tr><th>Titel</th><th>Art</th><th>Kreis</th><th>Paragraphen</th><th>Offene Kommentare</th><th>Evaluation</th></tr></thead>
+            <tbody>
+            <?php global $wpdb; foreach ($dokumente as $d) :
+                $anz = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}pp_dokument_paragraphen WHERE dokument_id = %d", $d->id));
+                $offen = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}pp_paragraph_kommentare WHERE dokument_id = %d AND erledigt = 0", $d->id));
+                $faellig = $d->evaluationsdatum && $d->evaluationsdatum <= $heute; ?>
+                <tr>
+                    <td><a href="<?php echo esc_url(pp_front_url(['pp_view' => 'dokument', 'id' => $d->id])); ?>"><?php echo esc_html($d->titel); ?></a></td>
+                    <td><?php echo esc_html($arten[$d->art] ?? $d->art); ?></td>
+                    <td><?php echo esc_html($d->gremium_name ?: '—'); ?></td>
+                    <td><?php echo $anz; ?></td>
+                    <td><?php echo $offen ? '<span class="pp-badge pp-badge-warn">' . $offen . '</span>' : '<span class="pp-meta">—</span>'; ?></td>
+                    <td><?php
+                        if ($d->evaluationsdatum) {
+                            echo '<span class="' . ($faellig ? 'pp-badge pp-badge-warn' : '') . '">' . esc_html(mysql2date('d.m.Y', $d->evaluationsdatum)) . '</span>';
+                        } else { echo '<span class="pp-meta">—</span>'; }
+                    ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        </div>
+    <?php endif; ?>
+
+    <?php if ($darf) : ?>
+        <details class="pp-card">
+            <summary><strong>Neues Dokument anlegen</strong></summary>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-form">
+                <?php wp_nonce_field('pp_front_dokument_save'); ?>
+                <input type="hidden" name="action" value="pp_front_dokument_save">
+                <input type="hidden" name="id" value="0">
+                <?php pp_front_return_field(); ?>
+                <label>Titel <input type="text" name="titel" required placeholder="z. B. Vereinssatzung"></label>
+                <label>Art
+                    <select name="art">
+                        <?php foreach ($arten as $slug => $label) : ?>
+                            <option value="<?php echo esc_attr($slug); ?>"><?php echo esc_html($label); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Zuständiger Kreis
+                    <select name="gremium_id">
+                        <option value="">—</option>
+                        <?php foreach ($gremien as $g) : ?>
+                            <option value="<?php echo esc_attr($g->id); ?>"><?php echo esc_html($g->name); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Beschreibung <textarea name="beschreibung" rows="2"></textarea></label>
+                <label>Wiedervorlage am <input type="date" name="evaluationsdatum"></label>
+                <div class="pp-form-actions"><button type="submit" class="pp-btn pp-btn-primary">Anlegen</button></div>
+            </form>
+        </details>
+    <?php endif;
+}
+
+function pp_render_view_dokument_detail() {
+    $id = intval($_GET['id'] ?? 0);
+    $d  = pp_get_dokument($id);
+    if (!$d) { echo '<p class="pp-empty">Dokument nicht gefunden.</p>'; return; }
+
+    $paragraphen = pp_get_paragraphen($id);
+    $arten       = pp_dokument_arten();
+    $status_list = pp_paragraph_status_liste();
+    $gremien     = pp_get_gremien();
+    $heute       = current_time('Y-m-d');
+    $darf        = pp_can_manage();
+    ?>
+    <p><a class="pp-btn pp-btn-small" href="<?php echo esc_url(pp_front_url(['pp_view' => 'dokumente'])); ?>">‹ Alle Dokumente</a></p>
+    <div class="pp-page-head">
+        <h2><?php echo esc_html($d->titel); ?></h2>
+        <span class="pp-meta"><?php
+            echo esc_html($arten[$d->art] ?? $d->art);
+            if ($d->evaluationsdatum) echo ' · Wiedervorlage ' . esc_html(mysql2date('d.m.Y', $d->evaluationsdatum));
+        ?></span>
+    </div>
+    <?php if ($d->beschreibung) : ?><p><?php echo nl2br(esc_html($d->beschreibung)); ?></p><?php endif; ?>
+
+    <?php if (!$paragraphen) : ?>
+        <p class="pp-empty">Noch keine Paragraphen erfasst.</p>
+    <?php endif; ?>
+
+    <ol class="pp-paragraphen">
+        <?php foreach ($paragraphen as $para) :
+            $kommentare = pp_get_paragraph_kommentare($para->id);
+            $offen      = count(array_filter($kommentare, function ($k) { return (int) $k->erledigt === 0; }));
+            $faellig    = $para->evaluationsdatum && $para->evaluationsdatum <= $heute; ?>
+            <li class="pp-paragraph pp-para-status-<?php echo esc_attr($para->status); ?>" id="para-<?php echo esc_attr($para->id); ?>">
+                <div class="pp-paragraph-kopf">
+                    <strong><?php echo esc_html(trim($para->nummer . ' ' . $para->titel)) ?: 'Ohne Titel'; ?></strong>
+                    <span class="pp-badge"><?php echo esc_html($status_list[$para->status] ?? $para->status); ?></span>
+                    <?php if ($para->evaluationsdatum) : ?>
+                        <span class="<?php echo $faellig ? 'pp-badge pp-badge-warn' : 'pp-meta'; ?>">Wiedervorlage <?php echo esc_html(mysql2date('d.m.Y', $para->evaluationsdatum)); ?></span>
+                    <?php endif; ?>
+                    <?php if ($offen) : ?><span class="pp-badge pp-badge-warn"><?php echo $offen; ?> offen</span><?php endif; ?>
+                </div>
+
+                <?php if ($para->inhalt) : ?>
+                    <div class="pp-paragraph-text"><?php echo wpautop(wp_kses_post($para->inhalt)); ?></div>
+                <?php endif; ?>
+
+                <?php if ($kommentare) : ?>
+                    <ul class="pp-para-kommentare">
+                        <?php foreach ($kommentare as $k) :
+                            $wer = $k->user_id ? get_userdata($k->user_id) : null; ?>
+                            <li class="<?php echo $k->erledigt ? 'is-erledigt' : ''; ?>">
+                                <span class="pp-meta"><?php echo esc_html(($wer ? $wer->display_name : 'Unbekannt') . ' · ' . mysql2date('d.m.Y H:i', $k->erstellt_am)); ?></span>
+                                <div><?php echo nl2br(esc_html($k->text)); ?></div>
+                                <?php if ($darf) : ?>
+                                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-inline-form">
+                                        <?php wp_nonce_field('pp_front_paragraph_kommentar_toggle'); ?>
+                                        <input type="hidden" name="action" value="pp_front_paragraph_kommentar_toggle">
+                                        <input type="hidden" name="id" value="<?php echo esc_attr($k->id); ?>">
+                                        <input type="hidden" name="paragraph_id" value="<?php echo esc_attr($para->id); ?>">
+                                        <input type="hidden" name="dokument_id" value="<?php echo esc_attr($d->id); ?>">
+                                        <?php pp_front_return_field(); ?>
+                                        <button type="submit" class="pp-btn pp-btn-small pp-btn-ghost"><?php echo $k->erledigt ? 'wieder öffnen' : 'erledigt'; ?></button>
+                                    </form>
+                                <?php endif; ?>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
+
+                <details class="pp-para-werkzeug">
+                    <summary class="pp-meta">Kommentieren</summary>
+                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-form">
+                        <?php wp_nonce_field('pp_front_paragraph_kommentar'); ?>
+                        <input type="hidden" name="action" value="pp_front_paragraph_kommentar">
+                        <input type="hidden" name="paragraph_id" value="<?php echo esc_attr($para->id); ?>">
+                        <input type="hidden" name="dokument_id" value="<?php echo esc_attr($d->id); ?>">
+                        <?php pp_front_return_field(); ?>
+                        <textarea name="text" rows="2" placeholder="Anmerkung, Änderungsvorschlag, Frage…" required></textarea>
+                        <div class="pp-form-actions"><button type="submit" class="pp-btn pp-btn-small">Kommentar speichern</button></div>
+                    </form>
+                </details>
+
+                <?php if ($darf) : ?>
+                    <details class="pp-para-werkzeug">
+                        <summary class="pp-meta">Bearbeiten</summary>
+                        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-form">
+                            <?php wp_nonce_field('pp_front_paragraph_save'); ?>
+                            <input type="hidden" name="action" value="pp_front_paragraph_save">
+                            <input type="hidden" name="id" value="<?php echo esc_attr($para->id); ?>">
+                            <input type="hidden" name="dokument_id" value="<?php echo esc_attr($d->id); ?>">
+                            <?php pp_front_return_field(); ?>
+                            <label>Nummer <input type="text" name="nummer" value="<?php echo esc_attr($para->nummer); ?>" placeholder="§ 3"></label>
+                            <label>Überschrift <input type="text" name="titel" value="<?php echo esc_attr($para->titel); ?>"></label>
+                            <label>Text <textarea name="inhalt" rows="5"><?php echo esc_textarea($para->inhalt); ?></textarea></label>
+                            <label>Status
+                                <select name="status">
+                                    <?php foreach ($status_list as $slug => $label) : ?>
+                                        <option value="<?php echo esc_attr($slug); ?>" <?php selected($para->status, $slug); ?>><?php echo esc_html($label); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </label>
+                            <label>Zuletzt geprüft am <input type="date" name="geprueft_am" value="<?php echo esc_attr($para->geprueft_am); ?>"></label>
+                            <label>Wiedervorlage am <input type="date" name="evaluationsdatum" value="<?php echo esc_attr($para->evaluationsdatum); ?>"></label>
+                            <div class="pp-form-actions"><button type="submit" class="pp-btn pp-btn-small">Speichern</button></div>
+                        </form>
+                        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-inline-form"
+                              onsubmit="return confirm('Paragraph samt Kommentaren löschen?');">
+                            <?php wp_nonce_field('pp_front_paragraph_delete'); ?>
+                            <input type="hidden" name="action" value="pp_front_paragraph_delete">
+                            <input type="hidden" name="id" value="<?php echo esc_attr($para->id); ?>">
+                            <input type="hidden" name="dokument_id" value="<?php echo esc_attr($d->id); ?>">
+                            <?php pp_front_return_field(); ?>
+                            <button type="submit" class="pp-link-danger">Paragraph löschen</button>
+                        </form>
+                    </details>
+                <?php endif; ?>
+            </li>
+        <?php endforeach; ?>
+    </ol>
+
+    <?php if ($darf) : ?>
+        <details class="pp-card">
+            <summary><strong>Paragraph hinzufügen</strong></summary>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-form">
+                <?php wp_nonce_field('pp_front_paragraph_save'); ?>
+                <input type="hidden" name="action" value="pp_front_paragraph_save">
+                <input type="hidden" name="id" value="0">
+                <input type="hidden" name="dokument_id" value="<?php echo esc_attr($d->id); ?>">
+                <?php pp_front_return_field(); ?>
+                <label>Nummer <input type="text" name="nummer" placeholder="§ 1"></label>
+                <label>Überschrift <input type="text" name="titel" placeholder="Name und Sitz"></label>
+                <label>Text <textarea name="inhalt" rows="5"></textarea></label>
+                <label>Wiedervorlage am <input type="date" name="evaluationsdatum"></label>
+                <div class="pp-form-actions"><button type="submit" class="pp-btn pp-btn-primary">Hinzufügen</button></div>
+            </form>
+        </details>
+
+        <details class="pp-card">
+            <summary><strong>Dokument bearbeiten</strong></summary>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-form">
+                <?php wp_nonce_field('pp_front_dokument_save'); ?>
+                <input type="hidden" name="action" value="pp_front_dokument_save">
+                <input type="hidden" name="id" value="<?php echo esc_attr($d->id); ?>">
+                <?php pp_front_return_field(); ?>
+                <label>Titel <input type="text" name="titel" value="<?php echo esc_attr($d->titel); ?>" required></label>
+                <label>Art
+                    <select name="art">
+                        <?php foreach ($arten as $slug => $label) : ?>
+                            <option value="<?php echo esc_attr($slug); ?>" <?php selected($d->art, $slug); ?>><?php echo esc_html($label); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Zuständiger Kreis
+                    <select name="gremium_id">
+                        <option value="">—</option>
+                        <?php foreach ($gremien as $g) : ?>
+                            <option value="<?php echo esc_attr($g->id); ?>" <?php selected($d->gremium_id, $g->id); ?>><?php echo esc_html($g->name); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Beschreibung <textarea name="beschreibung" rows="2"><?php echo esc_textarea($d->beschreibung); ?></textarea></label>
+                <label>Wiedervorlage am <input type="date" name="evaluationsdatum" value="<?php echo esc_attr($d->evaluationsdatum); ?>"></label>
+                <div class="pp-form-actions"><button type="submit" class="pp-btn pp-btn-small">Speichern</button></div>
+            </form>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-inline-form"
+                  onsubmit="return confirm('Dokument mit allen Paragraphen und Kommentaren löschen?');">
+                <?php wp_nonce_field('pp_front_dokument_delete'); ?>
+                <input type="hidden" name="action" value="pp_front_dokument_delete">
+                <input type="hidden" name="id" value="<?php echo esc_attr($d->id); ?>">
+                <?php pp_front_return_field(); ?>
+                <button type="submit" class="pp-link-danger">Dokument löschen</button>
+            </form>
+        </details>
+    <?php endif;
+}
+
 function pp_render_view_protokoll_detail() {
     $id = intval($_GET['id'] ?? 0);
     $p  = pp_get_protokoll($id);
@@ -1723,7 +2873,9 @@ function pp_render_view_protokoll_detail() {
                         <?php if ($t->beschreibung) : ?><div class="pp-agenda-desc"><?php echo nl2br(esc_html($t->beschreibung)); ?></div><?php endif; ?>
                         <?php if ($t->beschluss) : ?><div class="pp-beschluss-line"><strong>Beschluss:</strong> <?php echo esc_html($t->beschluss); ?></div><?php endif; ?>
 
+                        <?php pp_render_top_schritte($t, $p, $p->status !== 'abgeschlossen' && pp_can_manage(), 'protokoll'); ?>
                         <?php pp_render_top_unterlagen($t, $p, $p->status !== 'abgeschlossen' && pp_can_manage(), 'protokoll'); ?>
+                        <?php pp_render_top_abstimmung($t, $p, $p->status !== 'abgeschlossen' && pp_can_manage(), 'protokoll'); ?>
 
                         <?php if ($p->status !== 'abgeschlossen') : ?>
                             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-inline-form pp-top-edit">
@@ -1882,86 +3034,110 @@ function pp_render_live_modus() {
             <?php if (empty($tops)) : ?><li class="pp-empty">Keine TOPs.</li><?php endif; ?>
         </ol>
 
-        <div class="pp-sidebar-section">Tagesordnung ändern</div>
-        <p class="pp-live-hinweis">Änderungen an der laufenden Tagesordnung werden als eigener Punkt zur Konsentrunde gestellt und erst mit dem Beschluss wirksam.</p>
-        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-live-form">
-            <?php wp_nonce_field('pp_front_to_aenderung_beantragen'); ?>
-            <input type="hidden" name="action" value="pp_front_to_aenderung_beantragen">
-            <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($p->id); ?>">
-            <?php pp_front_return_field(); ?>
+        <div class="pp-live-fuss">
+            <details class="pp-live-werkzeug">
+                <summary class="pp-btn pp-btn-small">Tagesordnung ändern</summary>
+                <p class="pp-live-hinweis">Änderungen an der laufenden Tagesordnung werden als eigener Punkt zur Konsentrunde gestellt und erst mit dem Beschluss wirksam.</p>
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-live-form">
+                    <?php wp_nonce_field('pp_front_to_aenderung_beantragen'); ?>
+                    <input type="hidden" name="action" value="pp_front_to_aenderung_beantragen">
+                    <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($p->id); ?>">
+                    <?php pp_front_return_field(); ?>
 
-            <select name="aktion" class="pp-to-aktion">
-                <option value="hinzufuegen">TOP aufnehmen</option>
-                <option value="entfernen">TOP streichen</option>
-                <option value="dauer">Dauer ändern</option>
-            </select>
+                    <select name="aktion" class="pp-to-aktion">
+                        <option value="hinzufuegen">TOP aufnehmen</option>
+                        <option value="entfernen">TOP streichen</option>
+                        <option value="dauer">Dauer ändern</option>
+                    </select>
 
-            <div class="pp-to-feld pp-to-feld-neu">
-                <input type="text" name="titel" placeholder="Titel des neuen TOP">
-            </div>
-            <div class="pp-to-feld pp-to-feld-ziel" style="display:none">
-                <select name="ziel_top_id">
-                    <option value="">TOP wählen…</option>
-                    <?php foreach ($tops as $t) : if ($t->typ === 'to_aenderung') continue; ?>
-                        <option value="<?php echo esc_attr($t->id); ?>"><?php echo esc_html($t->titel); ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <div class="pp-to-feld pp-to-feld-dauer">
-                <input type="number" name="dauer_minuten" value="15" min="0" step="5" title="Minuten">
-            </div>
+                    <div class="pp-to-feld pp-to-feld-neu">
+                        <input type="text" name="titel" placeholder="Titel des neuen TOP">
+                    </div>
+                    <div class="pp-to-feld pp-to-feld-ziel" style="display:none">
+                        <select name="ziel_top_id">
+                            <option value="">TOP wählen…</option>
+                            <?php foreach ($tops as $t) : if ($t->typ === 'to_aenderung') continue; ?>
+                                <option value="<?php echo esc_attr($t->id); ?>"><?php echo esc_html($t->titel); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="pp-to-feld pp-to-feld-dauer">
+                        <input type="number" name="dauer_minuten" value="15" min="0" step="5" title="Minuten">
+                    </div>
 
-            <input type="text" name="begruendung" placeholder="Kurze Begründung">
-            <button type="submit" class="pp-btn pp-btn-small">Änderung beantragen</button>
-        </form>
+                    <input type="text" name="begruendung" placeholder="Kurze Begründung">
+                    <button type="submit" class="pp-btn pp-btn-small">Änderung beantragen</button>
+                </form>
+            </details>
 
-        <div class="pp-sidebar-section">Aufgabe erfassen</div>
-        <?php $sitzungs_aufgaben = pp_get_aufgaben_aus_sitzung($p->id); ?>
-        <?php if ($sitzungs_aufgaben) : ?>
-            <ul class="pp-live-erfasst">
-                <?php foreach ($sitzungs_aufgaben as $sa) : ?>
-                    <li>✓ <?php echo esc_html($sa->titel); ?>
-                        <span class="pp-meta"><?php
-                            echo esc_html(pp_user_display_name($sa->verantwortlich_user_id));
-                            if ($sa->faelligkeitsdatum) echo ' · bis ' . esc_html($sa->faelligkeitsdatum);
-                        ?></span>
-                    </li>
-                <?php endforeach; ?>
-            </ul>
-        <?php endif; ?>
-        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-live-form">
-            <?php wp_nonce_field('pp_front_quick_aufgabe'); ?>
-            <input type="hidden" name="action" value="pp_front_quick_aufgabe">
-            <input type="hidden" name="ziel_view" value="live">
-            <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($p->id); ?>">
-            <input type="hidden" name="gremium_id" value="<?php echo esc_attr($p->gremium_id); ?>">
-            <?php pp_front_return_field(); ?>
-            <input type="text" name="titel" placeholder="Aufgabe…" required>
-            <select name="verantwortlich_user_id">
-                <option value="">Verantwortlich…</option>
-                <?php foreach (pp_get_moegliche_mitglieder() as $u) : ?>
-                    <option value="<?php echo esc_attr($u->ID); ?>"><?php echo esc_html($u->display_name); ?></option>
-                <?php endforeach; ?>
-            </select>
-            <input type="date" name="faelligkeitsdatum">
-            <button type="submit" class="pp-btn pp-btn-small">Aufgabe anlegen</button>
-        </form>
+            <?php $sitzungs_aufgaben = pp_get_aufgaben_aus_sitzung($p->id); ?>
+            <details class="pp-live-werkzeug">
+                <summary class="pp-btn pp-btn-small">+ Aufgabe<?php if ($sitzungs_aufgaben) : ?> <span class="pp-meta">(<?php echo count($sitzungs_aufgaben); ?>)</span><?php endif; ?></summary>
+                <?php if ($sitzungs_aufgaben) : ?>
+                    <ul class="pp-live-erfasst">
+                        <?php foreach ($sitzungs_aufgaben as $sa) : ?>
+                            <li>✓ <?php echo esc_html($sa->titel); ?>
+                                <span class="pp-meta"><?php
+                                    echo esc_html(pp_user_display_name($sa->verantwortlich_user_id));
+                                    if ($sa->faelligkeitsdatum) echo ' · bis ' . esc_html($sa->faelligkeitsdatum);
+                                ?></span>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-live-form">
+                    <?php wp_nonce_field('pp_front_quick_aufgabe'); ?>
+                    <input type="hidden" name="action" value="pp_front_quick_aufgabe">
+                    <input type="hidden" name="ziel_view" value="live">
+                    <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($p->id); ?>">
+                    <input type="hidden" name="gremium_id" value="<?php echo esc_attr($p->gremium_id); ?>">
+                    <?php pp_front_return_field(); ?>
+                    <input type="text" name="titel" placeholder="Aufgabe…" required>
+                    <select name="verantwortlich_user_id">
+                        <option value="">Verantwortlich…</option>
+                        <?php foreach (pp_get_moegliche_mitglieder() as $u) : ?>
+                            <option value="<?php echo esc_attr($u->ID); ?>"><?php echo esc_html($u->display_name); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <input type="date" name="faelligkeitsdatum">
+                    <button type="submit" class="pp-btn pp-btn-small">Aufgabe anlegen</button>
+                </form>
+            </details>
 
-        <div class="pp-sidebar-section">Termin erfassen</div>
-        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-live-form">
-            <?php wp_nonce_field('pp_front_quick_termin'); ?>
-            <input type="hidden" name="action" value="pp_front_quick_termin">
-            <input type="hidden" name="ziel_view" value="live">
-            <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($p->id); ?>">
-            <input type="hidden" name="gremium_id" value="<?php echo esc_attr($p->gremium_id); ?>">
-            <?php pp_front_return_field(); ?>
-            <input type="text" name="titel" placeholder="Termin…" required>
-            <input type="datetime-local" name="datum">
-            <input type="text" name="ort" placeholder="Ort">
-            <button type="submit" class="pp-btn pp-btn-small">Termin anlegen</button>
-        </form>
+            <details class="pp-live-werkzeug">
+                <summary class="pp-btn pp-btn-small">+ Termin</summary>
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-live-form">
+                    <?php wp_nonce_field('pp_front_quick_termin'); ?>
+                    <input type="hidden" name="action" value="pp_front_quick_termin">
+                    <input type="hidden" name="ziel_view" value="live">
+                    <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($p->id); ?>">
+                    <input type="hidden" name="gremium_id" value="<?php echo esc_attr($p->gremium_id); ?>">
+                    <?php pp_front_return_field(); ?>
+                    <input type="text" name="titel" placeholder="Termin…" required>
+                    <input type="datetime-local" name="datum">
+                    <input type="text" name="ort" placeholder="Ort">
+                    <button type="submit" class="pp-btn pp-btn-small">Termin anlegen</button>
+                </form>
+            </details>
 
-        <a class="pp-btn pp-btn-small pp-live-exit" href="<?php echo esc_url(pp_front_url(['pp_view' => 'protokoll', 'id' => $p->id])); ?>">Live-Modus verlassen</a>
+            <details class="pp-live-werkzeug">
+                <summary class="pp-btn pp-btn-small">+ Thema</summary>
+                <p class="pp-live-hinweis">Landet im Themenspeicher – für eine spätere Sitzung.</p>
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-live-form">
+                    <?php wp_nonce_field('pp_front_quick_thema'); ?>
+                    <input type="hidden" name="action" value="pp_front_quick_thema">
+                    <input type="hidden" name="ziel_view" value="live">
+                    <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($p->id); ?>">
+                    <input type="hidden" name="gremium_id" value="<?php echo esc_attr($p->gremium_id); ?>">
+                    <?php pp_front_return_field(); ?>
+                    <input type="text" name="titel" placeholder="Thema…" required>
+                    <textarea name="beschreibung" rows="2" placeholder="Worum geht es?"></textarea>
+                    <button type="submit" class="pp-btn pp-btn-small">Thema merken</button>
+                </form>
+            </details>
+
+            <a class="pp-btn pp-btn-small pp-live-exit" href="<?php echo esc_url(pp_front_url(['pp_view' => 'protokoll', 'id' => $p->id])); ?>">Live-Modus verlassen</a>
+        </div>
     </aside>
 
     <main class="pp-app-main pp-live-main">
@@ -2203,7 +3379,9 @@ function pp_render_live_top($t, $p) {
             <div class="pp-form-actions"><button type="submit" class="pp-btn pp-btn-small">Notizen speichern</button></div>
         </form>
 
+        <?php pp_render_top_schritte($t, $p, true, 'live'); ?>
         <?php pp_render_top_unterlagen($t, $p, true, 'live'); ?>
+        <?php pp_render_top_abstimmung($t, $p, true, 'live'); ?>
 
         <?php if ($t->konsent_status === 'einwand_offen') :
             $einwaende = $wpdb->get_results($wpdb->prepare(
@@ -2336,7 +3514,7 @@ function pp_render_kreis_formular($kreis, $alle_gremien) {
 
         <label>Entscheidungsfindung
             <select name="standardverfahren">
-                <?php foreach (['konsent','mehrheit','geheime_wahl'] as $v) : ?>
+                <?php foreach (array_keys(pp_verfahren_liste()) as $v) : if ($v === 'mehrheit') continue; ?>
                     <option value="<?php echo esc_attr($v); ?>" <?php selected($kreis->standardverfahren ?? 'konsent', $v); ?>><?php echo esc_html(pp_verfahren_label($v)); ?></option>
                 <?php endforeach; ?>
             </select>

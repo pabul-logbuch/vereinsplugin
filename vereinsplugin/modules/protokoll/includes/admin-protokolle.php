@@ -68,7 +68,7 @@ function pp_handle_add_top() {
         'protokoll_id'   => $protokoll_id,
         'titel'          => sanitize_text_field($_POST['titel'] ?? ''),
         'typ'            => in_array($_POST['typ'] ?? '', ['standard','wahl','svo_teil_a_review']) ? $_POST['typ'] : 'standard',
-        'verfahren'      => in_array($_POST['verfahren'] ?? '', ['konsent','mehrheit','geheime_wahl']) ? $_POST['verfahren'] : ($gremium->standardverfahren ?? 'konsent'),
+        'verfahren'      => array_key_exists($_POST['verfahren'] ?? '', pp_verfahren_liste()) ? $_POST['verfahren'] : ($gremium->standardverfahren ?? 'konsent'),
         'beschreibung'   => sanitize_textarea_field($_POST['beschreibung'] ?? ''),
         'thema_id'       => !empty($_POST['thema_id']) ? intval($_POST['thema_id']) : null,
         'ist_aufgabe'    => isset($_POST['ist_aufgabe']) ? 1 : 0,
@@ -354,9 +354,9 @@ function pp_render_protokoll_edit() {
                         <th>Verfahren</th>
                         <td>
                             <select name="verfahren">
-                                <option value="konsent">Konsent (Standard)</option>
-                                <option value="mehrheit">Mehrheitsentscheid</option>
-                                <option value="geheime_wahl">Geheime Wahl</option>
+                                <?php foreach (pp_verfahren_liste() as $vslug => $vdef) : if ($vslug === 'mehrheit') continue; ?>
+                                    <option value="<?php echo esc_attr($vslug); ?>"><?php echo esc_html($vdef['label']); ?></option>
+                                <?php endforeach; ?>
                             </select>
                         </td>
                     </tr>

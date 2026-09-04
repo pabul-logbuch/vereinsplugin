@@ -17,7 +17,7 @@ function pp_handle_save_gremium() {
         'name'                 => sanitize_text_field($_POST['name'] ?? ''),
         'parent_gremium_id'    => !empty($_POST['parent_gremium_id']) ? intval($_POST['parent_gremium_id']) : null,
         'oeffentlichkeit'      => in_array($_POST['oeffentlichkeit'] ?? '', ['oeffentlich','vereinsintern','nur_gremium']) ? $_POST['oeffentlichkeit'] : 'vereinsintern',
-        'standardverfahren'    => in_array($_POST['standardverfahren'] ?? '', ['konsent','mehrheit','geheime_wahl']) ? $_POST['standardverfahren'] : 'konsent',
+        'standardverfahren'    => array_key_exists($_POST['standardverfahren'] ?? '', pp_verfahren_liste()) ? $_POST['standardverfahren'] : 'konsent',
         'einladungsfrist_tage' => intval($_POST['einladungsfrist_tage'] ?? 14),
         'beschreibung'         => sanitize_textarea_field($_POST['beschreibung'] ?? ''),
         'aktiv'                => isset($_POST['aktiv']) ? 1 : 0,
@@ -179,7 +179,7 @@ function pp_render_gremien_page() {
                             <th><label>Standard-Entscheidungsverfahren</label></th>
                             <td>
                                 <select name="standardverfahren">
-                                    <?php foreach (['konsent','mehrheit','geheime_wahl'] as $v) : ?>
+                                    <?php foreach (array_keys(pp_verfahren_liste()) as $v) : if ($v === 'mehrheit') continue; ?>
                                         <option value="<?php echo esc_attr($v); ?>" <?php selected($editing->standardverfahren ?? 'konsent', $v); ?>><?php echo esc_html(pp_verfahren_label($v)); ?></option>
                                     <?php endforeach; ?>
                                 </select>

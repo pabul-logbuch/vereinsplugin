@@ -315,7 +315,158 @@ function pp_create_tables() {
         KEY protokoll_id (protokoll_id)
     ) $charset;");
 
+    // ─── ABLAUF-VORLAGEN (wie eine Diskussion gegliedert wird) ──────────
+    $vorlagen = $wpdb->prefix . 'pp_ablauf_vorlagen';
+    dbDelta("CREATE TABLE IF NOT EXISTS $vorlagen (
+        id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        name         VARCHAR(255) NOT NULL,
+        beschreibung TEXT,
+        gremium_id   BIGINT UNSIGNED DEFAULT NULL,
+        aktiv        TINYINT DEFAULT 1,
+        erstellt_am  DATETIME DEFAULT CURRENT_TIMESTAMP,
+        KEY gremium_id (gremium_id)
+    ) $charset;");
+
+    $vorlage_schritte = $wpdb->prefix . 'pp_ablauf_vorlage_schritte';
+    dbDelta("CREATE TABLE IF NOT EXISTS $vorlage_schritte (
+        id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        vorlage_id BIGINT UNSIGNED NOT NULL,
+        titel      VARCHAR(255) NOT NULL,
+        hinweis    TEXT,
+        sortierung SMALLINT DEFAULT 0,
+        KEY vorlage_id (vorlage_id)
+    ) $charset;");
+
+    // ─── ABLAUF-SCHRITTE EINES KONKRETEN TOPS ───────────────────────────
+    $top_schritte = $wpdb->prefix . 'pp_top_schritte';
+    dbDelta("CREATE TABLE IF NOT EXISTS $top_schritte (
+        id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        top_id       BIGINT UNSIGNED NOT NULL,
+        protokoll_id BIGINT UNSIGNED NOT NULL,
+        titel        VARCHAR(255) NOT NULL,
+        hinweis      TEXT,
+        inhalt       LONGTEXT,
+        erledigt     TINYINT DEFAULT 0,
+        sortierung   SMALLINT DEFAULT 0,
+        KEY top_id (top_id),
+        KEY protokoll_id (protokoll_id)
+    ) $charset;");
+
+    // ─── DOKUMENTE (Satzung, Verträge, Ordnungen) ───────────────────────
+    $dokumente = $wpdb->prefix . 'pp_dokumente';
+    dbDelta("CREATE TABLE IF NOT EXISTS $dokumente (
+        id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        titel            VARCHAR(255) NOT NULL,
+        art              VARCHAR(30) DEFAULT 'satzung',
+        beschreibung     TEXT,
+        gremium_id       BIGINT UNSIGNED DEFAULT NULL,
+        status           VARCHAR(30) DEFAULT 'aktuell',
+        evaluationsdatum DATE DEFAULT NULL,
+        erstellt_am      DATETIME DEFAULT CURRENT_TIMESTAMP,
+        erstellt_von     BIGINT UNSIGNED DEFAULT NULL,
+        KEY gremium_id (gremium_id)
+    ) $charset;");
+
+    $paragraphen = $wpdb->prefix . 'pp_dokument_paragraphen';
+    dbDelta("CREATE TABLE IF NOT EXISTS $paragraphen (
+        id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        dokument_id      BIGINT UNSIGNED NOT NULL,
+        nummer           VARCHAR(30) DEFAULT '',
+        titel            VARCHAR(255) DEFAULT '',
+        inhalt           LONGTEXT,
+        status           VARCHAR(30) DEFAULT 'aktuell',
+        evaluationsdatum DATE DEFAULT NULL,
+        geprueft_am      DATE DEFAULT NULL,
+        top_id           BIGINT UNSIGNED DEFAULT NULL,
+        sortierung       SMALLINT DEFAULT 0,
+        geaendert_am     DATETIME DEFAULT CURRENT_TIMESTAMP,
+        KEY dokument_id (dokument_id)
+    ) $charset;");
+
+    $para_kommentare = $wpdb->prefix . 'pp_paragraph_kommentare';
+    dbDelta("CREATE TABLE IF NOT EXISTS $para_kommentare (
+        id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        paragraph_id BIGINT UNSIGNED NOT NULL,
+        dokument_id  BIGINT UNSIGNED NOT NULL,
+        user_id      BIGINT UNSIGNED DEFAULT NULL,
+        text         TEXT NOT NULL,
+        erledigt     TINYINT DEFAULT 0,
+        erstellt_am  DATETIME DEFAULT CURRENT_TIMESTAMP,
+        KEY paragraph_id (paragraph_id),
+        KEY dokument_id (dokument_id)
+    ) $charset;");
+
     pp_maybe_upgrade_columns();
+    pp_seed_ablauf_vorlagen();
+}
+
+/**
+ * Legt einmalig die gängigen Ablauf-Vorlagen an. Danach sind sie ganz normale
+ * Datensätze — Änderungen des Vereins werden nicht überschrieben.
+ */
+function pp_seed_ablauf_vorlagen() {
+    global $wpdb;
+    if (get_option('pp_ablauf_vorlagen_seed') === '1') return;
+
+    $vorlagen = [
+        ['Soziokratische Konsentrunde', 'Bild formen, Meinung bilden, Konsent finden.', [
+            ['Bild formen', 'Worum geht es? Sachstand und Ziel klären.'],
+            ['Verständnisfragen', 'Nur Fragen zum Verständnis, noch keine Meinungen.'],
+            ['Meinungsrunde', 'Reihum: Wie siehst du das? Was ist dir wichtig?'],
+            ['Beschlussvorschlag', 'Konkreter Vorschlag, über den entschieden wird.'],
+            ['Konsentrunde', 'Reihum: Gibt es einen schwerwiegenden Einwand?'],
+            ['Einwände integrieren', 'Vorschlag anpassen, bis kein Einwand mehr bleibt.'],
+        ]],
+        ['Entscheidung mit Meinungsrunden', 'Zwei Meinungsrunden vor der Konsentfindung.', [
+            ['Informationen', 'Ist der Sachverhalt klar?'],
+            ['Meinungsbildungsrunde 1', 'Was ist dir wichtig?'],
+            ['Meinungsbildungsrunde 2', 'Was ist dein Lösungsvorschlag?'],
+            ['Konsentfindung', 'Beschlussvorschlag und Einwände.'],
+        ]],
+        ['Rednerliste', 'Moderierte Aussprache mit Wortmeldungen.', [
+            ['Einführung', 'Wer bringt das Thema ein, worum geht es?'],
+            ['Wortmeldungen', 'Rednerliste in der Reihenfolge der Meldungen.'],
+            ['Zusammenfassung', 'Was wurde gesagt, worauf läuft es hinaus?'],
+            ['Beschluss', 'Vorschlag und Abstimmung.'],
+        ]],
+        ['Im Kreis sprechen', 'Runden ohne Zwischenrufe, alle kommen dran.', [
+            ['Rahmen setzen', 'Frage der Runde und Redezeit klären.'],
+            ['Erste Runde', 'Reihum, jede Person einmal.'],
+            ['Zweite Runde', 'Reihum, Reaktion auf das Gehörte.'],
+            ['Abschlussrunde', 'Was nehmen wir mit?'],
+        ]],
+        ['Offene Wahl', 'Wahl per Handzeichen mit Vorstellung.', [
+            ['Amt und Aufgaben klären', 'Was gehört zur Rolle, für wie lange?'],
+            ['Kandidaturen sammeln', 'Vorschläge und Selbstnominierungen.'],
+            ['Vorstellung', 'Kandidat:innen stellen sich vor.'],
+            ['Nachfragen', 'Fragen an die Kandidat:innen.'],
+            ['Wahlgang', 'Abstimmung nach gewähltem Verfahren.'],
+            ['Annahme der Wahl', 'Nimmt die gewählte Person an?'],
+        ]],
+        ['Kurzer Austausch', 'Ohne Beschluss — nur informieren und sammeln.', [
+            ['Input', 'Kurzer Sachstand.'],
+            ['Rückfragen', 'Offene Punkte klären.'],
+            ['Nächste Schritte', 'Wer macht was bis wann?'],
+        ]],
+    ];
+
+    foreach ($vorlagen as $v) {
+        $wpdb->insert($wpdb->prefix . 'pp_ablauf_vorlagen', [
+            'name' => $v[0], 'beschreibung' => $v[1], 'aktiv' => 1,
+        ]);
+        $vid = (int) $wpdb->insert_id;
+        if (!$vid) continue;
+        $i = 0;
+        foreach ($v[2] as $schritt) {
+            $wpdb->insert($wpdb->prefix . 'pp_ablauf_vorlage_schritte', [
+                'vorlage_id' => $vid,
+                'titel'      => $schritt[0],
+                'hinweis'    => $schritt[1],
+                'sortierung' => ++$i,
+            ]);
+        }
+    }
+    update_option('pp_ablauf_vorlagen_seed', '1');
 }
 
 /** Rüstet neue Spalten bei bestehenden Installationen manuell nach
@@ -356,6 +507,27 @@ function pp_maybe_upgrade_columns() {
 
     $tops = $wpdb->prefix . 'pp_tops';
     $cols3 = $wpdb->get_col("SHOW COLUMNS FROM $tops", 0);
+
+    // Entscheidungsverfahren: von ENUM auf VARCHAR, damit neue Verfahren
+    // (2/3, 3/4, systemisches Konsentieren …) ohne Schema-Änderung dazukommen.
+    foreach ([[$tops, 'verfahren'], [$wpdb->prefix . 'pp_gremien', 'standardverfahren']] as $zw) {
+        list($tbl, $col) = $zw;
+        $def = $wpdb->get_row("SHOW COLUMNS FROM $tbl LIKE '$col'");
+        if ($def && stripos((string) $def->Type, 'enum') === 0) {
+            $wpdb->query("ALTER TABLE $tbl MODIFY COLUMN $col VARCHAR(40) NOT NULL DEFAULT 'konsent'");
+        }
+    }
+    // Ergebnis einer ausgezählten Abstimmung.
+    foreach ([
+        'stimmen_ja'         => "ALTER TABLE $tops ADD COLUMN stimmen_ja SMALLINT DEFAULT NULL AFTER verfahren",
+        'stimmen_nein'       => "ALTER TABLE $tops ADD COLUMN stimmen_nein SMALLINT DEFAULT NULL AFTER stimmen_ja",
+        'stimmen_enthaltung' => "ALTER TABLE $tops ADD COLUMN stimmen_enthaltung SMALLINT DEFAULT NULL AFTER stimmen_nein",
+        'stimmberechtigt'    => "ALTER TABLE $tops ADD COLUMN stimmberechtigt SMALLINT DEFAULT NULL AFTER stimmen_enthaltung",
+        'evaluationsdatum'   => "ALTER TABLE $tops ADD COLUMN evaluationsdatum DATE DEFAULT NULL AFTER beschluss",
+        'beschlossen_am'     => "ALTER TABLE $tops ADD COLUMN beschlossen_am DATETIME DEFAULT NULL AFTER evaluationsdatum",
+    ] as $spalte => $sql) {
+        if (!in_array($spalte, $cols3)) $wpdb->query($sql);
+    }
     if (!in_array('dauer_minuten', $cols3)) {
         $wpdb->query("ALTER TABLE $tops ADD COLUMN dauer_minuten SMALLINT DEFAULT 15 AFTER beschluss");
     }

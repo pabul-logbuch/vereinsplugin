@@ -499,3 +499,90 @@
 .pp-unterlage-neu > summary { cursor: pointer; font-size: 14px; color: var(--pp-muted, #667); }
 .pp-unterlage-form { margin-top: 8px; }
 .pp-unterlage-form label { display: block; margin-bottom: 8px; }
+
+/* ─── Live-Seitenleiste: eigener Scrollbereich ──────────────────────────────
+   Die Leiste bleibt stehen, nur die Tagesordnung scrollt. Die Werkzeuge zum
+   Erfassen sitzen als Knöpfe unten und öffnen sich erst auf Klick — sonst
+   verdrängen sie die TOPs. */
+.pp-sidebar-live {
+  position: sticky; top: 0;
+  max-height: 100vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.pp-sidebar-live > .pp-live-clock,
+.pp-sidebar-live > .pp-sidebar-section { flex: none; }
+.pp-sidebar-live > .pp-live-agenda {
+  flex: 1 1 auto; min-height: 3em; overflow-y: auto;
+  margin: 0 0 10px; padding-right: 4px;
+}
+.pp-live-fuss {
+  flex: none; margin-top: auto; padding-top: 10px;
+  border-top: 1px solid var(--pp-line, #e2e5ea);
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 55vh; overflow-y: auto;
+}
+.pp-live-werkzeug > summary {
+  display: block; cursor: pointer; text-align: left; list-style: none;
+}
+.pp-live-werkzeug > summary::-webkit-details-marker { display: none; }
+.pp-live-werkzeug[open] > summary { font-weight: 600; }
+.pp-live-werkzeug .pp-live-form { margin-top: 6px; }
+.pp-live-werkzeug .pp-live-hinweis { margin: 6px 0; font-size: 12px; }
+
+/* ─── Abstimmung zu einem TOP ───────────────────────────────────────────── */
+.pp-top-abstimmung {
+  margin: 10px 0 4px; padding: 9px 11px;
+  border: 1px solid var(--pp-line, #e2e5ea); border-radius: 6px;
+  background: var(--pp-bg, #fbfbfc);
+}
+.pp-abstimmung-kopf { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pp-abstimmung-hinweis { margin: 4px 0 0; }
+.pp-abstimmung-ergebnis { margin: 6px 0 0; font-size: 14px; }
+.pp-abstimmung-form { margin-top: 8px; }
+.pp-abstimmung-form > label { display: block; margin-bottom: 8px; }
+.pp-stimmen { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.pp-stimmen label { font-size: 13px; }
+.pp-stimmen input { width: 5.5em; }
+.pp-badge-ok { background: #e6f6ea; color: #1d6b32; }
+.pp-badge-warn { background: #fdf3e0; color: #8a5a12; }
+
+/* ─── Ablauf-Schritte eines TOPs ────────────────────────────────────────── */
+.pp-top-ablauf { margin: 10px 0; padding: 9px 11px; border: 1px solid var(--pp-line, #e2e5ea); border-radius: 6px; }
+.pp-ablauf-kopf { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.pp-schritt-liste { margin: 8px 0 0; padding-left: 1.3em; display: grid; gap: 10px; }
+.pp-schritt.is-erledigt .pp-schritt-kopf strong { text-decoration: line-through; opacity: .65; }
+.pp-schritt-kopf { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.pp-schritt textarea { width: 100%; margin-top: 4px; }
+.pp-schritt-erledigt { font-size: 13px; color: var(--pp-muted, #667); }
+.pp-schritt-text { margin-top: 4px; font-size: 14px; }
+.pp-ablauf-fuss { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.pp-ablauf-fuss input[type=text] { flex: 1; min-width: 12em; }
+.pp-ablauf-verwalten { margin-top: 8px; }
+
+/* ─── Entscheide-Übersicht ──────────────────────────────────────────────── */
+.pp-filterleiste { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin: 10px 0 14px; }
+.pp-filterleiste label { display: flex; flex-direction: column; font-size: 13px; gap: 3px; }
+.pp-entscheide .pp-entscheid-text { margin-top: 4px; font-size: 14px; color: var(--pp-muted, #667); }
+.pp-entscheide tr.is-faellig { background: #fdf8ee; }
+
+/* ─── Ablauf-Vorlagen ───────────────────────────────────────────────────── */
+.pp-vorlagen-layout { display: grid; grid-template-columns: 220px 1fr; gap: 20px; align-items: start; }
+.pp-vorlagen-liste { display: flex; flex-direction: column; gap: 2px; }
+.pp-vorlage-schritt { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; flex-wrap: wrap; }
+.pp-vorlage-schritt input[type=text] { flex: 1; min-width: 10em; }
+@media (max-width: 780px) { .pp-vorlagen-layout { grid-template-columns: 1fr; } }
+
+/* ─── Dokumente / Paragraphen ───────────────────────────────────────────── */
+.pp-paragraphen { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 12px; }
+.pp-paragraph { border: 1px solid var(--pp-line, #e2e5ea); border-left-width: 3px; border-radius: 6px; padding: 10px 12px; }
+.pp-para-status-in_pruefung { border-left-color: #d19a1d; }
+.pp-para-status-strittig    { border-left-color: #c0392b; }
+.pp-para-status-geaendert   { border-left-color: #2d7dd2; }
+.pp-para-status-gestrichen  { border-left-color: #999; opacity: .7; }
+.pp-paragraph-kopf { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.pp-paragraph-text { margin-top: 6px; font-size: 15px; line-height: 1.5; }
+.pp-para-kommentare { list-style: none; margin: 10px 0 0; padding: 0 0 0 12px; border-left: 2px solid var(--pp-line, #e2e5ea); display: grid; gap: 8px; }
+.pp-para-kommentare li.is-erledigt { opacity: .55; }
+.pp-para-werkzeug { margin-top: 8px; }
+.pp-para-werkzeug > summary { cursor: pointer; }
