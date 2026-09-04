@@ -378,6 +378,114 @@ function pp_handle_front_save_top_inhalt() {
     pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => $ziel, 'id' => $protokoll_id], 'top-' . $id);
 }
 
+/* ─── UNTERLAGEN ZU EINEM TOP ───────────────────────────────────────────────
+ * Während der Sitzung kommen zu einem TOP oft noch Dinge dazu: ein längerer
+ * Text, der Link auf die Nextcloud-Datei oder ein hochgeladenes PDF. Alles
+ * drei landet in derselben Liste, damit die Reihenfolge stimmt.
+ */
+
+function pp_top_unterlagen_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'pp_top_unterlagen';
+}
+
+/** Unterlagen eines TOPs, älteste zuerst. */
+function pp_top_unterlagen($top_id) {
+    global $wpdb;
+    $t = pp_top_unterlagen_table();
+    if ($wpdb->get_var("SHOW TABLES LIKE '$t'") !== $t) return [];
+    return $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM $t WHERE top_id = %d ORDER BY sortierung ASC, id ASC", intval($top_id)
+    )) ?: [];
+}
+
+add_action('admin_post_pp_front_top_unterlage_add', 'pp_handle_front_top_unterlage_add');
+function pp_handle_front_top_unterlage_add() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_top_unterlage');
+    global $wpdb;
+
+    $top_id       = intval($_POST['top_id'] ?? 0);
+    $protokoll_id = intval($_POST['protokoll_id'] ?? 0);
+    $ziel         = sanitize_key($_POST['ziel_view'] ?? 'live');
+    $typ          = sanitize_key($_POST['typ'] ?? 'text');
+    $titel        = sanitize_text_field($_POST['titel'] ?? '');
+    $zurueck      = $_POST['pp_return'] ?? '';
+
+    if (!$top_id || !$protokoll_id) {
+        pp_front_redirect($zurueck, ['pp_view' => $ziel, 'id' => $protokoll_id, 'pp_error' => 'TOP+fehlt']);
+    }
+
+    $row = [
+        'top_id'       => $top_id,
+        'protokoll_id' => $protokoll_id,
+        'typ'          => in_array($typ, ['text', 'link', 'datei'], true) ? $typ : 'text',
+        'titel'        => $titel,
+        'inhalt'       => '',
+        'url'          => '',
+        'erstellt_von' => get_current_user_id(),
+        'erstellt_am'  => current_time('mysql'),
+    ];
+
+    if ($typ === 'datei') {
+        // Datei landet in der WordPress-Mediathek – dort greifen Rechte,
+        // Backup und Löschen bereits. Wer lieber Nextcloud nutzt, nimmt „Link".
+        if (empty($_FILES['datei']['name'])) {
+            pp_front_redirect($zurueck, ['pp_view' => $ziel, 'id' => $protokoll_id, 'pp_error' => 'Keine+Datei+gewählt'], 'top-' . $top_id);
+        }
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+        $anhang_id = media_handle_upload('datei', 0);
+        if (is_wp_error($anhang_id)) {
+            pp_front_redirect($zurueck, ['pp_view' => $ziel, 'id' => $protokoll_id, 'pp_error' => $anhang_id->get_error_message()], 'top-' . $top_id);
+        }
+        $row['anhang_id'] = (int) $anhang_id;
+        $row['url']       = (string) wp_get_attachment_url($anhang_id);
+        if ($row['titel'] === '') {
+            $row['titel'] = get_the_title($anhang_id) ?: basename($row['url']);
+        }
+    } elseif ($typ === 'link') {
+        $url = esc_url_raw(trim((string) ($_POST['url'] ?? '')));
+        if ($url === '') {
+            pp_front_redirect($zurueck, ['pp_view' => $ziel, 'id' => $protokoll_id, 'pp_error' => 'Kein+Link+angegeben'], 'top-' . $top_id);
+        }
+        $row['url'] = $url;
+        if ($row['titel'] === '') $row['titel'] = $url;
+    } else {
+        $inhalt = wp_kses_post(trim((string) ($_POST['inhalt'] ?? '')));
+        if ($inhalt === '') {
+            pp_front_redirect($zurueck, ['pp_view' => $ziel, 'id' => $protokoll_id, 'pp_error' => 'Kein+Text+eingegeben'], 'top-' . $top_id);
+        }
+        $row['inhalt'] = $inhalt;
+        if ($row['titel'] === '') $row['titel'] = 'Notiz';
+    }
+
+    $t = pp_top_unterlagen_table();
+    $row['sortierung'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(sortierung),0)+1 FROM $t WHERE top_id = %d", $top_id));
+    $wpdb->insert($t, $row);
+
+    pp_front_redirect($zurueck, ['pp_view' => $ziel, 'id' => $protokoll_id], 'top-' . $top_id);
+}
+
+add_action('admin_post_pp_front_top_unterlage_delete', 'pp_handle_front_top_unterlage_delete');
+function pp_handle_front_top_unterlage_delete() {
+    if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
+    check_admin_referer('pp_front_top_unterlage_delete');
+    global $wpdb;
+
+    $id           = intval($_POST['id'] ?? 0);
+    $protokoll_id = intval($_POST['protokoll_id'] ?? 0);
+    $top_id       = intval($_POST['top_id'] ?? 0);
+    $ziel         = sanitize_key($_POST['ziel_view'] ?? 'live');
+
+    // Die Mediathek-Datei bleibt bewusst liegen: sie kann anderswo verlinkt
+    // sein, und ein versehentliches Entfernen wäre nicht rückholbar.
+    $wpdb->delete(pp_top_unterlagen_table(), ['id' => $id]);
+
+    pp_front_redirect($_POST['pp_return'] ?? '', ['pp_view' => $ziel, 'id' => $protokoll_id], 'top-' . $top_id);
+}
+
 add_action('admin_post_pp_front_top_konsent', 'pp_handle_front_top_konsent');
 function pp_handle_front_top_konsent() {
     if (!is_user_logged_in() || !pp_can_manage()) wp_die('Keine Berechtigung.');
@@ -1615,6 +1723,8 @@ function pp_render_view_protokoll_detail() {
                         <?php if ($t->beschreibung) : ?><div class="pp-agenda-desc"><?php echo nl2br(esc_html($t->beschreibung)); ?></div><?php endif; ?>
                         <?php if ($t->beschluss) : ?><div class="pp-beschluss-line"><strong>Beschluss:</strong> <?php echo esc_html($t->beschluss); ?></div><?php endif; ?>
 
+                        <?php pp_render_top_unterlagen($t, $p, $p->status !== 'abgeschlossen' && pp_can_manage(), 'protokoll'); ?>
+
                         <?php if ($p->status !== 'abgeschlossen') : ?>
                             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-inline-form pp-top-edit">
                                 <?php wp_nonce_field('pp_front_update_top'); ?>
@@ -1954,6 +2064,118 @@ function pp_render_live_modus() {
     <?php
 }
 
+/**
+ * Unterlagen eines TOPs: Liste plus Erfassungsformular.
+ * $bearbeitbar = false rendert nur die Liste (normale Protokollansicht).
+ */
+function pp_render_top_unterlagen($t, $p, $bearbeitbar = true, $ziel_view = 'live') {
+    $unterlagen = pp_top_unterlagen($t->id);
+    if (!$unterlagen && !$bearbeitbar) return;
+
+    // Das Umschalten der Eingabefelder wird einmal pro Seite ausgegeben – die
+    // Funktion läuft im Live-Modus wie in der Protokollansicht.
+    static $script_raus = false;
+    if ($bearbeitbar && !$script_raus) {
+        $script_raus = true;
+        ?>
+        <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            document.querySelectorAll('.pp-unterlage-form').forEach(function (f) {
+                var typ = f.querySelector('.pp-unterlage-typ');
+                if (!typ) return;
+                var felder = f.querySelectorAll('.pp-unterlage-feld');
+                var zeigen = function () {
+                    felder.forEach(function (l) { l.hidden = (l.getAttribute('data-fuer') !== typ.value); });
+                };
+                typ.addEventListener('change', zeigen);
+                zeigen();
+            });
+        });
+        </script>
+        <?php
+    }
+    ?>
+    <div class="pp-top-unterlagen">
+        <?php if ($unterlagen) : ?>
+            <ul class="pp-unterlagen-liste">
+                <?php foreach ($unterlagen as $u) :
+                    $wer = $u->erstellt_von ? get_userdata($u->erstellt_von) : null; ?>
+                    <li class="pp-unterlage pp-unterlage-<?php echo esc_attr($u->typ); ?>">
+                        <div class="pp-unterlage-kopf">
+                            <span class="pp-unterlage-icon" aria-hidden="true"><?php
+                                echo $u->typ === 'datei' ? '📄' : ($u->typ === 'link' ? '🔗' : '📝');
+                            ?></span>
+                            <?php if ($u->typ === 'text') : ?>
+                                <strong><?php echo esc_html($u->titel); ?></strong>
+                            <?php else : ?>
+                                <a href="<?php echo esc_url($u->url); ?>" target="_blank" rel="noopener"><?php echo esc_html($u->titel); ?></a>
+                            <?php endif; ?>
+                            <span class="pp-meta"><?php
+                                echo esc_html(($wer ? $wer->display_name . ' · ' : '') . mysql2date('d.m.Y H:i', $u->erstellt_am));
+                            ?></span>
+                            <?php if ($bearbeitbar) : ?>
+                                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-inline-form"
+                                      onsubmit="return confirm('Diese Unterlage entfernen?');">
+                                    <?php wp_nonce_field('pp_front_top_unterlage_delete'); ?>
+                                    <input type="hidden" name="action" value="pp_front_top_unterlage_delete">
+                                    <input type="hidden" name="id" value="<?php echo esc_attr($u->id); ?>">
+                                    <input type="hidden" name="top_id" value="<?php echo esc_attr($t->id); ?>">
+                                    <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($p->id); ?>">
+                                    <input type="hidden" name="ziel_view" value="<?php echo esc_attr($ziel_view); ?>">
+                                    <?php pp_front_return_field(); ?>
+                                    <button type="submit" class="pp-btn pp-btn-small pp-btn-ghost" title="Entfernen">×</button>
+                                </form>
+                            <?php endif; ?>
+                        </div>
+                        <?php if ($u->typ === 'text' && $u->inhalt !== '') : ?>
+                            <div class="pp-unterlage-text"><?php echo wpautop(wp_kses_post($u->inhalt)); ?></div>
+                        <?php endif; ?>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        <?php endif; ?>
+
+        <?php if ($bearbeitbar) : ?>
+            <details class="pp-unterlage-neu">
+                <summary>Unterlage oder Text hinzufügen</summary>
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>"
+                      enctype="multipart/form-data" class="pp-form pp-unterlage-form">
+                    <?php wp_nonce_field('pp_front_top_unterlage'); ?>
+                    <input type="hidden" name="action" value="pp_front_top_unterlage_add">
+                    <input type="hidden" name="top_id" value="<?php echo esc_attr($t->id); ?>">
+                    <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($p->id); ?>">
+                    <input type="hidden" name="ziel_view" value="<?php echo esc_attr($ziel_view); ?>">
+                    <?php pp_front_return_field(); ?>
+
+                    <label>Art
+                        <select name="typ" class="pp-unterlage-typ">
+                            <option value="text">Text / Notiz</option>
+                            <option value="datei">Datei hochladen</option>
+                            <option value="link">Link (z. B. Nextcloud)</option>
+                        </select>
+                    </label>
+                    <label>Titel (optional)
+                        <input type="text" name="titel" placeholder="z. B. Angebot Stadtfest">
+                    </label>
+                    <label class="pp-unterlage-feld" data-fuer="text">Text
+                        <textarea name="inhalt" rows="4" placeholder="Längerer Text, Zitat, Vorlage …"></textarea>
+                    </label>
+                    <label class="pp-unterlage-feld" data-fuer="datei" hidden>Datei
+                        <input type="file" name="datei">
+                    </label>
+                    <label class="pp-unterlage-feld" data-fuer="link" hidden>Link
+                        <input type="url" name="url" placeholder="https://…">
+                    </label>
+                    <div class="pp-form-actions">
+                        <button type="submit" class="pp-btn pp-btn-small">Hinzufügen</button>
+                    </div>
+                </form>
+            </details>
+        <?php endif; ?>
+    </div>
+    <?php
+}
+
 function pp_render_live_top($t, $p) {
     global $wpdb;
     $reihenfolge = ['vorstellung', 'verstaendnisfragen', 'meinungsrunde', 'konsentrunde', 'beschlossen'];
@@ -1980,6 +2202,8 @@ function pp_render_live_top($t, $p) {
             </label>
             <div class="pp-form-actions"><button type="submit" class="pp-btn pp-btn-small">Notizen speichern</button></div>
         </form>
+
+        <?php pp_render_top_unterlagen($t, $p, true, 'live'); ?>
 
         <?php if ($t->konsent_status === 'einwand_offen') :
             $einwaende = $wpdb->get_results($wpdb->prepare(

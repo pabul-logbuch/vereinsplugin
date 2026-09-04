@@ -295,6 +295,26 @@ function pp_create_tables() {
         KEY protokoll_id (protokoll_id)
     ) $charset;");
 
+    // ─── UNTERLAGEN ZU TOPS (Text, Link, Datei) ─────────────────────────
+    // Getrennte Tabelle statt weiterer TEXT-Spalten an pp_tops: es sind
+    // beliebig viele je TOP, mit eigener Herkunft und eigenem Zeitstempel.
+    $top_unterlagen = $wpdb->prefix . 'pp_top_unterlagen';
+    dbDelta("CREATE TABLE IF NOT EXISTS $top_unterlagen (
+        id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        top_id       BIGINT UNSIGNED NOT NULL,
+        protokoll_id BIGINT UNSIGNED NOT NULL,
+        typ          ENUM('text','link','datei') DEFAULT 'text',
+        titel        VARCHAR(255) DEFAULT '',
+        inhalt       LONGTEXT,
+        url          VARCHAR(600) DEFAULT '',
+        anhang_id    BIGINT UNSIGNED DEFAULT NULL,
+        erstellt_von BIGINT UNSIGNED DEFAULT NULL,
+        erstellt_am  DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sortierung   SMALLINT DEFAULT 0,
+        KEY top_id (top_id),
+        KEY protokoll_id (protokoll_id)
+    ) $charset;");
+
     pp_maybe_upgrade_columns();
 }
 

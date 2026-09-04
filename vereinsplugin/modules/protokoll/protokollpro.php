@@ -9,7 +9,7 @@
 
 defined('ABSPATH') || exit;
 
-define('PP_VERSION', '1.7.0');
+define('PP_VERSION', '1.8.0');
 define('PP_PATH', plugin_dir_path(__FILE__));
 define('PP_URL', plugin_dir_url(__FILE__));
 

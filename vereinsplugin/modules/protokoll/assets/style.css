@@ -483,3 +483,19 @@
     gap: 14px;
     margin-bottom: 10px;
 }
+
+/* ─── Unterlagen zu einem TOP (Text, Link, Datei) ───────────────────────── */
+.pp-top-unterlagen { margin: 8px 0 4px; }
+.pp-unterlagen-liste { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
+.pp-unterlage {
+  border: 1px solid var(--pp-line, #e2e5ea); border-radius: 6px;
+  padding: 7px 10px; background: var(--pp-bg, #fbfbfc);
+}
+.pp-unterlage-kopf { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pp-unterlage-kopf .pp-meta { margin-left: auto; font-size: 12px; }
+.pp-unterlage-icon { flex: none; }
+.pp-unterlage-text { margin-top: 6px; font-size: 14px; line-height: 1.45; }
+.pp-unterlage-text p { margin: 0 0 6px; }
+.pp-unterlage-neu > summary { cursor: pointer; font-size: 14px; color: var(--pp-muted, #667); }
+.pp-unterlage-form { margin-top: 8px; }
+.pp-unterlage-form label { display: block; margin-bottom: 8px; }

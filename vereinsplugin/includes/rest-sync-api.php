@@ -80,6 +80,7 @@ function vp_sync_tables() {
 		'pp_rollenvorlagen_aufgaben' => array( 'pp_rollenvorlagen_aufgaben', 'id', 'erstellt_am', 'pp_manage', null ),
 		'pp_protokolle'          => array( 'pp_protokolle',           'id', 'geaendert_am',  'pp_manage', null ),
 		'pp_tops'                => array( 'pp_tops',                 'id', null,            'pp_manage', null ),
+		'pp_top_unterlagen'      => array( 'pp_top_unterlagen',       'id', 'erstellt_am',   'pp_manage', null ),
 		'pp_einwaende'           => array( 'pp_einwaende',            'id', 'erstellt_am',   'pp_manage', null ),
 		'pp_themen'              => array( 'pp_themen',               'id', 'erstellt_am',   'pp_manage', null ),
 		'pp_aufgaben'            => array( 'pp_aufgaben',             'id', 'erstellt_am',   'pp_manage', null ),
