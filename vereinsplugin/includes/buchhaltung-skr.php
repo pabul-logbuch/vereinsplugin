@@ -1357,6 +1357,19 @@ function vp_bh_bestaende() {
 		}
 	}
 
+	if ( $can_edit && isset( $_POST['vp_quellen_save'] ) && check_admin_referer( 'vp_bestaende', 'vp_bestaende_nonce' ) ) {
+		$zeilen = array();
+		foreach ( (array) ( $_POST['quelle_konto'] ?? array() ) as $q => $k ) {
+			$q = sanitize_text_field( wp_unslash( (string) $q ) );
+			$k = sanitize_text_field( wp_unslash( (string) $k ) );
+			if ( '' !== $q && '' !== $k ) {
+				$zeilen[] = $q . ' = ' . $k;
+			}
+		}
+		update_option( 'jb_quelle_konto_map', implode( "\n", $zeilen ) );
+		$msg = __( 'Zuordnung der Geld-Töpfe gespeichert.', 'vereinsplugin' );
+	}
+
 	$jahre = function_exists( 'vp_doppik_bestand_jahre' ) ? vp_doppik_bestand_jahre() : array();
 	$jahr  = isset( $_GET['anf_jahr'] ) ? (int) $_GET['anf_jahr'] : 0;
 	if ( ! $jahr ) {
@@ -1419,6 +1432,40 @@ function vp_bh_bestaende() {
 			. '<button class="vp-btn" name="vp_anf_uebernehmen" value="1">' . esc_html__( 'als Anfangsbestand des Folgejahres setzen', 'vereinsplugin' ) . '</button></p>';
 	}
 	echo '</form>';
+
+	// ── Zuordnung Geld-Topf → Konto ──────────────────────────────────────────
+	if ( function_exists( 'vp_doppik_map' ) ) {
+		$map    = vp_doppik_map();
+		$konten = function_exists( 'jb_konten_all' ) ? jb_konten_all( false ) : array();
+		echo '<h3 style="margin-top:24px">' . esc_html__( 'Welcher Geld-Topf liegt auf welchem Konto?', 'vereinsplugin' ) . '</h3>';
+		echo '<p class="vp-muted">' . esc_html__( 'Jede Buchung nennt einen Geld-Topf („Quelle"). Diese Zuordnung bestimmt, auf welchem Bestandskonto das Geld landet – rückwirkend für alle Buchungen. Wer z. B. PayPal auf ein anderes Konto legt, verschiebt damit sämtliche PayPal-Buchungen dorthin; nichts muss neu gebucht werden.', 'vereinsplugin' ) . '</p>';
+		echo '<form method="post">' . wp_nonce_field( 'vp_bestaende', 'vp_bestaende_nonce', true, false );
+		echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Geld-Topf (Quelle)', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Konto', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Buchungen', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
+		$anzahl = array();
+		foreach ( (array) $wpdb->get_results( 'SELECT quelle, COUNT(*) n FROM ' . jb_table_journal() . ' GROUP BY quelle', ARRAY_A ) as $r ) {
+			$anzahl[ (string) $r['quelle'] ] = (int) $r['n'];
+		}
+		foreach ( $map as $quelle => $konto ) {
+			$sel = '';
+			foreach ( $konten as $k ) {
+				$sel .= '<option value="' . esc_attr( $k->nummer ) . '"' . selected( (string) $k->nummer, (string) $konto, false ) . '>'
+					. esc_html( $k->nummer . ' · ' . $k->bezeichnung ) . '</option>';
+			}
+			printf(
+				'<tr><td>%s</td><td>%s</td><td style="text-align:right">%s</td></tr>',
+				esc_html( $quelle ),
+				$can_edit
+					? '<select name="quelle_konto[' . esc_attr( $quelle ) . ']">' . $sel . '</select>'
+					: esc_html( $konto ),
+				esc_html( (string) ( $anzahl[ $quelle ] ?? 0 ) )
+			);
+		}
+		echo '</tbody></table></div>';
+		if ( $can_edit ) {
+			echo '<p><button class="vp-btn vp-btn-primary" name="vp_quellen_save" value="1">' . esc_html__( 'Zuordnung speichern', 'vereinsplugin' ) . '</button></p>';
+		}
+		echo '</form>';
+	}
 
 	$alt = (string) get_option( 'jb_anfangsbestand_datum', '' );
 	if ( $alt && ! $jahre ) {

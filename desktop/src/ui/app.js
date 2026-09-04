@@ -1045,7 +1045,14 @@ async function showKontenplan() {
   view.append(tb0);
 
   // Geld-Töpfe als Kacheln – direkt aus denselben Salden.
-  const topfe = [['1200', 'Bankkonto (KSK)'], ['1000', 'Barkasse'], ['1220', 'PayPal'], ['1360', 'Zettle (Karte)']];
+  // Welches Konto zu welchem Topf gehört, sagt die Zuordnung – nicht eine
+  // feste Liste (sonst zeigt die Kachel auf ein anderes Konto als die Buchungen).
+  const kn = Object.fromEntries(konten.map((k) => [String(k.nummer), k.bezeichnung]));
+  const topfe = [];
+  for (const [q, label] of [['Bank KSK', 'Bankkonto'], ['Zettle-Bar', 'Barkasse'], ['PayPal', 'PayPal'], ['Zettle-Karte', 'Zettle (Karte)']]) {
+    const nr = String(dmap[q] || '');
+    if (nr && !topfe.some((t) => t[0] === nr)) topfe.push([nr, `${label} · ${nr}${kn[nr] ? ' ' + kn[nr] : ''}`]);
+  }
   const pt = el('div', { class: 'tiles' });
   for (const [nr, label] of topfe) {
     const u = sal[nr];
@@ -1839,9 +1846,24 @@ function satzZuZeile(soll, haben, betrag, konten, map) {
   const b = Math.round(Math.abs(Number(betrag) || 0) * 100) / 100;
   const sE = erfolg(soll);
   const hE = erfolg(haben);
-  if (sE && !hE) return { konto: soll, gegenkonto: '', betrag: -b, quelle: quelleFuerKonto(haben, map), sphaere: sphOf(soll) }; // Ausgabe
-  if (!sE && hE) return { konto: haben, gegenkonto: '', betrag: b, quelle: quelleFuerKonto(soll, map), sphaere: sphOf(haben) }; // Einnahme
-  return { konto: soll, gegenkonto: haben, betrag: b, quelle: 'Umbuchung', sphaere: 'neutral' }; // Bestand ↔ Bestand
+  // Ausgabe
+  if (sE && !hE) return { konto: soll, gegenkonto: '', betrag: -b, quelle: quelleFuerKonto(haben, map), geldkonto: String(haben), sphaere: sphOf(soll) };
+  // Einnahme
+  if (!sE && hE) return { konto: haben, gegenkonto: '', betrag: b, quelle: quelleFuerKonto(soll, map), geldkonto: String(soll), sphaere: sphOf(haben) };
+  // Bestand ↔ Bestand: beide Konten stehen direkt in der Zeile, die Quelle ist
+  // dann nur noch ein Etikett.
+  return { konto: soll, gegenkonto: haben, betrag: b, quelle: 'Umbuchung', geldkonto: '', sphaere: 'neutral' };
+}
+
+/**
+ * Prüft, ob das gewählte Geldkonto überhaupt über einen Geld-Topf erreichbar
+ * ist. Ist es das nicht, würde beim Speichern die Quelle auf „Manuell" fallen
+ * und die Buchung landete auf einem ganz anderen Konto.
+ */
+function quelleStimmt(z, map) {
+  const m = map || DOPPIK_MAP_DEFAULT;
+  if (!z.geldkonto) return true;
+  return String(m[z.quelle] || '') === String(z.geldkonto);
 }
 
 async function showBuchung(pk, from) {
@@ -1882,6 +1904,18 @@ async function showBuchung(pk, from) {
     const k = konten.find((x) => String(x.nummer) === String(nr));
     return nr ? `${nr}${k ? ' – ' + k.bezeichnung : ''}` : '—';
   };
+
+  // Offener Konflikt? Dann kommt hier nichts durch, bis er entschieden ist –
+  // das muss man sehen, sonst wirkt „Speichern" wie ein stiller Fehlschlag.
+  try {
+    const offen = (await call(api.conflicts.list())) || [];
+    if (offen.some((k) => k.tbl === 'jb_buchungen' && String(k.pk) === String(pk))) {
+      view.append(el('div', { class: 'note err' },
+        'Diese Buchung hat einen offenen Konflikt: sie wurde hier und auf dem Server geändert. '
+        + 'Solange er offen ist, wird nichts gespeichert. ',
+        el('button', { class: 'small', onclick: showConflicts }, 'Konflikt entscheiden')));
+    }
+  } catch { /* Konfliktliste ist nur ein Hinweis */ }
 
   if (!String(row.konto || '')) {
     view.append(el('div', { class: 'note' },
@@ -2012,6 +2046,15 @@ async function showBuchung(pk, from) {
       `${kname(fSoll.value)} an ${kname(fHaben.value)} · ${eur(Math.abs(Number(z.betrag) || 0))}` +
       ` → wird gespeichert als ${art}: Betrag ${eur(z.betrag)}, Konto ${z.konto || '—'}, Quelle ${z.quelle}` +
       (z.gegenkonto ? `, Gegenkonto ${z.gegenkonto}` : '');
+    const schief = !quelleStimmt(z, dmap);
+    vorschau.className = schief ? 'note err' : 'muted';
+    if (schief) {
+      vorschau.textContent =
+        `Konto ${kname(z.geldkonto)} ist keinem Geld-Topf zugeordnet. Gespeichert würde die Quelle „${z.quelle}" –`
+        + ` die Buchung landete damit auf Konto ${dmap[z.quelle] || '?'} statt auf ${z.geldkonto}.`
+        + ' Bitte im Plugin unter Buchhaltung → Bestände die Zuordnung der Geld-Töpfe anpassen'
+        + ' oder hier ein Konto wählen, das einem Topf zugeordnet ist.';
+    }
   }
   for (const n of [fSoll, fHaben, fBetrag]) n.addEventListener('change', updateVorschau);
   fBetrag.addEventListener('input', updateVorschau);
@@ -2037,6 +2080,9 @@ async function showBuchung(pk, from) {
     if (!fSoll.value || !fHaben.value) return toast('Soll- und Haben-Konto wählen.', true);
     if (fSoll.value === fHaben.value) return toast('Soll und Haben dürfen nicht dasselbe Konto sein.', true);
     const z = satzZuZeile(fSoll.value, fHaben.value, parseNum(fBetrag.value), konten, dmap);
+    if (!quelleStimmt(z, dmap)) {
+      return toast(`Konto ${z.geldkonto} ist keinem Geld-Topf zugeordnet – die Buchung würde auf ${dmap[z.quelle] || '?'} landen. Zuordnung im Plugin unter Buchhaltung → Bestände anpassen.`, true);
+    }
     const fields = {
       buchung_datum: fDatum.value,
       betrag: String(z.betrag),
@@ -2061,8 +2107,14 @@ async function showBuchung(pk, from) {
     for (const k of Object.keys(fields)) if (!cols.has(k)) delete fields[k];
     try {
       await call(api.data.save('jb_buchungen', pk, fields));
-      toast('Gespeichert (wird beim Sync gesendet).');
+      const vorher = (state.stats && state.stats.conflicts) || 0;
       await runSyncQuiet();
+      const nachher = (state.stats && state.stats.conflicts) || 0;
+      if (nachher > vorher) {
+        toast('Nicht gespeichert: Die Buchung wurde auf dem Server zwischenzeitlich geändert. Bitte unter „Konflikte" entscheiden.', true);
+      } else {
+        toast('Gespeichert.');
+      }
       showBuchung(pk, from);
     } catch (e) {
       toast(e.message, true);

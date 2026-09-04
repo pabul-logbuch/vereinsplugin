@@ -144,18 +144,38 @@ function vp_doppik_anfangsbestaende( $jahr = null ) {
 		return $out;
 	}
 
+	// Altbestand: die vier globalen Optionen, Konto über die quelle-Zuordnung.
 	$map = array(
-		'bank'   => '1200',
-		'kasse'  => '1000',
-		'paypal' => '1220',
-		'zettle' => '1360',
+		'bank'   => 'Bank KSK',
+		'kasse'  => 'Zettle-Bar',
+		'paypal' => 'PayPal',
+		'zettle' => 'Zettle-Karte',
 	);
 	$out = array();
-	foreach ( $map as $k => $konto ) {
+	foreach ( $map as $k => $quelle ) {
 		$v = (float) get_option( 'jb_anfangsbestand_' . $k, 0 );
 		if ( $v ) {
+			$konto = vp_doppik_konto_fuer_quelle( $quelle );
 			$out[ $konto ] = ( $out[ $konto ] ?? 0 ) + $v;
 		}
+	}
+	return $out;
+}
+
+/**
+ * Geldkonten, wie sie sich aus der quelle-Zuordnung ergeben.
+ * @return array<string,string>  konto => Topf-Beschriftung
+ */
+function vp_doppik_geldkonten() {
+	$labels = array(
+		'Bank KSK'     => __( 'Bankkonto', 'vereinsplugin' ),
+		'Zettle-Bar'   => __( 'Barkasse', 'vereinsplugin' ),
+		'PayPal'       => __( 'PayPal', 'vereinsplugin' ),
+		'Zettle-Karte' => __( 'Zettle (Karte)', 'vereinsplugin' ),
+	);
+	$out = array();
+	foreach ( $labels as $quelle => $label ) {
+		$out[ vp_doppik_konto_fuer_quelle( $quelle ) ] = $label;
 	}
 	return $out;
 }

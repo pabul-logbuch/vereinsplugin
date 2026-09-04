@@ -185,9 +185,12 @@ function jb_topf_saldo(string $key): float {
     // Bevorzugt der buchhalterisch saubere Weg: Saldo des zugehörigen
     // Geldkontos aus der Doppik (berücksichtigt Umbuchungen über gegenkonto
     // und Vorzeichen korrekt, nicht nur die „quelle").
-    static $doppik_konto = ['bank' => '1200', 'kasse' => '1000', 'paypal' => '1220', 'zettle' => '1360'];
-    if (function_exists('vp_doppik_salden') && isset($doppik_konto[$key])) {
-        $konto = $doppik_konto[$key];
+    // Welches Geldkonto zu einem Topf gehört, sagt die quelle→konto-Zuordnung
+    // (Einstellung `jb_quelle_konto_map`) – nicht eine feste Liste. Sonst zeigt
+    // der Kassenbericht auf ein anderes Konto als die Buchungen.
+    static $topf_quelle = ['bank' => 'Bank KSK', 'kasse' => 'Zettle-Bar', 'paypal' => 'PayPal', 'zettle' => 'Zettle-Karte'];
+    if (function_exists('vp_doppik_salden') && function_exists('vp_doppik_konto_fuer_quelle') && isset($topf_quelle[$key])) {
+        $konto = vp_doppik_konto_fuer_quelle($topf_quelle[$key]);
         foreach (vp_doppik_salden() as $s) {
             if ($s['konto'] === $konto) {
                 return (float) $s['saldo'];
