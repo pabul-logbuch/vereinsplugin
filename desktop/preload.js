@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('api', {
     summary: (year) => invoke('report:summary', { year }),
     salden: (jahr) => invoke('report:salden', { jahr }),
     kontenblatt: (konto, jahr) => invoke('report:kontenblatt', { konto, jahr }),
+    quelleMap: () => invoke('settings:quelle-map'),
+    saveQuelleMap: (map) => invoke('settings:quelle-map-save', { map }),
   },
   action: {
     run: (name, body) => invoke('action:run', { name, body }),

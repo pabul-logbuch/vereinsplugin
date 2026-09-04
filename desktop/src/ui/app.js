@@ -272,6 +272,7 @@ function renderNav() {
     if (has('jb_ruecklagen')) tblItem('jb_ruecklagen', 'Rücklagen');
     if (has('jb_konten')) addItem('kontenplan', 'Kontenplan', { onClick: showKontenplan });
     if (has('jb_anfangsbestaende')) tblItem('jb_anfangsbestaende', 'Anfangsbestände');
+    if (has('jb_buchungen')) addItem('quellen', 'Geld-Töpfe → Konten', { onClick: () => showQuellen(showKontenplan) });
     if (has('vp_rechnungen')) addItem('rechnungen', 'Rechnungen', { slug: 'vp_rechnungen', badge: countFor('vp_rechnungen').count, onClick: () => showRechnungen() });
     if (has('vp_sepa_mandate')) addItem('sepa', 'SEPA-Lastschrift', { onClick: () => showSepa() });
     if (has('vp_spenden')) addItem('spenden', 'Spenden & Bescheinigungen', { onClick: () => showSpenden() });
@@ -319,6 +320,7 @@ function rerender() {
   else if (c.name === 'zbon') showZbon();
   else if (c.name === 'kontenblaetter') showKontenblaetter();
   else if (c.name === 'kontenblatt') showKontenblatt(c.konto, c.from, c.jahr);
+  else if (c.name === 'quellen') showQuellen(c.zurueck);
   else if (c.name === 'buchung') showBuchung(c.pk, c.from);
   else if (c.name === 'auslagen_pruefen') showAuslagenPruefen();
   else if (c.name === 'journal') showJournal();
@@ -1129,6 +1131,67 @@ async function showKontenplan() {
     el('button', { class: 'small', onclick: () => showTable('jb_konten') }, 'Kontenplan bearbeiten')));
 }
 
+/* ------------------------------------------------ Geld-Töpfe → Konto */
+
+/**
+ * Jede Buchung nennt einen Geld-Topf („quelle"). Welches Bestandskonto dahinter
+ * liegt, steht in dieser Zuordnung – ändert man sie, wandern rückwirkend alle
+ * Buchungen des Topfes auf das neue Konto. Deshalb hier bearbeitbar und nicht
+ * nur im WordPress-Frontend.
+ */
+async function showQuellen(zurueck) {
+  state.current = { name: 'quellen', zurueck };
+  renderNav();
+  view.innerHTML = '';
+  if (zurueck) view.append(el('button', { class: 'ghost small', onclick: zurueck }, '‹ Zurück'));
+  view.append(el('h1', {}, 'Geld-Töpfe → Konten'));
+  view.append(el('p', { class: 'sub' },
+    'Ändern wirkt rückwirkend auf alle Buchungen des jeweiligen Topfes – es muss nichts neu gebucht werden.'));
+
+  let data;
+  let konten = [];
+  try {
+    [data, konten] = await Promise.all([
+      call(api.report.quelleMap()),
+      call(api.data.rows('jb_konten', { limit: 2000 })).then((r) => r.rows).catch(() => []),
+    ]);
+  } catch (e) {
+    return view.append(el('div', { class: 'note err' }, e.message
+      + ' – dafür muss das Plugin mindestens v0.27.0 sein und die App online.'));
+  }
+
+  const map = { ...(data.map || {}) };
+  const anzahl = data.anzahl || {};
+  const form = el('form', { class: 'detail' });
+  const sel = {};
+  for (const quelle of Object.keys(map)) {
+    sel[quelle] = kontoSelect(konten, map[quelle], 'alle');
+    const n = anzahl[quelle] || 0;
+    form.append(el('label', {}, `${quelle}`, el('span', { class: 'muted' }, n ? ` · ${n} Buchungen` : ' · keine Buchungen')), sel[quelle]);
+  }
+  const actions = el('div', { class: 'form-actions' });
+  actions.append(el('button', { class: 'primary', type: 'submit' }, 'Zuordnung speichern'));
+  if (data.editable === false) {
+    actions.append(el('span', { class: 'tag' }, 'nur lesbar – Recht „Journal bearbeiten" fehlt'));
+  }
+  form.append(actions);
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const neu = {};
+    for (const q of Object.keys(sel)) if (sel[q].value) neu[q] = sel[q].value;
+    try {
+      await call(api.report.saveQuelleMap(neu));
+      toast('Zuordnung gespeichert.');
+      showQuellen(zurueck);
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+  view.append(form);
+  view.append(el('p', { class: 'muted' },
+    'Standard: Bank KSK→1200, Zettle-Bar/Bar→1000, PayPal→1220, Zettle-Karte/Umbuchung→1360, Auslage→1600, Manuell→1200.'));
+}
+
 /* --------------------------------------------------------- Z-Bon erfassen */
 
 async function showZbon() {
@@ -1882,6 +1945,10 @@ async function showBuchung(pk, from) {
   let auslagen = [];
   let alle = [];
   let dmap = DOPPIK_MAP_DEFAULT;
+  // Ob die Zuordnung wirklich vom Server kommt: nur dann darf das Speichern
+  // wegen einer nicht zugeordneten Quelle abgelehnt werden.
+  let mapEcht = false;
+  let mapFehler = '';
   try {
     [data, konten, budgets, ruecklagen, auslagen, alle] = await Promise.all([
       call(api.data.row('jb_buchungen', pk)),
@@ -1891,10 +1958,15 @@ async function showBuchung(pk, from) {
       call(api.data.rows('jb_auslagen', { limit: 1000 })).then((r) => r.rows).catch(() => []),
       call(api.data.rows('jb_buchungen', { limit: 5000 })).then((r) => r.rows).catch(() => []),
     ]);
-    const s = await call(api.report.salden()).catch(() => null);
-    if (s && s.map) dmap = { ...DOPPIK_MAP_DEFAULT, ...s.map };
+    const s = await call(api.report.salden()).catch((e) => { mapFehler = e.message; return null; });
+    if (s && s.map) { dmap = { ...DOPPIK_MAP_DEFAULT, ...s.map }; mapEcht = true; }
   } catch (e) {
     return view.append(el('div', { class: 'note err' }, e.message));
+  }
+  if (mapFehler) {
+    view.append(el('div', { class: 'note' },
+      'Zuordnung der Geld-Töpfe konnte nicht geladen werden (' + mapFehler + ') – es gilt die Standardzuordnung. '
+      + 'Prüfe die Konten unten besonders sorgfältig.'));
   }
 
   const row = (data && data.row) || {};
@@ -1943,6 +2015,12 @@ async function showBuchung(pk, from) {
 
   const vorschau = el('p', { class: 'muted', style: 'grid-column:1/-1;margin:0' });
   form.append(vorschau);
+  // Direkter Weg aus der Warnung heraus – die Zuordnung ist der eigentliche Fix.
+  const fixBtn = el('button', {
+    type: 'button', class: 'small', hidden: true, style: 'grid-column:1/-1;justify-self:start',
+    onclick: () => showQuellen(() => showBuchung(pk, from)),
+  }, 'Geld-Töpfe → Konten öffnen');
+  form.append(fixBtn);
 
   /* --- 2. Beschreibung ---------------------------------------------------- */
   sec('Beschreibung');
@@ -2048,12 +2126,12 @@ async function showBuchung(pk, from) {
       (z.gegenkonto ? `, Gegenkonto ${z.gegenkonto}` : '');
     const schief = !quelleStimmt(z, dmap);
     vorschau.className = schief ? 'note err' : 'muted';
+    fixBtn.hidden = !schief;
     if (schief) {
       vorschau.textContent =
         `Konto ${kname(z.geldkonto)} ist keinem Geld-Topf zugeordnet. Gespeichert würde die Quelle „${z.quelle}" –`
         + ` die Buchung landete damit auf Konto ${dmap[z.quelle] || '?'} statt auf ${z.geldkonto}.`
-        + ' Bitte im Plugin unter Buchhaltung → Bestände die Zuordnung der Geld-Töpfe anpassen'
-        + ' oder hier ein Konto wählen, das einem Topf zugeordnet ist.';
+        + ' Ordne das Konto einem Topf zu oder wähle hier ein bereits zugeordnetes Konto.';
     }
   }
   for (const n of [fSoll, fHaben, fBetrag]) n.addEventListener('change', updateVorschau);
@@ -2080,8 +2158,10 @@ async function showBuchung(pk, from) {
     if (!fSoll.value || !fHaben.value) return toast('Soll- und Haben-Konto wählen.', true);
     if (fSoll.value === fHaben.value) return toast('Soll und Haben dürfen nicht dasselbe Konto sein.', true);
     const z = satzZuZeile(fSoll.value, fHaben.value, parseNum(fBetrag.value), konten, dmap);
-    if (!quelleStimmt(z, dmap)) {
-      return toast(`Konto ${z.geldkonto} ist keinem Geld-Topf zugeordnet – die Buchung würde auf ${dmap[z.quelle] || '?'} landen. Zuordnung im Plugin unter Buchhaltung → Bestände anpassen.`, true);
+    // Nur blockieren, wenn die Zuordnung wirklich bekannt ist – sonst würde eine
+    // bloß angenommene Standardzuordnung das Speichern verhindern.
+    if (mapEcht && !quelleStimmt(z, dmap)) {
+      return toast(`Konto ${z.geldkonto} ist keinem Geld-Topf zugeordnet – die Buchung würde auf ${dmap[z.quelle] || '?'} landen. Unten „Geld-Töpfe → Konten" öffnen und zuordnen.`, true);
     }
     const fields = {
       buchung_datum: fDatum.value,

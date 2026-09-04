@@ -74,6 +74,14 @@ class SyncClient {
     return this._req('GET', '/report/salden', { query: { jahr: jahr || '' } });
   }
 
+  quelleMap() {
+    return this._req('GET', '/settings/quelle-map');
+  }
+
+  saveQuelleMap(map) {
+    return this._req('POST', '/settings/quelle-map', { json: { map } });
+  }
+
   kontenblatt(konto, jahr) {
     return this._req('GET', '/report/kontenblatt', { query: { konto, jahr: jahr || '' } });
   }

@@ -295,6 +295,21 @@ add_action( 'rest_api_init', function () {
 		},
 	) );
 
+	// Zuordnung Geld-Topf („quelle") → Bestandskonto. Auch aus der Desktop-App
+	// änderbar, weil sie sonst nur im WordPress-Frontend erreichbar wäre.
+	register_rest_route( VP_SYNC_API_NS, '/settings/quelle-map', array(
+		array(
+			'methods'             => 'GET',
+			'permission_callback' => $cap( 'jb_view_journal' ),
+			'callback'            => 'vp_sync_quelle_map_get',
+		),
+		array(
+			'methods'             => 'POST',
+			'permission_callback' => $cap( 'jb_edit_journal' ),
+			'callback'            => 'vp_sync_quelle_map_set',
+		),
+	) );
+
 	register_rest_route( VP_SYNC_API_NS, '/report/kontenblatt', array(
 		'methods'             => 'GET',
 		'permission_callback' => $cap( 'jb_view_journal' ),
@@ -811,6 +826,46 @@ function vp_sync_member_row( WP_User $u ) {
 /* =========================================================================
  * Nextcloud-Beleg-Proxy
  * ====================================================================== */
+
+/** GET /settings/quelle-map – aktuelle Zuordnung + Nutzung je Geld-Topf. */
+function vp_sync_quelle_map_get() {
+	global $wpdb;
+	if ( ! function_exists( 'vp_doppik_map' ) ) {
+		return new WP_Error( 'no_fn', 'Doppik-Modul nicht geladen.', array( 'status' => 400 ) );
+	}
+	$anzahl = array();
+	if ( vp_sync_columns( 'jb_buchungen' ) ) {
+		$rows = $wpdb->get_results( "SELECT quelle, COUNT(*) n FROM {$wpdb->prefix}jb_buchungen GROUP BY quelle", ARRAY_A );
+		foreach ( (array) $rows as $r ) {
+			$anzahl[ (string) $r['quelle'] ] = (int) $r['n'];
+		}
+	}
+	return rest_ensure_response( array(
+		'map'      => vp_doppik_map(),
+		'standard' => vp_doppik_default_map(),
+		'anzahl'   => $anzahl,
+		'editable' => current_user_can( 'jb_edit_journal' ) || current_user_can( 'manage_options' ),
+	) );
+}
+
+/** POST /settings/quelle-map  { map: { "PayPal": "1215", … } } */
+function vp_sync_quelle_map_set( WP_REST_Request $req ) {
+	$b   = (array) $req->get_json_params();
+	$map = isset( $b['map'] ) && is_array( $b['map'] ) ? $b['map'] : null;
+	if ( null === $map ) {
+		return new WP_Error( 'bad_req', 'Feld „map" (Objekt quelle → konto) nötig.', array( 'status' => 400 ) );
+	}
+	$zeilen = array();
+	foreach ( $map as $quelle => $konto ) {
+		$quelle = sanitize_text_field( (string) $quelle );
+		$konto  = sanitize_text_field( (string) $konto );
+		if ( '' !== $quelle && '' !== $konto ) {
+			$zeilen[] = $quelle . ' = ' . $konto;
+		}
+	}
+	update_option( 'jb_quelle_konto_map', implode( "\n", $zeilen ) );
+	return rest_ensure_response( array( 'ok' => true, 'map' => vp_doppik_map() ) );
+}
 
 function vp_sync_route_beleg_get( WP_REST_Request $req ) {
 	if ( ! function_exists( 'jb_nc' ) ) {

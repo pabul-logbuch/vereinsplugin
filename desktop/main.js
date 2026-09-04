@@ -147,6 +147,22 @@ ipcMain.handle('report:salden', async (_e, { jahr } = {}) => {
   }
 });
 
+ipcMain.handle('settings:quelle-map', async () => {
+  try {
+    return ok(await client().quelleMap());
+  } catch (e) {
+    return fail(e);
+  }
+});
+
+ipcMain.handle('settings:quelle-map-save', async (_e, { map }) => {
+  try {
+    return ok(await client().saveQuelleMap(map));
+  } catch (e) {
+    return fail(e);
+  }
+});
+
 ipcMain.handle('report:kontenblatt', async (_e, { konto, jahr }) => {
   try {
     return ok(await client().kontenblatt(konto, jahr));
