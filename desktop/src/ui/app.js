@@ -1517,6 +1517,9 @@ const SPHAERE_OPTS = [
   ['', '—'], ['ideell', 'Ideeller Bereich'], ['zweckbetrieb', 'Zweckbetrieb'],
   ['vermoegen', 'Vermögensverwaltung'], ['wirtschaftlich', 'Wirtschaftl. Geschäftsbetrieb'], ['neutral', 'Neutral / Bestand'],
 ];
+// Bekannte Geld-Töpfe. In den Formularen wird stattdessen das Geldkonto
+// gewählt (siehe geldkontoFeld); die Liste dient nur noch als Reihenfolge
+// und Rückfallebene, wenn die Zuordnung nicht geladen werden kann.
 const QUELLE_OPTS = ['Bank KSK', 'Zettle-Bar', 'Zettle-Karte', 'PayPal', 'Auslage', 'Umbuchung', 'Manuell'];
 
 function selectEl(options, value, attrs = {}) {
@@ -1671,7 +1674,7 @@ async function showJournal() {
   jState.sel = new Set();
   const acts = el('div', { class: 'toolbar' });
   acts.append(
-    el('button', { class: 'primary small', onclick: () => togglePanel('add', () => journalForm(konten, ruecklagen, budgets)) }, '+ Buchung'),
+    el('button', { class: 'primary small', onclick: () => togglePanel('add', () => journalForm(konten, ruecklagen, budgets, dmap)) }, '+ Buchung'),
     el('button', { class: 'small', onclick: () => togglePanel('transfer', () => umbuchungForm(konten)) }, '⇄ Umbuchung'),
     el('button', { class: 'small', onclick: () => togglePanel('csv', () => bankCsvForm(konten)) }, '⇑ Bank-CSV importieren'),
     el('span', { style: 'flex:1' }),
@@ -1883,6 +1886,58 @@ function togglePanel(kind, builder) {
   host.append(builder());
 }
 
+/* ------------------------------------------------ Geldkonto statt Geldtopf */
+
+/**
+ * Auswahl des Geldkontos – zeigt die Konten, die der Nutzer kennt (Bank,
+ * Barkasse, PayPal), statt der internen Topf-Namen. Gespeichert wird nach wie
+ * vor eine `quelle`; welche, leitet sich aus dem gewählten Konto ab.
+ *
+ * Teilen sich mehrere Töpfe ein Konto (Zettle-Bar und Bar liegen beide auf
+ * 1000), wird zusätzlich ein kleines Feld für den Zahlweg gezeigt – nur dann
+ * ist die Unterscheidung überhaupt eine Information.
+ */
+function geldkontoFeld(konten, map, vorgabeQuelle) {
+  const m = map || DOPPIK_MAP_DEFAULT;
+  const kname = (nr) => {
+    const k = (konten || []).find((x) => String(x.nummer) === String(nr));
+    return k ? `${nr} – ${k.bezeichnung}` : String(nr);
+  };
+  // Konto → Töpfe, die darauf zeigen (Reihenfolge wie in QUELLE_PREF).
+  const proKonto = new Map();
+  for (const q of [...QUELLE_PREF, ...Object.keys(m)]) {
+    const nr = String(m[q] || '');
+    if (!nr) continue;
+    if (!proKonto.has(nr)) proKonto.set(nr, []);
+    if (!proKonto.get(nr).includes(q)) proKonto.get(nr).push(q);
+  }
+  const konten1 = [...proKonto.keys()].sort((a, b) => a.localeCompare(b, 'de', { numeric: true }));
+
+  const start = String(m[vorgabeQuelle] || m['Bank KSK'] || konten1[0] || '');
+  const kSel = selectEl(konten1.map((nr) => [nr, kname(nr)]), start);
+  const zSel = selectEl([], '', { style: 'max-width:200px' });
+  const zeile = el('div', { style: 'grid-column:1/-1;display:flex;gap:10px;align-items:center' });
+  zeile.append(el('span', { class: 'muted' }, 'Zahlweg (nur Herkunft, gleiches Konto):'), zSel);
+
+  function syncZahlweg() {
+    const opts = proKonto.get(kSel.value) || [];
+    zSel.innerHTML = '';
+    for (const q of opts) zSel.append(el('option', { value: q }, q));
+    if (opts.includes(vorgabeQuelle)) zSel.value = vorgabeQuelle;
+    // Nur zeigen, wenn es wirklich etwas zu entscheiden gibt.
+    zeile.hidden = opts.length < 2;
+  }
+  kSel.addEventListener('change', syncZahlweg);
+  syncZahlweg();
+
+  return {
+    select: kSel,
+    zahlweg: zeile,
+    get konto() { return kSel.value; },
+    get quelle() { return zSel.value || (proKonto.get(kSel.value) || ['Manuell'])[0]; },
+  };
+}
+
 /* ------------------------------------------- Erklärtexte zu den Buchungsfeldern */
 
 /**
@@ -1891,8 +1946,8 @@ function togglePanel(kind, builder) {
  */
 const FELD_HILFE = {
   quelle:
-    'WO das Geld liegt. Bei negativem Betrag geht es aus diesem Topf raus, bei positivem rein. '
-    + 'Dahinter steht ein Bestandskonto (Bank 1200, Kasse 1000 …).',
+    'WO das Geld liegt: Bank, Barkasse, PayPal. Bei negativem Betrag geht es von diesem Konto runter, '
+    + 'bei positivem drauf.',
   konto:
     'WOFÜR das Geld geflossen ist – der Zweck (z. B. 4100 Mitgliedsbeiträge, 5600 Wareneinkauf). '
     + 'Dieses Konto steht in der EÜR, der Geldtopf nicht.',
@@ -1919,10 +1974,9 @@ function buchungsHilfe(offen) {
     'Jede Buchung beantwortet drei verschiedene Fragen. Nur die ersten beiden sind Konten.'));
   const dl = el('dl', {});
   const zeile = (t, txt) => { dl.append(el('dt', {}, t), el('dd', {}, txt)); };
-  zeile('Geldtopf (Quelle) — wo?',
-    'Welches Geld sich bewegt: Bank KSK, Barkasse, PayPal, Zettle-Karte. Negativer Betrag = raus aus diesem Topf, '
-    + 'positiver = rein. Der Geldtopf ist ein Bestandskonto – er sagt, wie viel Geld ihr habt. '
-    + 'Welches Konto dahinter liegt, steht unter „Geld-Töpfe → Konten".');
+  zeile('Geldkonto — wo?',
+    'Auf welchem Konto das Geld liegt: Bank, Barkasse, PayPal. Negativer Betrag = runter vom Konto, '
+    + 'positiver = drauf. Ein Bestandskonto – es sagt, wie viel Geld ihr habt.');
   zeile('SKR-Konto — wofür?',
     'Der Grund der Bewegung: 4100 Mitgliedsbeiträge, 4600 Getränkeumsatz, 5600 Wareneinkauf. '
     + 'Das ist ein Erfolgskonto – es sagt, ob ihr etwas eingenommen oder ausgegeben habt, und nur dieses '
@@ -1938,8 +1992,12 @@ function buchungsHilfe(offen) {
     'Beispiel Ausgabe: Getränke bar gekauft für 84,20 € → Betrag −84,20, Geldtopf Barkasse, Konto 5600 Wareneinkauf, '
     + 'Gegenpartei „Getränke Müller GmbH".'));
   d.append(el('p', { class: 'bsp' },
-    'Jede Buchung berührt genau einen Geldtopf und ein SKR-Konto – das sind die beiden Seiten des Buchungssatzes '
-    + '(Soll und Haben). Nur Umbuchungen berühren zwei Geldtöpfe und gar kein SKR-Konto.'));
+    'Jede Buchung berührt genau ein Geldkonto und ein SKR-Konto – das sind die beiden Seiten des Buchungssatzes '
+    + '(Soll und Haben). Nur Umbuchungen berühren zwei Geldkonten und gar kein SKR-Konto.'));
+  d.append(el('p', { class: 'bsp' },
+    'Intern trägt jede Buchung außerdem einen Topf-Namen („Bank KSK", „Zettle-Bar"), der historisch aus der Zeit '
+    + 'vor dem Kontenplan stammt. Er sagt nur, über welchen Weg das Geld kam, und wird aus dem Geldkonto '
+    + 'abgeleitet – sichtbar in der Rohdaten-Ansicht und unter „Geld-Töpfe → Konten".'));
   return d;
 }
 
@@ -2273,7 +2331,7 @@ async function showBuchung(pk, from) {
     ' · Rohdaten (alle Spalten) unter Admin · Rohdaten → Buchungen.'));
 }
 
-function journalForm(konten, ruecklagen = [], budgets = []) {
+function journalForm(konten, ruecklagen = [], budgets = [], dmap = DOPPIK_MAP_DEFAULT) {
   const card = el('div', { class: 'card' });
   const head = el('div', { class: 'row', style: 'justify-content:space-between' });
   head.append(el('h2', {}, 'Neue Buchung'));
@@ -2304,7 +2362,7 @@ function journalForm(konten, ruecklagen = [], budgets = []) {
     },
   });
   const sph = selectEl(SPHAERE_OPTS, '');
-  const quelle = selectEl(QUELLE_OPTS, 'Bank KSK');
+  const geld = geldkontoFeld(konten, dmap, 'Bank KSK');
   const gegen = el('input', { type: 'text', placeholder: 'Gegenpartei (optional)' });
   const beschr = el('textarea', { placeholder: 'Beschreibung' });
   const rl = selectEl([['', '– keine –'], ...ruecklagen.map((r) => [String(r.id), r.bezeichnung])], '');
@@ -2326,7 +2384,8 @@ function journalForm(konten, ruecklagen = [], budgets = []) {
     'Betrag (€)', betrag,
     labelMitHilfe('Konto (SKR) – wofür?', FELD_HILFE.konto), konto,
     labelMitHilfe('Sphäre', FELD_HILFE.sphaere), sph,
-    labelMitHilfe('Geldtopf (Quelle) – wo?', FELD_HILFE.quelle), quelle,
+    labelMitHilfe('Geldkonto – wo?', FELD_HILFE.quelle), geld.select,
+    geld.zahlweg,
     labelMitHilfe('Gegenpartei – mit wem?', FELD_HILFE.gegenpartei), gegen,
     'Beschreibung', beschr
   );
@@ -2343,7 +2402,7 @@ function journalForm(konten, ruecklagen = [], budgets = []) {
       await call(api.action.run('journal-add', {
         buchung_datum: datum.value, betrag: amt, konto: konto.value, sphaere: sph.value,
         kategorie: (konten.find((k) => String(k.nummer) === konto.value) || {}).bezeichnung || 'Sonstige',
-        quelle: quelle.value, gegenpartei: gegen.value, beschreibung: beschr.value,
+        quelle: geld.quelle, gegenpartei: gegen.value, beschreibung: beschr.value,
         ruecklage_id: Number(rl.value) || 0,
         budget_id: Number(bud.value) || 0, kostenstelle: ks.value,
       }));
