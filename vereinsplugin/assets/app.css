@@ -125,3 +125,30 @@ details.vp-card > summary{cursor:pointer}
 /* Eingebettete ProtokollPro-Ansicht darf KEIN eigenes App-Layout aufspannen */
 .vp-pp .pp-app, .vp-pp .pp-sidebar { display: contents; }
 .vp-pp .pp-app-main { padding: 0; }
+
+/* Live-Modus: zwei Spalten (Sitzungs-Seitenleiste + Protokoll) im Tab-Inhalt.
+   Die Seitenleiste bleibt hier ein echter Block – sie ist das Bedienpult der
+   laufenden Sitzung und darf nicht per display:contents aufgelöst werden. */
+.vp-pp-live {
+	display: grid;
+	grid-template-columns: minmax(240px, 300px) 1fr;
+	gap: 20px;
+	align-items: start;
+}
+.vp-pp-live .pp-sidebar-live {
+	display: block;
+	flex: none;
+	border: 0;
+	border-radius: 10px;
+	padding: 16px 0;
+	position: sticky;
+	top: 16px;
+	max-height: calc(100vh - 32px);
+	overflow-y: auto;
+}
+.vp-pp-live .pp-live-main { min-width: 0; padding: 0; }
+
+@media (max-width: 782px) {
+	.vp-pp-live { grid-template-columns: 1fr; }
+	.vp-pp-live .pp-sidebar-live { position: static; max-height: none; }
+}

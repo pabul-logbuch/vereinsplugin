@@ -44,6 +44,17 @@ function vp_render_protokoll_bereich() {
 		return esc_url( add_query_arg( array_merge( array( 'vp_tab' => 'protokolle', 'pp_view' => $v ), $extra ), $perm ) );
 	};
 
+	// Live-Modus: eigene Ansicht (Sitzungs-Seitenleiste + Protokoll) ohne die
+	// Unter-Navigation. Ohne diesen Zweig landet „Live protokollieren" im
+	// default-Fall unten — also in der Übersicht.
+	if ( 'live' === $view && function_exists( 'pp_render_live_modus' ) ) {
+		ob_start();
+		echo '<div class="vp-pp vp-pp-live">';
+		pp_render_live_modus(); // gibt Hinweise selbst aus
+		echo '</div>';
+		return ob_get_clean();
+	}
+
 	global $wpdb;
 	$entwuerfe = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}pp_protokolle WHERE status='entwurf'" );
 	$offene    = (int) $wpdb->get_var( $wpdb->prepare(

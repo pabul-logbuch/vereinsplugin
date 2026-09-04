@@ -66,6 +66,32 @@ function vp_settings_save() {
 	update_option( 'vp_sepa_mandatstext', sanitize_textarea_field( wp_unslash( $_POST['vp_sepa_mandatstext'] ?? '' ) ) );
 	update_option( 'vp_beitrag_default', sanitize_text_field( wp_unslash( $_POST['vp_beitrag_default'] ?? '' ) ) );
 	update_option( 'vp_beitrag_intervall', sanitize_key( wp_unslash( $_POST['vp_beitrag_intervall'] ?? 'jaehrlich' ) ) );
+	update_option( 'vp_sepa_bic', sanitize_text_field( wp_unslash( $_POST['vp_sepa_bic'] ?? '' ) ) );
+	update_option( 'vp_sepa_zweck_vorlage', sanitize_text_field( wp_unslash( $_POST['vp_sepa_zweck_vorlage'] ?? '' ) ) );
+
+	// Verein als Aussteller (Rechnungen + Zuwendungsbestätigungen).
+	update_option( 'vp_org_name', sanitize_text_field( wp_unslash( $_POST['vp_org_name'] ?? '' ) ) );
+	update_option( 'vp_org_anschrift', sanitize_textarea_field( wp_unslash( $_POST['vp_org_anschrift'] ?? '' ) ) );
+	update_option( 'vp_org_ort', sanitize_text_field( wp_unslash( $_POST['vp_org_ort'] ?? '' ) ) );
+	update_option( 'vp_org_email', sanitize_email( wp_unslash( $_POST['vp_org_email'] ?? '' ) ) );
+	update_option( 'vp_org_web', esc_url_raw( wp_unslash( $_POST['vp_org_web'] ?? '' ) ) );
+	update_option( 'vp_org_steuernr', sanitize_text_field( wp_unslash( $_POST['vp_org_steuernr'] ?? '' ) ) );
+	update_option( 'vp_org_finanzamt', sanitize_text_field( wp_unslash( $_POST['vp_org_finanzamt'] ?? '' ) ) );
+	update_option( 'vp_org_vertreter', sanitize_text_field( wp_unslash( $_POST['vp_org_vertreter'] ?? '' ) ) );
+
+	// Rechnungen.
+	update_option( 'vp_rechnung_prefix', sanitize_text_field( wp_unslash( $_POST['vp_rechnung_prefix'] ?? 'RE' ) ) );
+	update_option( 'vp_rechnung_zahlungsziel', max( 0, (int) ( $_POST['vp_rechnung_zahlungsziel'] ?? 14 ) ) );
+	update_option( 'vp_rechnung_einleitung', sanitize_textarea_field( wp_unslash( $_POST['vp_rechnung_einleitung'] ?? '' ) ) );
+	update_option( 'vp_rechnung_schluss', sanitize_textarea_field( wp_unslash( $_POST['vp_rechnung_schluss'] ?? '' ) ) );
+	update_option( 'vp_rechnung_ust_hinweis', sanitize_textarea_field( wp_unslash( $_POST['vp_rechnung_ust_hinweis'] ?? '' ) ) );
+
+	// Zuwendungsbestätigungen.
+	update_option( 'vp_spende_konten', sanitize_text_field( wp_unslash( $_POST['vp_spende_konten'] ?? '4200,4210' ) ) );
+	update_option( 'vp_spende_zweck', sanitize_text_field( wp_unslash( $_POST['vp_spende_zweck'] ?? '' ) ) );
+	update_option( 'vp_spende_bescheid_typ', in_array( ( $_POST['vp_spende_bescheid_typ'] ?? 'freistellung' ), array( 'freistellung', '60a' ), true ) ? sanitize_text_field( wp_unslash( $_POST['vp_spende_bescheid_typ'] ) ) : 'freistellung' );
+	update_option( 'vp_spende_bescheid_datum', sanitize_text_field( wp_unslash( $_POST['vp_spende_bescheid_datum'] ?? '' ) ) );
+	update_option( 'vp_spende_veranlagungszeitraum', sanitize_text_field( wp_unslash( $_POST['vp_spende_veranlagungszeitraum'] ?? '' ) ) );
 
 	// Module an/aus.
 	$all      = array_keys( vp_modules() );
@@ -231,9 +257,111 @@ function vp_render_settings_page() {
 					<td><input name="vp_sepa_glaeubiger_id" id="vp_sepa_glaeubiger_id" type="text" class="regular-text" value="<?php echo esc_attr( get_option( 'vp_sepa_glaeubiger_id', '' ) ); ?>"></td>
 				</tr>
 				<tr>
+					<th scope="row"><label for="vp_sepa_bic"><?php esc_html_e( 'BIC des Vereinskontos', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_sepa_bic" id="vp_sepa_bic" type="text" class="regular-text" value="<?php echo esc_attr( get_option( 'vp_sepa_bic', get_option( 'wl_bic', '' ) ) ); ?>">
+						<p class="description"><?php esc_html_e( 'Optional – bei fehlender BIC wird NOTPROVIDED übermittelt (SEPA-Inland).', 'vereinsplugin' ); ?></p></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_sepa_zweck_vorlage"><?php esc_html_e( 'Verwendungszweck-Vorlage', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_sepa_zweck_vorlage" id="vp_sepa_zweck_vorlage" type="text" class="regular-text" value="<?php echo esc_attr( get_option( 'vp_sepa_zweck_vorlage', 'Mitgliedsbeitrag {jahr} - {name}' ) ); ?>">
+						<p class="description"><?php esc_html_e( 'Platzhalter: {jahr} {monat} {name} {mandatsref} {betrag}', 'vereinsplugin' ); ?></p></td>
+				</tr>
+				<tr>
 					<th scope="row"><label for="vp_sepa_mandatstext"><?php esc_html_e( 'Mandatstext (optional)', 'vereinsplugin' ); ?></label></th>
 					<td><textarea name="vp_sepa_mandatstext" id="vp_sepa_mandatstext" rows="3" class="large-text"><?php echo esc_textarea( get_option( 'vp_sepa_mandatstext', '' ) ); ?></textarea>
 						<p class="description"><?php esc_html_e( 'Leer lassen für den Standardtext.', 'vereinsplugin' ); ?></p></td>
+				</tr>
+			</table>
+
+			<h2><?php esc_html_e( 'Verein als Aussteller (Rechnungen & Spendenbescheinigungen)', 'vereinsplugin' ); ?></h2>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="vp_org_name"><?php esc_html_e( 'Vereinsname', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_org_name" id="vp_org_name" type="text" class="regular-text" value="<?php echo esc_attr( get_option( 'vp_org_name', get_bloginfo( 'name' ) ) ); ?>"></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_org_anschrift"><?php esc_html_e( 'Anschrift', 'vereinsplugin' ); ?></label></th>
+					<td><textarea name="vp_org_anschrift" id="vp_org_anschrift" rows="3" class="large-text"><?php echo esc_textarea( get_option( 'vp_org_anschrift', '' ) ); ?></textarea></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_org_ort"><?php esc_html_e( 'Ort (für die Unterschriftzeile)', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_org_ort" id="vp_org_ort" type="text" class="regular-text" value="<?php echo esc_attr( get_option( 'vp_org_ort', '' ) ); ?>"></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_org_email"><?php esc_html_e( 'E-Mail (Fußzeile)', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_org_email" id="vp_org_email" type="email" class="regular-text" value="<?php echo esc_attr( get_option( 'vp_org_email', get_option( 'admin_email' ) ) ); ?>"></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_org_web"><?php esc_html_e( 'Website', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_org_web" id="vp_org_web" type="url" class="regular-text" value="<?php echo esc_attr( get_option( 'vp_org_web', home_url( '/' ) ) ); ?>"></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_org_vertreter"><?php esc_html_e( 'Zeichnungsberechtigte:r', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_org_vertreter" id="vp_org_vertreter" type="text" class="regular-text" value="<?php echo esc_attr( get_option( 'vp_org_vertreter', '' ) ); ?>"></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_org_finanzamt"><?php esc_html_e( 'Finanzamt', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_org_finanzamt" id="vp_org_finanzamt" type="text" class="regular-text" value="<?php echo esc_attr( get_option( 'vp_org_finanzamt', '' ) ); ?>"></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_org_steuernr"><?php esc_html_e( 'Steuernummer', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_org_steuernr" id="vp_org_steuernr" type="text" class="regular-text" value="<?php echo esc_attr( get_option( 'vp_org_steuernr', '' ) ); ?>"></td>
+				</tr>
+			</table>
+
+			<h2><?php esc_html_e( 'Rechnungen', 'vereinsplugin' ); ?></h2>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="vp_rechnung_prefix"><?php esc_html_e( 'Nummernkreis-Präfix', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_rechnung_prefix" id="vp_rechnung_prefix" type="text" class="small-text" value="<?php echo esc_attr( get_option( 'vp_rechnung_prefix', 'RE' ) ); ?>">
+						<p class="description"><?php esc_html_e( 'Ergibt Nummern wie RE-2026-001 (fortlaufend je Jahr).', 'vereinsplugin' ); ?></p></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_rechnung_zahlungsziel"><?php esc_html_e( 'Zahlungsziel (Tage)', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_rechnung_zahlungsziel" id="vp_rechnung_zahlungsziel" type="number" min="0" class="small-text" value="<?php echo esc_attr( get_option( 'vp_rechnung_zahlungsziel', 14 ) ); ?>"></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_rechnung_einleitung"><?php esc_html_e( 'Standard-Einleitung', 'vereinsplugin' ); ?></label></th>
+					<td><textarea name="vp_rechnung_einleitung" id="vp_rechnung_einleitung" rows="2" class="large-text"><?php echo esc_textarea( get_option( 'vp_rechnung_einleitung', '' ) ); ?></textarea></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_rechnung_schluss"><?php esc_html_e( 'Standard-Schlusstext', 'vereinsplugin' ); ?></label></th>
+					<td><textarea name="vp_rechnung_schluss" id="vp_rechnung_schluss" rows="2" class="large-text"><?php echo esc_textarea( get_option( 'vp_rechnung_schluss', '' ) ); ?></textarea></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_rechnung_ust_hinweis"><?php esc_html_e( 'Hinweis ohne USt-Ausweis', 'vereinsplugin' ); ?></label></th>
+					<td><textarea name="vp_rechnung_ust_hinweis" id="vp_rechnung_ust_hinweis" rows="2" class="large-text"><?php echo esc_textarea( get_option( 'vp_rechnung_ust_hinweis', 'Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.' ) ); ?></textarea></td>
+				</tr>
+			</table>
+
+			<h2><?php esc_html_e( 'Zuwendungsbestätigungen', 'vereinsplugin' ); ?></h2>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="vp_spende_konten"><?php esc_html_e( 'Spendenkonten', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_spende_konten" id="vp_spende_konten" type="text" class="regular-text" value="<?php echo esc_attr( get_option( 'vp_spende_konten', '4200,4210' ) ); ?>">
+						<p class="description"><?php esc_html_e( 'Kontonummern (Komma getrennt), deren Einnahmen als Zuwendung übernommen werden.', 'vereinsplugin' ); ?></p></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_spende_zweck"><?php esc_html_e( 'Begünstigter Zweck', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_spende_zweck" id="vp_spende_zweck" type="text" class="regular-text" value="<?php echo esc_attr( get_option( 'vp_spende_zweck', 'der Jugendhilfe' ) ); ?>">
+						<p class="description"><?php esc_html_e( 'Wird im Satz „… wegen Förderung <Zweck> …" eingesetzt, z. B. „der Jugendhilfe".', 'vereinsplugin' ); ?></p></td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Rechtsgrundlage', 'vereinsplugin' ); ?></th>
+					<td>
+						<?php $bt = get_option( 'vp_spende_bescheid_typ', 'freistellung' ); ?>
+						<label><input type="radio" name="vp_spende_bescheid_typ" value="freistellung" <?php checked( $bt, 'freistellung' ); ?>> <?php esc_html_e( 'Freistellungsbescheid / Anlage zum Körperschaftsteuerbescheid', 'vereinsplugin' ); ?></label><br>
+						<label><input type="radio" name="vp_spende_bescheid_typ" value="60a" <?php checked( $bt, '60a' ); ?>> <?php esc_html_e( 'Feststellung nach § 60a AO', 'vereinsplugin' ); ?></label>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_spende_bescheid_datum"><?php esc_html_e( 'Datum des Bescheids', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_spende_bescheid_datum" id="vp_spende_bescheid_datum" type="date" value="<?php echo esc_attr( get_option( 'vp_spende_bescheid_datum', '' ) ); ?>"></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vp_spende_veranlagungszeitraum"><?php esc_html_e( 'Letzter Veranlagungszeitraum', 'vereinsplugin' ); ?></label></th>
+					<td><input name="vp_spende_veranlagungszeitraum" id="vp_spende_veranlagungszeitraum" type="text" class="small-text" value="<?php echo esc_attr( get_option( 'vp_spende_veranlagungszeitraum', '' ) ); ?>">
+						<p class="description"><?php esc_html_e( 'Nur beim Freistellungsbescheid, z. B. „2022 – 2024".', 'vereinsplugin' ); ?></p></td>
 				</tr>
 			</table>
 

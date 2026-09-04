@@ -316,7 +316,7 @@ function vp_org_daten() {
 		'email'     => (string) get_option( 'vp_org_email', get_option( 'wl_kontakt_email', get_option( 'admin_email' ) ) ),
 		'web'       => (string) get_option( 'vp_org_web', home_url( '/' ) ),
 		'iban'      => (string) get_option( 'wl_iban', '' ),
-		'bic'       => (string) get_option( 'vp_sepa_bic', '' ),
+		'bic'       => (string) get_option( 'vp_sepa_bic', get_option( 'wl_bic', '' ) ),
 		'bank'      => (string) get_option( 'wl_bank', '' ),
 		'steuernr'  => (string) get_option( 'vp_org_steuernr', '' ),
 		'finanzamt' => (string) get_option( 'vp_org_finanzamt', '' ),
@@ -420,7 +420,7 @@ function vp_rechnung_html( $id ) {
 				?>
 				<br>
 				<?php echo esc_html( $org['name'] ); ?><br>
-				<?php esc_html_e( 'IBAN', 'vereinsplugin' ); ?>: <?php echo esc_html( chunk_split( vp_iban_normalize( $org['iban'] ), 4, ' ' ) ); ?><br>
+				<?php esc_html_e( 'IBAN', 'vereinsplugin' ); ?>: <?php echo esc_html( trim( chunk_split( vp_iban_normalize( $org['iban'] ), 4, ' ' ) ) ); ?><br>
 				<?php if ( $org['bic'] ) : ?><?php esc_html_e( 'BIC', 'vereinsplugin' ); ?>: <?php echo esc_html( $org['bic'] ); ?><br><?php endif; ?>
 				<?php esc_html_e( 'Verwendungszweck', 'vereinsplugin' ); ?>: <?php echo esc_html( $r->nummer ?: __( 'Rechnung', 'vereinsplugin' ) ); ?>
 			<?php endif; ?>
@@ -519,4 +519,336 @@ function vp_rechnung_mail( $id ) {
 		$wpdb->update( vp_rechnung_table(), array( 'gesendet_am' => current_time( 'mysql' ) ), array( 'id' => (int) $id ) );
 	}
 	return $ok ? true : new WP_Error( 'mail', __( 'Der Versand ist fehlgeschlagen.', 'vereinsplugin' ) );
+}
+
+/* =========================================================================
+ * Frontend-Sektion „Rechnungen"
+ * ====================================================================== */
+
+function vp_render_rechnungen_section() {
+	if ( ! vp_rechnung_can() ) {
+		return '<div class="vp-note vp-note-error">' . esc_html__( 'Keine Berechtigung.', 'vereinsplugin' ) . '</div>';
+	}
+	vp_rechnungen_maybe_upgrade();
+
+	$msg = '';
+	$err = '';
+	$id  = isset( $_GET['re'] ) ? (int) $_GET['re'] : 0;
+
+	if ( isset( $_POST['vp_re_save'] ) && check_admin_referer( 'vp_re', 'vp_re_nonce' ) ) {
+		$positionen = array();
+		foreach ( (array) ( $_POST['p_bezeichnung'] ?? array() ) as $k => $bez ) {
+			$positionen[] = array(
+				'bezeichnung' => wp_unslash( $bez ),
+				'menge'       => wp_unslash( $_POST['p_menge'][ $k ] ?? '1' ),
+				'einheit'     => wp_unslash( $_POST['p_einheit'][ $k ] ?? '' ),
+				'einzelpreis' => wp_unslash( $_POST['p_preis'][ $k ] ?? '0' ),
+				'ust_satz'    => wp_unslash( $_POST['p_ust'][ $k ] ?? '0' ),
+				'konto'       => wp_unslash( $_POST['p_konto'][ $k ] ?? '' ),
+			);
+		}
+		$r = vp_rechnung_save( array(
+			'id'                   => (int) ( $_POST['id'] ?? 0 ),
+			'datum'                => wp_unslash( $_POST['datum'] ?? '' ),
+			'faellig_am'           => wp_unslash( $_POST['faellig_am'] ?? '' ),
+			'user_id'              => (int) ( $_POST['user_id'] ?? 0 ),
+			'mandat_id'            => (int) ( $_POST['mandat_id'] ?? 0 ),
+			'empfaenger_name'      => wp_unslash( $_POST['empfaenger_name'] ?? '' ),
+			'empfaenger_anschrift' => wp_unslash( $_POST['empfaenger_anschrift'] ?? '' ),
+			'empfaenger_email'     => wp_unslash( $_POST['empfaenger_email'] ?? '' ),
+			'betreff'              => wp_unslash( $_POST['betreff'] ?? '' ),
+			'einleitung'           => wp_unslash( $_POST['einleitung'] ?? '' ),
+			'schluss'              => wp_unslash( $_POST['schluss'] ?? '' ),
+			'ust_ausweisen'        => ! empty( $_POST['ust_ausweisen'] ),
+			'zahlart'              => wp_unslash( $_POST['zahlart'] ?? 'ueberweisung' ),
+			'konto'                => wp_unslash( $_POST['konto'] ?? '' ),
+			'kostenstelle'         => wp_unslash( $_POST['kostenstelle'] ?? '' ),
+			'budget_id'            => (int) ( $_POST['budget_id'] ?? 0 ),
+			'notiz'                => wp_unslash( $_POST['notiz'] ?? '' ),
+		), $positionen );
+		if ( is_wp_error( $r ) ) {
+			$err = $r->get_error_message();
+		} else {
+			$msg = __( 'Rechnung gespeichert.', 'vereinsplugin' );
+			$id  = (int) $r;
+			unset( $_GET['re'] );
+		}
+	}
+	if ( isset( $_POST['vp_re_fest'] ) && check_admin_referer( 'vp_re', 'vp_re_nonce' ) ) {
+		$r = vp_rechnung_festschreiben( (int) $_POST['id'] );
+		$id = (int) $_POST['id'];
+		if ( is_wp_error( $r ) ) {
+			$err = $r->get_error_message();
+		} else {
+			$msg = sprintf( __( 'Festgeschrieben als %s.', 'vereinsplugin' ), $r );
+		}
+	}
+	if ( isset( $_POST['vp_re_bezahlt'] ) && check_admin_referer( 'vp_re', 'vp_re_nonce' ) ) {
+		$id = (int) $_POST['id'];
+		$r  = vp_rechnung_mark_bezahlt( $id, wp_unslash( $_POST['bezahlt_am'] ?? '' ), 0, wp_unslash( $_POST['quelle'] ?? 'Bank KSK' ) );
+		$msg = is_wp_error( $r ) ? '' : __( 'Als bezahlt gebucht.', 'vereinsplugin' );
+		$err = is_wp_error( $r ) ? $r->get_error_message() : '';
+	}
+	if ( isset( $_POST['vp_re_storno'] ) && check_admin_referer( 'vp_re', 'vp_re_nonce' ) ) {
+		vp_rechnung_storno( (int) $_POST['id'] );
+		$id  = (int) $_POST['id'];
+		$msg = __( 'Rechnung storniert.', 'vereinsplugin' );
+	}
+	if ( isset( $_POST['vp_re_del'] ) && check_admin_referer( 'vp_re', 'vp_re_nonce' ) ) {
+		$r = vp_rechnung_delete( (int) $_POST['id'] );
+		if ( is_wp_error( $r ) ) {
+			$err = $r->get_error_message();
+			$id  = (int) $_POST['id'];
+		} else {
+			$msg = __( 'Entwurf gelöscht.', 'vereinsplugin' );
+			$id  = 0;
+		}
+	}
+	if ( isset( $_POST['vp_re_mail'] ) && check_admin_referer( 'vp_re', 'vp_re_nonce' ) ) {
+		$id = (int) $_POST['id'];
+		$r  = vp_rechnung_mail( $id );
+		if ( is_wp_error( $r ) ) {
+			$err = $r->get_error_message();
+		} else {
+			$msg = __( 'Rechnung per E-Mail verschickt.', 'vereinsplugin' );
+		}
+	}
+
+	$base = get_permalink() ?: remove_query_arg( array( 're' ) );
+
+	ob_start();
+	echo '<h2>' . esc_html__( 'Rechnungen', 'vereinsplugin' ) . '</h2>';
+	if ( $msg ) {
+		echo '<div class="vp-note">' . esc_html( $msg ) . '</div>';
+	}
+	if ( $err ) {
+		echo '<div class="vp-note vp-note-error">' . esc_html( $err ) . '</div>';
+	}
+	echo '<p><a class="vp-btn vp-btn-primary" href="' . esc_url( add_query_arg( array( 'vp_tab' => 'rechnungen', 're' => 'neu' ), $base ) ) . '">'
+		. esc_html__( 'Neue Rechnung', 'vereinsplugin' ) . '</a></p>';
+
+	if ( isset( $_GET['re'] ) && 'neu' === $_GET['re'] ) {
+		echo vp_rechnung_form( null ); // phpcs:ignore
+	} elseif ( $id ) {
+		echo vp_rechnung_form( vp_rechnung_get( $id ) ); // phpcs:ignore
+	}
+
+	echo vp_rechnung_liste( $base ); // phpcs:ignore
+	return ob_get_clean();
+}
+
+function vp_rechnung_liste( $base ) {
+	global $wpdb;
+	$rows = $wpdb->get_results( 'SELECT * FROM ' . vp_rechnung_table() . ' ORDER BY datum DESC, id DESC LIMIT 200' );
+	$offen = 0.0;
+	foreach ( $rows as $r ) {
+		if ( 'offen' === $r->status ) {
+			$offen += (float) $r->summe;
+		}
+	}
+	ob_start();
+	echo '<h3>' . esc_html__( 'Übersicht', 'vereinsplugin' ) . ' <span class="vp-muted">('
+		. sprintf( esc_html__( 'offen: %s €', 'vereinsplugin' ), esc_html( number_format( $offen, 2, ',', '.' ) ) ) . ')</span></h3>';
+	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr>'
+		. '<th>' . esc_html__( 'Nummer', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'Empfänger:in', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'Betreff', 'vereinsplugin' ) . '</th>'
+		. '<th class="r">' . esc_html__( 'Summe', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'Zahlart', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'Status', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
+	foreach ( $rows as $r ) {
+		printf(
+			'<tr><td><a href="%s">%s</a></td><td>%s</td><td>%s</td><td>%s</td><td class="r">%s €</td><td>%s</td><td>%s</td></tr>',
+			esc_url( add_query_arg( array( 'vp_tab' => 'rechnungen', 're' => (int) $r->id ), $base ) ),
+			esc_html( $r->nummer ?: __( 'Entwurf', 'vereinsplugin' ) ),
+			esc_html( date_i18n( 'd.m.Y', strtotime( $r->datum ) ) ),
+			esc_html( $r->empfaenger_name ),
+			esc_html( $r->betreff ),
+			esc_html( number_format( (float) $r->summe, 2, ',', '.' ) ),
+			esc_html( $r->zahlart ),
+			esc_html( $r->status )
+		);
+	}
+	if ( ! $rows ) {
+		echo '<tr><td colspan="7">' . esc_html__( 'Noch keine Rechnungen.', 'vereinsplugin' ) . '</td></tr>';
+	}
+	echo '</tbody></table></div>';
+	return ob_get_clean();
+}
+
+function vp_rechnung_form( $r ) {
+	global $wpdb;
+	$pos     = $r ? vp_rechnung_positionen( $r->id ) : array();
+	$konten  = function_exists( 'jb_konten_all' ) ? jb_konten_all() : array();
+	$budgets = function_exists( 'jb_budgets_get_all' ) ? jb_budgets_get_all() : array();
+	$mandate = $wpdb->get_results( 'SELECT * FROM ' . vp_sepa_table_mandate() . " WHERE status = 'aktiv' ORDER BY kontoinhaber" );
+	$locked  = $r && in_array( $r->status, array( 'bezahlt', 'storniert' ), true );
+	$v       = function ( $feld, $default = '' ) use ( $r ) {
+		return esc_attr( $r && isset( $r->$feld ) && null !== $r->$feld ? $r->$feld : $default );
+	};
+
+	ob_start();
+	echo '<form method="post" class="vp-card">';
+	wp_nonce_field( 'vp_re', 'vp_re_nonce' );
+	echo '<input type="hidden" name="id" value="' . ( $r ? (int) $r->id : 0 ) . '">';
+	printf(
+		'<h3>%s</h3>',
+		$r ? esc_html( sprintf( __( 'Rechnung %s (%s)', 'vereinsplugin' ), $r->nummer ?: __( 'Entwurf', 'vereinsplugin' ), $r->status ) ) : esc_html__( 'Neue Rechnung', 'vereinsplugin' )
+	);
+
+	echo '<div class="vp-form-grid">';
+	echo '<label>' . esc_html__( 'Mitglied (optional)', 'vereinsplugin' ) . '<select name="user_id" id="vp-re-user"><option value="0">' . esc_html__( '— frei —', 'vereinsplugin' ) . '</option>';
+	foreach ( get_users( array( 'role__in' => array( VP_MEMBER_ROLE, 'editor', 'administrator' ), 'orderby' => 'display_name' ) ) as $u ) {
+		printf(
+			'<option value="%d"%s data-name="%s" data-email="%s" data-anschrift="%s">%s</option>',
+			$u->ID,
+			selected( $r ? (int) $r->user_id : 0, $u->ID, false ),
+			esc_attr( $u->display_name ),
+			esc_attr( $u->user_email ),
+			esc_attr( trim( get_user_meta( $u->ID, 'vp_strasse', true ) . "\n" . trim( get_user_meta( $u->ID, 'vp_plz', true ) . ' ' . get_user_meta( $u->ID, 'vp_ort', true ) ) ) ),
+			esc_html( $u->display_name )
+		);
+	}
+	echo '</select></label>';
+
+	printf( '<label>%s<input type="text" name="empfaenger_name" id="vp-re-name" value="%s" required></label>', esc_html__( 'Empfänger:in', 'vereinsplugin' ), $v( 'empfaenger_name' ) );
+	printf( '<label>%s<input type="email" name="empfaenger_email" id="vp-re-email" value="%s"></label>', esc_html__( 'E-Mail', 'vereinsplugin' ), $v( 'empfaenger_email' ) );
+	printf( '<label>%s<input type="date" name="datum" value="%s"></label>', esc_html__( 'Datum', 'vereinsplugin' ), $v( 'datum', current_time( 'Y-m-d' ) ) );
+	printf( '<label>%s<input type="date" name="faellig_am" value="%s"></label>', esc_html__( 'Fällig am', 'vereinsplugin' ), $v( 'faellig_am' ) );
+
+	echo '<label>' . esc_html__( 'Zahlart', 'vereinsplugin' ) . '<select name="zahlart">';
+	foreach ( array( 'ueberweisung' => __( 'Überweisung', 'vereinsplugin' ), 'lastschrift' => __( 'SEPA-Lastschrift', 'vereinsplugin' ), 'bar' => __( 'bar', 'vereinsplugin' ) ) as $k => $lbl ) {
+		printf( '<option value="%s"%s>%s</option>', esc_attr( $k ), selected( $r ? $r->zahlart : 'ueberweisung', $k, false ), esc_html( $lbl ) );
+	}
+	echo '</select></label>';
+
+	echo '<label>' . esc_html__( 'SEPA-Mandat (bei Lastschrift)', 'vereinsplugin' ) . '<select name="mandat_id"><option value="0">' . esc_html__( '— automatisch —', 'vereinsplugin' ) . '</option>';
+	foreach ( $mandate as $m ) {
+		printf( '<option value="%d"%s>%s (%s)</option>', (int) $m->id, selected( $r ? (int) $r->mandat_id : 0, (int) $m->id, false ), esc_html( $m->kontoinhaber ), esc_html( $m->mandatsref ) );
+	}
+	echo '</select></label>';
+
+	echo '<label>' . esc_html__( 'Ertragskonto', 'vereinsplugin' ) . '<select name="konto">';
+	echo '<option value="">' . esc_html__( '— später —', 'vereinsplugin' ) . '</option>';
+	foreach ( $konten as $k ) {
+		if ( 'einnahme' !== $k->typ ) {
+			continue;
+		}
+		printf( '<option value="%s"%s>%s %s</option>', esc_attr( $k->nummer ), selected( $r ? $r->konto : '', $k->nummer, false ), esc_html( $k->nummer ), esc_html( $k->bezeichnung ) );
+	}
+	echo '</select></label>';
+
+	echo '<label>' . esc_html__( 'Budget', 'vereinsplugin' ) . '<select name="budget_id"><option value="0">—</option>';
+	foreach ( $budgets as $b ) {
+		$b = (object) $b;
+		printf( '<option value="%d"%s>%s</option>', (int) $b->id, selected( $r ? (int) $r->budget_id : 0, (int) $b->id, false ), esc_html( $b->zweck ) );
+	}
+	echo '</select></label>';
+	printf( '<label>%s<input type="text" name="kostenstelle" value="%s"></label>', esc_html__( 'Kostenstelle', 'vereinsplugin' ), $v( 'kostenstelle' ) );
+	echo '</div>';
+
+	printf(
+		'<p><label>%s<br><textarea name="empfaenger_anschrift" id="vp-re-anschrift" rows="3" style="width:100%%">%s</textarea></label></p>',
+		esc_html__( 'Anschrift', 'vereinsplugin' ),
+		esc_textarea( $r ? (string) $r->empfaenger_anschrift : '' )
+	);
+	printf( '<p><label>%s<br><input type="text" name="betreff" value="%s" style="width:100%%"></label></p>', esc_html__( 'Betreff', 'vereinsplugin' ), $v( 'betreff', __( 'Rechnung', 'vereinsplugin' ) ) );
+	printf(
+		'<p><label>%s<br><textarea name="einleitung" rows="2" style="width:100%%">%s</textarea></label></p>',
+		esc_html__( 'Einleitungstext', 'vereinsplugin' ),
+		esc_textarea( $r ? (string) $r->einleitung : (string) get_option( 'vp_rechnung_einleitung', '' ) )
+	);
+
+	/* ---- Positionen ---- */
+	echo '<h4>' . esc_html__( 'Positionen', 'vereinsplugin' ) . '</h4>';
+	echo '<div class="vp-table-wrap"><table class="vp-table" id="vp-re-pos"><thead><tr>'
+		. '<th>' . esc_html__( 'Bezeichnung', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'Menge', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'Einheit', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'Einzelpreis', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'USt %', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'Konto', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
+
+	$zeile = function ( $p = null ) use ( $konten ) {
+		echo '<tr>';
+		echo '<td><input type="text" name="p_bezeichnung[]" value="' . esc_attr( $p->bezeichnung ?? '' ) . '" style="width:100%"></td>';
+		echo '<td><input type="text" inputmode="decimal" size="4" name="p_menge[]" value="' . esc_attr( $p ? rtrim( rtrim( number_format( (float) $p->menge, 3, ',', '' ), '0' ), ',' ) : '1' ) . '"></td>';
+		echo '<td><input type="text" size="6" name="p_einheit[]" value="' . esc_attr( $p->einheit ?? '' ) . '"></td>';
+		echo '<td><input type="text" inputmode="decimal" size="8" name="p_preis[]" value="' . esc_attr( $p ? number_format( (float) $p->einzelpreis, 2, ',', '' ) : '' ) . '"></td>';
+		echo '<td><input type="text" inputmode="decimal" size="3" name="p_ust[]" value="' . esc_attr( $p ? number_format( (float) $p->ust_satz, 0, ',', '' ) : '0' ) . '"></td>';
+		echo '<td><select name="p_konto[]"><option value="">—</option>';
+		foreach ( $konten as $k ) {
+			if ( 'einnahme' !== $k->typ ) {
+				continue;
+			}
+			printf( '<option value="%s"%s>%s</option>', esc_attr( $k->nummer ), selected( $p->konto ?? '', $k->nummer, false ), esc_html( $k->nummer . ' ' . $k->bezeichnung ) );
+		}
+		echo '</select></td></tr>';
+	};
+	foreach ( $pos as $p ) {
+		$zeile( $p );
+	}
+	for ( $i = 0; $i < 3; $i++ ) {
+		$zeile( null );
+	}
+	echo '</tbody></table></div>';
+
+	printf(
+		'<p><label><input type="checkbox" name="ust_ausweisen" value="1"%s> %s</label></p>',
+		checked( $r ? (int) $r->ust_ausweisen : 0, 1, false ),
+		esc_html__( 'Umsatzsteuer ausweisen (sonst Kleinunternehmer-/gemeinnütziger Hinweis)', 'vereinsplugin' )
+	);
+	printf(
+		'<p><label>%s<br><textarea name="schluss" rows="2" style="width:100%%">%s</textarea></label></p>',
+		esc_html__( 'Schlusstext', 'vereinsplugin' ),
+		esc_textarea( $r ? (string) $r->schluss : (string) get_option( 'vp_rechnung_schluss', '' ) )
+	);
+	printf(
+		'<p><label>%s<br><textarea name="notiz" rows="2" style="width:100%%">%s</textarea></label></p>',
+		esc_html__( 'Interne Notiz', 'vereinsplugin' ),
+		esc_textarea( $r ? (string) $r->notiz : '' )
+	);
+
+	echo '<p>';
+	if ( ! $locked ) {
+		echo '<button class="vp-btn vp-btn-primary" name="vp_re_save" value="1">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button> ';
+	}
+	if ( $r && 'entwurf' === $r->status ) {
+		echo '<button class="vp-btn" name="vp_re_fest" value="1">' . esc_html__( 'Festschreiben (Nummer vergeben)', 'vereinsplugin' ) . '</button> ';
+		echo '<button class="vp-btn" name="vp_re_del" value="1" onclick="return confirm(\'' . esc_js( __( 'Entwurf löschen?', 'vereinsplugin' ) ) . '\')">' . esc_html__( 'Löschen', 'vereinsplugin' ) . '</button> ';
+	}
+	if ( $r && $r->id ) {
+		printf(
+			'<a class="vp-btn" target="_blank" rel="noopener" href="%s">%s</a> ',
+			esc_url( wp_nonce_url( add_query_arg( 'vp_rechnung_print', (int) $r->id, home_url( '/' ) ), 'vp_rechnung_print_' . (int) $r->id ) ),
+			esc_html__( 'Drucken / PDF', 'vereinsplugin' )
+		);
+	}
+	if ( $r && 'offen' === $r->status ) {
+		echo '<button class="vp-btn" name="vp_re_mail" value="1">' . esc_html__( 'Per E-Mail senden', 'vereinsplugin' ) . '</button> ';
+		echo '<button class="vp-btn" name="vp_re_storno" value="1" onclick="return confirm(\'' . esc_js( __( 'Rechnung stornieren?', 'vereinsplugin' ) ) . '\')">' . esc_html__( 'Stornieren', 'vereinsplugin' ) . '</button> ';
+	}
+	echo '</p>';
+
+	if ( $r && in_array( $r->status, array( 'offen', 'entwurf' ), true ) ) {
+		echo '<div class="vp-card"><strong>' . esc_html__( 'Zahlungseingang buchen', 'vereinsplugin' ) . '</strong>';
+		echo '<div class="vp-form-grid">';
+		printf( '<label>%s<input type="date" name="bezahlt_am" value="%s"></label>', esc_html__( 'Bezahlt am', 'vereinsplugin' ), esc_attr( current_time( 'Y-m-d' ) ) );
+		printf( '<label>%s<input type="text" name="quelle" value="Bank KSK"></label>', esc_html__( 'Geld-Topf', 'vereinsplugin' ) );
+		echo '</div>';
+		echo '<p><button class="vp-btn" name="vp_re_bezahlt" value="1">' . esc_html__( 'Als bezahlt buchen', 'vereinsplugin' ) . '</button></p></div>';
+	}
+	if ( $r && $r->bezahlt_am ) {
+		echo '<p class="vp-muted">' . esc_html( sprintf( __( 'Bezahlt am %1$s · Buchung #%2$d', 'vereinsplugin' ), $r->bezahlt_am, (int) $r->buchung_id ) ) . '</p>';
+	}
+	echo '</form>';
+
+	// Empfängerdaten aus dem Mitgliederprofil übernehmen.
+	echo '<script>(function(){var s=document.getElementById("vp-re-user");if(!s)return;s.addEventListener("change",function(){'
+		. 'var o=s.options[s.selectedIndex];if(!o||!o.dataset.name)return;'
+		. 'var n=document.getElementById("vp-re-name"),e=document.getElementById("vp-re-email"),a=document.getElementById("vp-re-anschrift");'
+		. 'if(n&&!n.value)n.value=o.dataset.name;if(e&&!e.value)e.value=o.dataset.email;if(a&&!a.value.trim())a.value=o.dataset.anschrift||"";});})();</script>';
+
+	return ob_get_clean();
 }

@@ -540,7 +540,7 @@ function vp_sepa_lauf_xml( $lauf_id ) {
 	$cred_name = vp_sepa_txt( get_option( 'vp_sepa_glaeubiger', get_bloginfo( 'name' ) ), 70 );
 	$cred_id   = strtoupper( preg_replace( '/\s+/', '', (string) get_option( 'vp_sepa_glaeubiger_id', '' ) ) );
 	$cred_iban = vp_iban_normalize( get_option( 'wl_iban', '' ) );
-	$cred_bic  = strtoupper( preg_replace( '/\s+/', '', (string) get_option( 'vp_sepa_bic', '' ) ) );
+	$cred_bic  = strtoupper( preg_replace( '/\s+/', '', (string) get_option( 'vp_sepa_bic', get_option( 'wl_bic', '' ) ) ) );
 
 	if ( '' === $cred_id || ! vp_iban_valid( $cred_iban ) ) {
 		return new WP_Error( 'config', __( 'Gläubiger-ID und/oder Vereins-IBAN fehlen in den Einstellungen.', 'vereinsplugin' ) );

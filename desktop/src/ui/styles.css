@@ -136,6 +136,11 @@ form.detail select { appearance: auto; background: var(--panel); }
 .st-genehmigt { background: #e3edff; color: #1c3d8a; }
 .st-ausgezahlt { background: #e6f4ec; color: var(--accent); }
 .st-abgelehnt { background: var(--err-bg); color: var(--err-ink); }
+.st-entwurf { background: var(--bg); color: var(--muted); }
+.st-offen { background: var(--warn-bg); color: var(--warn-ink); }
+.st-bezahlt { background: #e6f4ec; color: var(--accent); }
+.st-storniert { background: var(--err-bg); color: var(--err-ink); }
+td.warn { color: var(--err-ink); }
 .card.auslage .kv { margin-top: 8px; grid-template-columns: 110px 1fr; }
 
 /* ---------------- Sub-Navigation (Chips) ---------------- */

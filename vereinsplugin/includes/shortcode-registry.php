@@ -22,7 +22,7 @@ function vp_shortcode_catalog() {
 			array(
 				'tag'   => 'verein_mitgliederbereich',
 				'attrs' => 'start="start"',
-				'desc'  => __( 'Der gemeinsame Mitglieder- UND Vorstandsbereich als installierbare WebApp. Zeigt je nach Berechtigung: Wünsche, Abstimmung, Schichtpläne, Protokolle, Auslage einreichen, Mein Profil – und für den Vorstand zusätzlich Anträge, Mitglieder, Auslagen prüfen, Kassenbericht, Buchhaltung, Veranstaltungen. Ersetzt die bisherigen Einzel-Mitgliederbereiche. start= wählt den Start-Bereich.', 'vereinsplugin' ),
+				'desc'  => __( 'Der gemeinsame Mitglieder- UND Vorstandsbereich als installierbare WebApp. Zeigt je nach Berechtigung: Wünsche, Abstimmung, Schichtpläne, Protokolle, Auslage einreichen, Mein Profil – und für den Vorstand zusätzlich Anträge, Mitglieder, Auslagen prüfen, Kassenbericht, Buchhaltung, Veranstaltungen. Für die Kasse zusätzlich: Rechnungen, SEPA-Lastschrift (Mandate + Einzugsläufe mit XML-Export), Spenden & Zuwendungsbestätigungen. Ersetzt die bisherigen Einzel-Mitgliederbereiche. start= wählt den Start-Bereich.', 'vereinsplugin' ),
 				'scope' => 'member',
 			),
 			array(

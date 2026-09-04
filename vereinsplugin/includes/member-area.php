@@ -208,6 +208,24 @@ function vp_member_sections() {
 			'cap'    => 'jb_view_journal',
 			'render' => 'vp_render_budgets_section',
 		),
+		'rechnungen' => array(
+			'label'  => __( 'Rechnungen', 'vereinsplugin' ),
+			'group'  => 'vorstand_kasse',
+			'cap'    => 'jb_view_journal',
+			'render' => 'vp_render_rechnungen_section',
+		),
+		'sepa' => array(
+			'label'  => __( 'SEPA-Lastschrift', 'vereinsplugin' ),
+			'group'  => 'vorstand_kasse',
+			'cap'    => 'jb_view_journal',
+			'render' => 'vp_render_sepa_section',
+		),
+		'spenden' => array(
+			'label'  => __( 'Spenden & Bescheinigungen', 'vereinsplugin' ),
+			'group'  => 'vorstand_kasse',
+			'cap'    => 'jb_view_journal',
+			'render' => 'vp_render_spenden_section',
+		),
 
 		/* ---- Vorstand · Sonstige ---- */
 
