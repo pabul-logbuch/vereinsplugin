@@ -59,6 +59,14 @@
 .vp-form-grid .vp-col-2{grid-column:1 / -1}
 .vp-check{display:flex;align-items:flex-start;gap:8px;font-size:14px;color:inherit}
 .vp-check input{width:auto;margin-top:3px}
+
+/* Sicherheitsnetz für ALLE Formulare im Bereich (auch die der Module):
+   Eingabefelder stehen meist IN einem <label> und würden per color:inherit
+   dessen gedämpfte Farbe erben – der getippte Text wäre dann hellgrau. */
+.vp-app input:not([type="checkbox"]):not([type="radio"]),
+.vp-app select,
+.vp-app textarea{color:var(--vp-ink);background:var(--vp-card)}
+.vp-app ::placeholder{color:var(--vp-muted);opacity:1}
 .vp-mandat-text{font-size:12px;color:var(--vp-muted);background:rgba(127,127,127,.08);padding:10px;border-radius:8px}
 
 .vp-konten-liste{display:flex;flex-direction:column;gap:6px;margin:0 0 14px}
@@ -148,6 +156,14 @@ details.vp-card > summary{cursor:pointer}
 	overflow-y: auto;
 }
 .vp-pp-live .pp-live-main { min-width: 0; padding: 0; }
+
+/* Die Live-Seitenleiste ist bewusst dunkel – dort bleiben helle Felder richtig,
+   das Sicherheitsnetz oben darf sie nicht auf Weiß zurücksetzen. */
+.vp-app .vp-pp.vp-pp-live .pp-live-form input,
+.vp-app .vp-pp.vp-pp-live .pp-live-form select {
+	background: #2b3243;
+	color: #e8e8e8;
+}
 
 @media (max-width: 782px) {
 	.vp-pp-live { grid-template-columns: 1fr; }
