@@ -1,20 +1,38 @@
-/* Vereinsplugin – Mitglieder-/Vorstandsbereich (WebApp-Shell) */
+/* Vereinsplugin – Mitglieder-/Vorstandsbereich (WebApp-Shell) + öffentliche
+   Formulare ([verein_formular], [verein_login], [verein_mitgliedsantrag]).
 
-.vp-app{
-	--vp-accent:#1f2937;
-	--vp-accent-fg:#fff;
+   Die Farb-Variablen stehen bewusst auf :root, nicht nur auf .vp-app: die
+   öffentlichen Formulare rendern OHNE .vp-app-Hülle (eigene Seite, nur
+   .vp-card als Wrapper). Standen die Variablen nur auf .vp-app, waren sie
+   dort schlicht nicht gesetzt -> jede Regel, die var(--vp-…) ohne Fallback
+   nutzt, wurde ungültig und komplett verworfen (kein Rahmen, keine
+   Hintergrundfarbe, Buttons unsichtbar) – genau das gemeldete Bild.
+
+   --vp-accent zieht wo möglich die Theme-Farben (WordPress-Block-Theme /
+   Global Styles, theme.json-Paletten-Slugs "primary"/"contrast"/"base")
+   statt eigener Hex-Werte – nur wenn das Theme keine setzt, greift unser
+   Standard als Fallback. */
+:root{
+	--vp-accent: var(--wp--preset--color--primary, var(--wp--preset--color--contrast, #1f2937));
+	--vp-accent-fg: var(--wp--preset--color--base, #fff);
 	--vp-bg:#f5f6f8;
 	--vp-card:#fff;
 	--vp-border:#e3e6ea;
 	--vp-muted:#6b7280;
 	--vp-ink:#111827;
 	--vp-danger:#b91c1c;
+}
+@media (prefers-color-scheme:dark){
+	:root{--vp-bg:#11151b;--vp-card:#1b2027;--vp-border:#2b323c;--vp-muted:#9aa4b2;--vp-ink:#e5e7eb;color-scheme:dark}
+}
+
+.vp-app{
 	max-width:1180px;margin:0 auto;background:var(--vp-bg);
 	border:1px solid var(--vp-border);border-radius:14px;overflow:hidden;
 	font-size:15px;line-height:1.5;
 }
 @media (prefers-color-scheme:dark){
-	.vp-app{--vp-bg:#11151b;--vp-card:#1b2027;--vp-border:#2b323c;--vp-muted:#9aa4b2;--vp-ink:#e5e7eb;--vp-accent:#e5e7eb;--vp-accent-fg:#11151b;color:#e5e7eb;color-scheme:dark}
+	.vp-app{color:#e5e7eb}
 }
 
 .vp-app-head{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--vp-accent);color:var(--vp-accent-fg)}
@@ -46,13 +64,24 @@
 .vp-tile-num{font-size:30px;font-weight:800}
 .vp-tile-alert{border-color:#f59e0b;background:#fffbeb}
 
-.vp-btn{display:inline-block;padding:8px 14px;border-radius:9px;border:1px solid var(--vp-border);background:var(--vp-card);color:inherit;text-decoration:none;cursor:pointer;font:inherit;margin:2px 4px 2px 0}
-.vp-btn:hover{border-color:var(--vp-muted)}
-.vp-btn-primary{background:var(--vp-accent);color:var(--vp-accent-fg);border-color:var(--vp-accent)}
-.vp-btn-danger{background:var(--vp-danger);color:#fff;border-color:var(--vp-danger)}
+/* !important auf Rahmen/Hintergrund/Farbe: manche Themes/Page-Builder setzen
+   für <button>/<select>/<textarea> eigene, spät geladene Reset-Regeln
+   (z. B. Rahmen entfernt, Hintergrund transparent) – ohne !important
+   verlieren wir dagegen zuverlässig, Buttons/Felder blieben unsichtbar. */
+.vp-btn{display:inline-block;padding:8px 14px;border-radius:9px;border:1px solid var(--vp-border) !important;background:var(--vp-card) !important;color:inherit !important;text-decoration:none;cursor:pointer;font:inherit;margin:2px 4px 2px 0;box-shadow:none}
+.vp-btn:hover{border-color:var(--vp-muted) !important}
+.vp-btn-primary{background:var(--vp-accent) !important;color:var(--vp-accent-fg) !important;border-color:var(--vp-accent) !important}
+.vp-btn-danger{background:var(--vp-danger) !important;color:#fff !important;border-color:var(--vp-danger) !important}
 
 .vp-form label{display:block;margin:0 0 10px;font-size:13px;color:var(--vp-muted)}
-.vp-form input,.vp-form select,.vp-form textarea{display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--vp-border);border-radius:8px;background:var(--vp-card);color:var(--vp-ink);font:inherit;box-sizing:border-box}
+.vp-form input,.vp-form select,.vp-form textarea{
+	display:block !important;width:100% !important;margin-top:4px;padding:8px 10px;
+	border:1px solid var(--vp-border) !important;border-radius:8px;
+	background:var(--vp-card) !important;color:var(--vp-ink) !important;
+	font:inherit;box-sizing:border-box !important;
+	-webkit-appearance:none;appearance:none;box-shadow:none
+}
+.vp-form select{background-image:url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath fill='%23888' d='M5.5 7.5l4.5 4.5 4.5-4.5z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:16px;padding-right:32px}
 .vp-form fieldset{border:1px solid var(--vp-border);border-radius:10px;padding:12px 14px;margin:0 0 14px}
 .vp-form legend{padding:0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--vp-muted)}
 .vp-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
@@ -60,13 +89,21 @@
 .vp-check{display:flex;align-items:flex-start;gap:8px;font-size:14px;color:inherit}
 .vp-check input{width:auto;margin-top:3px}
 
-/* Sicherheitsnetz für ALLE Formulare im Bereich (auch die der Module):
+/* Sicherheitsnetz für ALLE Formulare im Bereich (auch die der Module UND die
+   eigenständigen öffentlichen Formulare ohne .vp-app-Hülle):
    Eingabefelder stehen meist IN einem <label> und würden per color:inherit
    dessen gedämpfte Farbe erben – der getippte Text wäre dann hellgrau. */
 .vp-app input:not([type="checkbox"]):not([type="radio"]),
 .vp-app select,
 .vp-app textarea{color:var(--vp-ink);background:var(--vp-card)}
-.vp-app ::placeholder{color:var(--vp-muted);opacity:1}
+/* Eigenständige öffentliche Formulare (kein .vp-app-Wrapper, siehe oben) –
+   hier mit !important, weil es keine spezifischeren Modul-Regeln gibt, die
+   das versehentlich überstimmen könnte. */
+.vp-card input:not([type="checkbox"]):not([type="radio"]),
+.vp-card select,
+.vp-card textarea{color:var(--vp-ink) !important;background:var(--vp-card) !important}
+.vp-app ::placeholder,
+.vp-card ::placeholder{color:var(--vp-muted);opacity:1}
 .vp-mandat-text{font-size:12px;color:var(--vp-muted);background:rgba(127,127,127,.08);padding:10px;border-radius:8px}
 
 .vp-konten-liste{display:flex;flex-direction:column;gap:6px;margin:0 0 14px}
