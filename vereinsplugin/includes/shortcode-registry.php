@@ -134,6 +134,15 @@ function vp_shortcode_catalog() {
 				'scope' => 'member',
 			),
 		),
+
+		__( 'Formulare', 'vereinsplugin' ) => array(
+			array(
+				'tag'   => 'verein_formular',
+				'attrs' => 'id="3"  oder  slug="anmeldung-sommerfest"',
+				'desc'  => __( 'Frei zusammengestelltes Formular (Text, E-Mail, Telefon, Zahl, Datum, Auswahl, Mehrfachauswahl, Zustimmung) – typisch für Anmeldungen zu Veranstaltungen, Umfragen oder Helfer:innen-Listen. Optional: Teilnehmerlimit, Anmeldeschluss, Login-Pflicht. Gebaut und ausgewertet (inkl. CSV-Export) im Mitgliederbereich unter „Formulare“.', 'vereinsplugin' ),
+				'scope' => 'public',
+			),
+		),
 	);
 
 	/**

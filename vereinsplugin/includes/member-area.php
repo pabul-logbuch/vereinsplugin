@@ -255,6 +255,12 @@ function vp_member_sections() {
 			'cap'    => 'jbf_edit_events',
 			'render' => 'vp_render_backend_links_events',
 		),
+		'formulare' => array(
+			'label'  => __( 'Formulare', 'vereinsplugin' ),
+			'group'  => 'vorstand_sonstige',
+			'cap'    => 'vp_manage_formulare',
+			'render' => 'vp_render_formulare_section',
+		),
 	);
 
 	return apply_filters( 'vp_member_sections', $sections );

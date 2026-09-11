@@ -123,6 +123,7 @@ function vp_core_setup_roles() {
 		'jb_view_journal', 'jb_edit_journal', 'jb_export', 'jb_manage_settings',
 		'jbf_send_external',
 		'vp_manage_members',
+		'vp_manage_formulare',
 	);
 	foreach ( array( 'administrator', 'editor' ) as $role_name ) {
 		$r = get_role( $role_name );
