@@ -770,10 +770,24 @@ function vp_member_area_assets() {
 	if ( ! $post ) {
 		return;
 	}
-	$is_area   = has_shortcode( $post->post_content, 'verein_mitgliederbereich' );
-	$is_login  = has_shortcode( $post->post_content, 'verein_login' );
-	$is_antrag = has_shortcode( $post->post_content, 'verein_mitgliedsantrag' );
-	if ( ! $is_area && ! $is_login && ! $is_antrag ) {
+	// Alle öffentlichen Kern-Shortcodes, die das vp-app-CSS/JS brauchen. Bei
+	// einem neuen öffentlichen Shortcode hier ergänzen – sonst rendert er
+	// ungestylt (genau das ist [verein_formular] anfangs passiert).
+	$public_tags = apply_filters( 'vp_public_shortcodes_needing_assets', array(
+		'verein_mitgliederbereich',
+		'verein_login',
+		'verein_mitgliedsantrag',
+		'verein_formular',
+	) );
+	$is_area = has_shortcode( $post->post_content, 'verein_mitgliederbereich' );
+	$found   = false;
+	foreach ( $public_tags as $tag ) {
+		if ( has_shortcode( $post->post_content, $tag ) ) {
+			$found = true;
+			break;
+		}
+	}
+	if ( ! $found ) {
 		return;
 	}
 

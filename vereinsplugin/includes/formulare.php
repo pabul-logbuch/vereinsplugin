@@ -137,6 +137,34 @@ function vp_formular_ist_offen( $f ) {
 	return true;
 }
 
+/**
+ * Verzweigung: ist die Bedingung eines Feldes anhand der (bisher) geposteten
+ * Daten erfüllt? Ohne Bedingung immer true. $felder_by_key = Feld-Schema
+ * indiziert nach 'key' (für den Feldtyp des Kontroll-Feldes).
+ */
+function vp_formular_bedingung_erfuellt( $feld, array $posted, array $felder_by_key ) {
+	if ( empty( $feld['show_if'] ) ) {
+		return true;
+	}
+	$ctrl = $felder_by_key[ $feld['show_if'] ] ?? null;
+	if ( ! $ctrl ) {
+		return true; // Verweist auf nichts (mehr) -> nicht blockieren.
+	}
+	$want = (string) ( $feld['show_if_value'] ?? '' );
+	$raw  = $posted[ $feld['show_if'] ] ?? ( 'checkboxes' === $ctrl['type'] ? array() : '' );
+
+	if ( 'checkboxes' === $ctrl['type'] ) {
+		$vals = array_map( 'sanitize_text_field', array_map( 'wp_unslash', (array) $raw ) );
+		return in_array( $want, $vals, true );
+	}
+	if ( 'checkbox' === $ctrl['type'] ) {
+		$checked = ! empty( $raw );
+		return $checked === ( '1' === $want );
+	}
+	$val = is_array( $raw ) ? '' : sanitize_text_field( wp_unslash( (string) $raw ) );
+	return $val === $want;
+}
+
 /* -------------------------------------------------------------------------
  * Felder-Baukasten aus geposteten Parallel-Arrays lesen
  * (Muster wie die Rechnungs-Positionen: f_label[], f_type[], …)
@@ -147,6 +175,8 @@ function vp_formular_felder_aus_post() {
 	$types     = (array) ( $_POST['f_type'] ?? array() );
 	$required  = (array) ( $_POST['f_required'] ?? array() );
 	$options   = (array) ( $_POST['f_options'] ?? array() );
+	$show_if   = (array) ( $_POST['f_show_if'] ?? array() );
+	$show_val  = (array) ( $_POST['f_show_if_value'] ?? array() );
 	$types_ok  = array_keys( vp_formular_feldtypen() );
 
 	$felder     = array();
@@ -177,12 +207,28 @@ function vp_formular_felder_aus_post() {
 		}
 
 		$felder[] = array(
-			'key'      => $key,
-			'label'    => $label,
-			'type'     => $type,
-			'required' => in_array( (string) ( $required[ $i ] ?? '' ), array( '1', 'on' ), true ) ? 1 : 0,
-			'options'  => $opts,
+			'key'           => $key,
+			'label'         => $label,
+			'type'          => $type,
+			'required'      => in_array( (string) ( $required[ $i ] ?? '' ), array( '1', 'on' ), true ) ? 1 : 0,
+			'options'       => $opts,
+			'show_if'       => sanitize_key( wp_unslash( $show_if[ $i ] ?? '' ) ),
+			'show_if_value' => sanitize_text_field( wp_unslash( $show_val[ $i ] ?? '' ) ),
 		);
+	}
+
+	// Verwaiste Bedingungen entfernen (Feld, auf das verwiesen wird, existiert
+	// nicht mehr oder verweist auf sich selbst / eine Überschrift).
+	$keys = wp_list_pluck( $felder, 'key' );
+	foreach ( $felder as $i => $feld ) {
+		if ( '' === $feld['show_if'] ) {
+			continue;
+		}
+		$ctrl_ok = in_array( $feld['show_if'], $keys, true ) && $feld['show_if'] !== $feld['key'];
+		if ( ! $ctrl_ok ) {
+			$felder[ $i ]['show_if']       = '';
+			$felder[ $i ]['show_if_value'] = '';
+		}
 	}
 	return $felder;
 }
@@ -257,20 +303,94 @@ function vp_shortcode_formular( $atts ) {
 	$u = is_user_logged_in() ? wp_get_current_user() : null;
 	$v = function ( $key ) { return isset( $_POST['f'][ $key ] ) ? wp_unslash( $_POST['f'][ $key ] ) : ''; };
 
-	echo '<form method="post" class="vp-form" novalidate>';
+	$form_id = 'vp-formular-' . (int) $f->id;
+	echo '<form method="post" class="vp-form" id="' . esc_attr( $form_id ) . '" novalidate>';
 	wp_nonce_field( 'vp_formular_' . $f->id, 'vp_formular_nonce' );
 	echo '<input type="hidden" name="vp_formular_submit" value="' . (int) $f->id . '">';
 	echo '<input type="text" name="vp_hp" value="" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true">';
 
+	$felder_by_key = array();
+	foreach ( $f->felder as $feld ) {
+		$felder_by_key[ $feld['key'] ] = $feld;
+	}
+	$span2 = array( 'heading', 'checkbox', 'checkboxes', 'textarea' );
+	$hat_bedingungen = false;
+
 	echo '<div class="vp-form-grid">';
 	foreach ( $f->felder as $feld ) {
+		$conditioned = ! empty( $feld['show_if'] ) && isset( $felder_by_key[ $feld['show_if'] ] );
+		if ( $conditioned ) {
+			$hat_bedingungen = true;
+			$ctrl_type = $felder_by_key[ $feld['show_if'] ]['type'];
+			printf(
+				'<div class="vp-cond%s" data-cond-field="%s" data-cond-value="%s" data-cond-type="%s" hidden>',
+				in_array( $feld['type'], $span2, true ) ? ' vp-col-2' : '',
+				esc_attr( $feld['show_if'] ),
+				esc_attr( $feld['show_if_value'] ),
+				esc_attr( $ctrl_type )
+			);
+		}
 		vp_formular_render_feld( $feld, $v, $u );
+		if ( $conditioned ) {
+			echo '</div>';
+		}
 	}
 	echo '</div>';
 
 	echo '<button type="submit" class="vp-btn vp-btn-primary">' . esc_html__( 'Absenden', 'vereinsplugin' ) . '</button>';
-	echo '</form></div>';
+	echo '</form>';
+
+	if ( $hat_bedingungen ) {
+		vp_formular_bedingungen_script( $form_id );
+	}
+	echo '</div>';
 	return ob_get_clean();
+}
+
+/**
+ * Reines JS: zeigt/versteckt Felder mit Bedingung, je nachdem was aktuell im
+ * Kontroll-Feld steht. `hidden` reicht aus, damit der Browser required-Felder
+ * dahinter nicht mehr zur Pflicht macht (verstecktes = von der
+ * Formularvalidierung ausgenommen).
+ */
+function vp_formular_bedingungen_script( $form_id ) {
+	?>
+	<script>
+	(function(){
+		var form = document.getElementById(<?php echo wp_json_encode( $form_id ); ?>);
+		if (!form) return;
+
+		function werte(key, type) {
+			if ('checkboxes' === type) {
+				var vals = [];
+				form.querySelectorAll('[name="f[' + key + '][]"]:checked').forEach(function(el){ vals.push(el.value); });
+				return vals;
+			}
+			if ('checkbox' === type) {
+				var cb = form.querySelector('[name="f[' + key + ']"]');
+				return cb && cb.checked ? '1' : '0';
+			}
+			var el = form.querySelector('[name="f[' + key + ']"]');
+			return el ? el.value : '';
+		}
+
+		function aktualisieren() {
+			form.querySelectorAll('.vp-cond').forEach(function(box){
+				var key  = box.getAttribute('data-cond-field');
+				var want = box.getAttribute('data-cond-value');
+				var type = box.getAttribute('data-cond-type');
+				var val  = werte(key, type);
+				var ok   = Array.isArray(val) ? val.indexOf(want) !== -1 : val === want;
+				box.hidden = !ok;
+			});
+		}
+
+		form.addEventListener('input', aktualisieren);
+		form.addEventListener('change', aktualisieren);
+		aktualisieren();
+	})();
+	</script>
+	<?php
 }
 
 function vp_formular_render_feld( $feld, $v, $u ) {
@@ -376,8 +496,18 @@ function vp_formular_handle_submit( $f ) {
 	$name   = '';
 	$email  = '';
 
+	$felder_by_key = array();
+	foreach ( $f->felder as $feld ) {
+		$felder_by_key[ $feld['key'] ] = $feld;
+	}
+
 	foreach ( $f->felder as $feld ) {
 		if ( 'heading' === $feld['type'] ) {
+			continue;
+		}
+		// Feld war laut Verzweigung ausgeblendet -> nicht validieren/speichern,
+		// egal was zufällig im (versteckten) Eingabefeld steht.
+		if ( ! vp_formular_bedingung_erfuellt( $feld, $posted, $felder_by_key ) ) {
 			continue;
 		}
 		$key = $feld['key'];
@@ -654,14 +784,17 @@ function vp_formular_render_editor( $id ) {
 
 		<h3><?php esc_html_e( 'Felder', 'vereinsplugin' ); ?></h3>
 		<p class="vp-muted"><?php esc_html_e( 'Leere Zeilen werden beim Speichern ignoriert. Optionen: eine pro Zeile (nur bei Auswahl/Mehrfachauswahl).', 'vereinsplugin' ); ?></p>
+		<p class="vp-muted"><?php esc_html_e( 'Verzweigung („Nur zeigen wenn"): Feld erscheint nur, wenn ein vorher gespeichertes Feld einen bestimmten Wert hat – z. B. „Alter der Kinder" nur wenn „Kinderbetreuung gewünscht" = „Ja". Bei „Zustimmung" (ein Kästchen) als Wert 1 für angehakt eintragen. Ein neu hinzugefügtes Feld kann erst NACH dem Speichern als Bedingung für andere Felder gewählt werden.', 'vereinsplugin' ); ?></p>
 		<div class="vp-table-wrap"><table class="vp-table"><thead><tr>
 			<th><?php esc_html_e( 'Beschriftung', 'vereinsplugin' ); ?></th>
 			<th><?php esc_html_e( 'Typ', 'vereinsplugin' ); ?></th>
 			<th><?php esc_html_e( 'Pflicht', 'vereinsplugin' ); ?></th>
 			<th><?php esc_html_e( 'Optionen', 'vereinsplugin' ); ?></th>
+			<th><?php esc_html_e( 'Nur zeigen wenn', 'vereinsplugin' ); ?></th>
+			<th><?php esc_html_e( '= Wert', 'vereinsplugin' ); ?></th>
 		</tr></thead><tbody>
 		<?php
-		$zeile = function ( $feld = null ) {
+		$zeile = function ( $feld = null ) use ( $felder ) {
 			echo '<tr>';
 			echo '<td><input type="text" name="f_label[]" style="width:100%" value="' . esc_attr( $feld['label'] ?? '' ) . '"></td>';
 			echo '<td><select name="f_type[]">';
@@ -671,6 +804,20 @@ function vp_formular_render_editor( $id ) {
 			echo '</select></td>';
 			echo '<td style="text-align:center"><input type="checkbox" name="f_required[]" value="1"' . checked( ! empty( $feld['required'] ), true, false ) . '></td>';
 			echo '<td><textarea name="f_options[]" rows="2" style="width:100%">' . esc_textarea( implode( "\n", (array) ( $feld['options'] ?? array() ) ) ) . '</textarea></td>';
+			echo '<td><select name="f_show_if[]"><option value="">– ' . esc_html__( 'immer', 'vereinsplugin' ) . ' –</option>';
+			foreach ( $felder as $moeglich ) {
+				if ( 'heading' === $moeglich['type'] || $moeglich['key'] === ( $feld['key'] ?? '' ) ) {
+					continue;
+				}
+				printf(
+					'<option value="%s"%s>%s</option>',
+					esc_attr( $moeglich['key'] ),
+					selected( $feld['show_if'] ?? '', $moeglich['key'], false ),
+					esc_html( $moeglich['label'] )
+				);
+			}
+			echo '</select></td>';
+			echo '<td><input type="text" name="f_show_if_value[]" style="width:100%" value="' . esc_attr( $feld['show_if_value'] ?? '' ) . '"></td>';
 			echo '</tr>';
 		};
 		foreach ( $felder as $feld ) {
