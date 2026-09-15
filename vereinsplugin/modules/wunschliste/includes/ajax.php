@@ -38,6 +38,11 @@ function wl_ajax_save_wunsch() {
 
     $data = compact('titel', 'beschreibung', 'begruendung', 'betrag', 'preis_von', 'preis_bis', 'kategorie', 'status', 'prioritaet', 'bild_url');
 
+    // Kreis-Zuordnung (Spalte ergänzt der Kern, siehe includes/kreise-verbund.php).
+    if (isset($_POST['gremium_id']) && in_array('gremium_id', (array) $wpdb->get_col("SHOW COLUMNS FROM $table"), true)) {
+        $data['gremium_id'] = intval($_POST['gremium_id']) ?: null;
+    }
+
     if ($id > 0) {
         $result = $wpdb->update($table, $data, ['id' => $id]);
         $msg = 'Wunsch aktualisiert.';

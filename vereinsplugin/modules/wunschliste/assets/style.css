@@ -709,3 +709,14 @@
     border: 1px solid #bfdbfe; border-radius: 4px;
     padding: 5px 8px; font-size: .82rem; width: 100%; box-sizing: border-box;
 }
+
+/* ── Kreis-Filter (Kreise-Verbund) ────────────────── */
+.wl-kreis-filter-bar { margin-top: -16px; }
+.wl-kreis-filter-btn {
+    background: #fff; border: 1px dashed var(--wl-border); border-radius: 999px;
+    padding: 4px 14px; font-size: .85rem; cursor: pointer; transition: all .2s; color: #334155;
+}
+.wl-kreis-filter-btn:hover, .wl-kreis-filter-btn.active {
+    background: var(--wl-primary); border-color: var(--wl-primary); border-style: solid; color: #fff !important;
+}
+.wl-badge-kreis { background: #eef2ff; color: #3730a3; }

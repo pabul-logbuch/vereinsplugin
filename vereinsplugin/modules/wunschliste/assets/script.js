@@ -129,6 +129,7 @@ function wlResetForm(selector) {
         $('#wl-edit-preis-von').val('');
         $('#wl-edit-preis-bis').val('');
         $('#wl-edit-kat').val('');
+        $('#wl-edit-kreis').val('');
         $('#wl-edit-status').val('offen');
         $('#wl-edit-prio').val('2');
         $('#wl-edit-bild').val('');
@@ -183,6 +184,7 @@ function wlResetForm(selector) {
         $('#wl-edit-desc').val($btn.data('desc'));
         $('#wl-edit-begruendung').val($btn.data('begruendung'));
         $('#wl-edit-kat').val($btn.data('kat'));
+        $('#wl-edit-kreis').val(String($btn.data('kreis') || ''));
         $('#wl-edit-status').val($btn.data('status'));
         $('#wl-edit-prio').val($btn.data('prio'));
         $('#wl-edit-bild').val($btn.data('bild'));
@@ -767,18 +769,32 @@ function wlResetForm(selector) {
 
     // ─── KATEGORIE-FILTER ──────────────────────────────────────────────────────
 
+    // Kategorie- und Kreis-Filter wirken zusammen.
+    function wlvFiltern() {
+        var kat   = $('#wlv-board .wl-filter-btn.active').data('filter') || '';
+        var kreis = String($('#wlv-board .wl-kreis-filter-btn.active').data('kreis') || '');
+        $('#wlv-liste .wlv-card').each(function () {
+            var passt = (!kat || $(this).data('kategorie') === kat)
+                && (!kreis || String($(this).data('kreis') || '') === kreis);
+            $(this).toggle(passt);
+        });
+    }
+
     $(document).on('click', '#wlv-board .wl-filter-btn', function () {
         $('#wlv-board .wl-filter-btn').removeClass('active');
         $(this).addClass('active');
+        wlvFiltern();
+    });
 
-        var filter = $(this).data('filter');
-        $('#wlv-liste .wlv-card').each(function () {
-            if (!filter || $(this).data('kategorie') === filter) {
-                $(this).show();
-            } else {
-                $(this).hide();
-            }
-        });
+    $(document).on('click', '#wlv-board .wl-kreis-filter-btn', function () {
+        $('#wlv-board .wl-kreis-filter-btn').removeClass('active');
+        $(this).addClass('active');
+        wlvFiltern();
+    });
+
+    // Vorauswahl über ?wl_kreis=<id> (Link aus der Kreis-Seite).
+    $(function () {
+        if ($('#wlv-board .wl-kreis-filter-btn.active').data('kreis')) wlvFiltern();
     });
 
     // ─── NEUER WUNSCH / FORMULAR ÖFFNEN ───────────────────────────────────────
@@ -788,6 +804,8 @@ function wlResetForm(selector) {
         $('#wlv-edit-titel, #wlv-edit-desc, #wlv-edit-begruendung, #wlv-edit-betrag, #wlv-edit-kat, #wlv-edit-bild').val('');
         $('#wlv-edit-status').val('offen');
         $('#wlv-edit-prio').val('2');
+        // Neuer Wunsch landet im gerade gefilterten Kreis.
+        $('#wlv-edit-kreis').val(String($('#wlv-board .wl-kreis-filter-btn.active').data('kreis') || ''));
         $('#wlv-wunsch-save-feedback').empty();
     }
 
@@ -813,6 +831,7 @@ function wlResetForm(selector) {
         $('#wlv-edit-begruendung').val($btn.data('begruendung'));
         $('#wlv-edit-betrag').val($btn.data('betrag'));
         $('#wlv-edit-kat').val($btn.data('kat'));
+        $('#wlv-edit-kreis').val(String($btn.data('kreis') || ''));
         $('#wlv-edit-status').val($btn.data('status'));
         $('#wlv-edit-prio').val($btn.data('prio'));
         $('#wlv-edit-bild').val($btn.data('bild'));

@@ -55,26 +55,11 @@ function vp_render_protokoll_bereich() {
 		return ob_get_clean();
 	}
 
-	global $wpdb;
-	$entwuerfe = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}pp_protokolle WHERE status='entwurf'" );
-	$offene    = (int) $wpdb->get_var( $wpdb->prepare(
-		"SELECT COUNT(*) FROM {$wpdb->prefix}pp_aufgaben WHERE status='offen' AND verantwortlich_user_id = %d",
-		get_current_user_id()
-	) );
-
-	$punkte = array(
-		'dashboard'  => array( __( 'Übersicht', 'vereinsplugin' ), '' ),
-		'protokolle' => array( __( 'Protokolle', 'vereinsplugin' ), $entwuerfe ? $entwuerfe . ' Entwürfe' : '' ),
-		'kreise'     => array( __( 'Kreise & Rollen', 'vereinsplugin' ), '' ),
-		'sets'       => array( __( 'Aufgaben-Sets', 'vereinsplugin' ), '' ),
-		'themen'     => array( __( 'Themenspeicher', 'vereinsplugin' ), '' ),
-		'aufgaben'   => array( __( 'Aufgaben', 'vereinsplugin' ), $offene ? (string) $offene : '' ),
-		'termine'    => array( __( 'Termine', 'vereinsplugin' ), '' ),
-		'kalender'   => array( __( 'Kalender-Sync', 'vereinsplugin' ), '' ),
-	);
-
-	$active_key = in_array( $view, array( 'protokoll' ), true ) ? 'protokolle'
-		: ( in_array( $view, array( 'kreis' ), true ) ? 'kreise' : $view );
+	// Gleiche Navigationspunkte wie im ProtokollPro-Widget (inkl. der per
+	// Filter ergänzten, z. B. Projekte) – vorher fehlten hier Entscheide,
+	// Ablauf-Vorlagen und Dokumente.
+	$punkte     = pp_front_nav_punkte();
+	$active_key = pp_front_nav_aktiv( $view );
 
 	ob_start();
 	echo '<div class="vp-pp">';
@@ -106,18 +91,7 @@ function vp_render_protokoll_bereich() {
 	if ( function_exists( 'pp_render_notices' ) ) {
 		pp_render_notices();
 	}
-	switch ( $view ) {
-		case 'protokolle': pp_render_view_protokolle(); break;
-		case 'protokoll':  pp_render_view_protokoll_detail(); break;
-		case 'kreise':     pp_render_view_kreise(); break;
-		case 'kreis':      pp_render_view_kreis_detail(); break;
-		case 'sets':       pp_render_view_sets(); break;
-		case 'themen':     pp_render_view_themen(); break;
-		case 'aufgaben':   pp_render_view_aufgaben(); break;
-		case 'termine':    pp_render_view_termine(); break;
-		case 'kalender':   pp_render_view_kalender(); break;
-		default:           pp_render_view_dashboard(); break;
-	}
+	pp_render_view_switch( $view );
 
 	echo '</div>';
 	return ob_get_clean();

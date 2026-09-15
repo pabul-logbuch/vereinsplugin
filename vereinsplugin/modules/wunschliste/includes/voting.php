@@ -253,6 +253,10 @@ function wl_render_voting_board($ist_mitglied, $voter_name) {
     $stufen   = wl_vote_stufen();
     $voter_key = wl_get_voter_key();
     $kategorien = wl_get_kategorien();
+    // Kreise (ProtokollPro): Filter + Zuordnung im Formular.
+    $kreise      = function_exists('pp_get_gremien') ? wp_list_pluck(pp_get_gremien(), 'name', 'id') : [];
+    $kreis_namen = function_exists('vp_kreis_namen') ? vp_kreis_namen() : $kreise;
+    $kreis_vorauswahl = isset($_GET['wl_kreis']) ? intval($_GET['wl_kreis']) : 0;
     ?>
     <div class="wl-wrap wlv-wrap" id="wlv-board"
          data-mitglied="<?php echo $ist_mitglied ? '1' : '0'; ?>"
@@ -288,6 +292,15 @@ function wl_render_voting_board($ist_mitglied, $voter_name) {
             <button type="button" class="wl-filter-btn active" data-filter="">Alle</button>
             <?php foreach ($kategorien as $kat) : ?>
                 <button type="button" class="wl-filter-btn" data-filter="<?php echo esc_attr($kat); ?>"><?php echo esc_html($kat); ?></button>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($kreise) : ?>
+        <div class="wl-filter-bar wl-kreis-filter-bar">
+            <button type="button" class="wl-kreis-filter-btn <?php echo $kreis_vorauswahl ? '' : 'active'; ?>" data-kreis="">Alle Kreise</button>
+            <?php foreach ($kreise as $kid => $kname) : ?>
+                <button type="button" class="wl-kreis-filter-btn <?php echo $kreis_vorauswahl === (int) $kid ? 'active' : ''; ?>" data-kreis="<?php echo (int) $kid; ?>">👥 <?php echo esc_html($kname); ?></button>
             <?php endforeach; ?>
         </div>
         <?php endif; ?>
@@ -333,6 +346,17 @@ function wl_render_voting_board($ist_mitglied, $voter_name) {
                             <option value="erfuellt">Erfüllt</option>
                         </select>
                     </div>
+                    <?php if ($kreise) : ?>
+                    <div class="wl-form-row">
+                        <label>Kreis</label>
+                        <select name="gremium_id" id="wlv-edit-kreis">
+                            <option value="">– ganzer Verein –</option>
+                            <?php foreach ($kreise as $kid => $kname) : ?>
+                                <option value="<?php echo (int) $kid; ?>"><?php echo esc_html($kname); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <?php endif; ?>
                     <div class="wl-form-row">
                         <label>Priorität</label>
                         <select name="prioritaet" id="wlv-edit-prio">
@@ -366,7 +390,8 @@ function wl_render_voting_board($ist_mitglied, $voter_name) {
             ?>
             <div class="wlv-card <?php echo $hat_veto ? 'wlv-card-veto' : ''; ?>"
                  id="wlv-card-<?php echo $w->id; ?>" data-id="<?php echo $w->id; ?>"
-                 data-kategorie="<?php echo esc_attr($w->kategorie); ?>">
+                 data-kategorie="<?php echo esc_attr($w->kategorie); ?>"
+                 data-kreis="<?php echo (int) ($w->gremium_id ?? 0) ?: ''; ?>">
 
                 <div class="wlv-card-rank"><?php echo $hat_veto ? '🚫' : '#' . ($i + 1); ?></div>
 
@@ -379,6 +404,7 @@ function wl_render_voting_board($ist_mitglied, $voter_name) {
                 <div class="wlv-card-info">
                     <div class="wlv-card-meta">
                         <?php if ($w->kategorie) echo '<span class="wl-badge wl-badge-kat">' . esc_html($w->kategorie) . '</span>'; ?>
+                        <?php if (!empty($w->gremium_id) && isset($kreis_namen[(int) $w->gremium_id])) echo '<span class="wl-badge wl-badge-kreis">👥 ' . esc_html($kreis_namen[(int) $w->gremium_id]) . '</span>'; ?>
                         <?php if ($hat_veto) echo '<span class="wl-badge" style="background:#fef2f2;color:#dc2626">⛔ Veto aktiv</span>'; ?>
                         <span class="wl-badge wl-badge-status wl-status-<?php echo esc_attr($w->status); ?>"><?php echo wl_status_label($w->status); ?></span>
                         <?php if ($w->prioritaet == 1) echo '<span class="wl-badge wl-badge-prio">⭐ Dringend</span>'; ?>
@@ -439,6 +465,7 @@ function wl_render_voting_board($ist_mitglied, $voter_name) {
                             data-begruendung="<?php echo esc_attr($w->begruendung); ?>"
                             data-betrag="<?php echo esc_attr($w->betrag); ?>"
                             data-kat="<?php echo esc_attr($w->kategorie); ?>"
+                            data-kreis="<?php echo (int) ($w->gremium_id ?? 0) ?: ''; ?>"
                             data-status="<?php echo esc_attr($w->status); ?>"
                             data-prio="<?php echo esc_attr($w->prioritaet); ?>"
                             data-bild="<?php echo esc_attr($w->bild_url); ?>">

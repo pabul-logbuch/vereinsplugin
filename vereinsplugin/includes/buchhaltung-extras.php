@@ -62,7 +62,7 @@ function vp_render_budgets_section() {
 
 	if ( $can_edit && isset( $_POST['vp_budget_save'] ) && check_admin_referer( 'vp_budget', 'vp_budget_nonce' ) ) {
 		if ( function_exists( 'jb_budget_save' ) ) {
-			jb_budget_save( array(
+			$saved_id = jb_budget_save( array(
 				'id'                     => (int) ( $_POST['id'] ?? 0 ),
 				'zweck'                  => wp_unslash( $_POST['zweck'] ?? '' ),
 				'beschreibung'           => wp_unslash( $_POST['beschreibung'] ?? '' ),
@@ -73,6 +73,10 @@ function vp_render_budgets_section() {
 				'verantwortlich_user_id' => (int) ( $_POST['verantwortlich_user_id'] ?? 0 ),
 				'notiz'                  => wp_unslash( $_POST['notiz'] ?? '' ),
 			) );
+			// Kreis-Zuordnung (Kreiskasse), jb_budget_save() kennt die Spalte nicht.
+			if ( $saved_id && isset( $_POST['gremium_id'] ) && function_exists( 'vp_kreis_col_exists' ) && vp_kreis_col_exists( jb_table_budgets(), 'gremium_id' ) ) {
+				$wpdb->update( jb_table_budgets(), array( 'gremium_id' => (int) $_POST['gremium_id'] ?: null ), array( 'id' => (int) $saved_id ) );
+			}
 			$msg = __( 'Budget gespeichert.', 'vereinsplugin' );
 		}
 	}
@@ -112,6 +116,7 @@ function vp_render_budgets_section() {
 		. ( $can_edit ? '<th></th>' : '' )
 		. '</tr></thead><tbody>';
 
+	$kreis_namen = function_exists( 'vp_kreis_namen' ) ? vp_kreis_namen() : array();
 	foreach ( $budgets as $b ) {
 		$b    = (object) $b;
 		// 'verbraucht' enthält auch die direkt aufs Budget gebuchten Journalausgaben.
@@ -121,7 +126,7 @@ function vp_render_budgets_section() {
 		printf(
 			'<tr><td><strong>%s</strong><br><span class="vp-muted">%s</span></td><td>%s</td><td>%s</td><td>%s</td><td style="text-align:right">%s €</td><td style="text-align:right">%s €</td><td style="text-align:right;%s">%s €</td>%s</tr>',
 			esc_html( $b->zweck ),
-			esc_html( wp_trim_words( (string) $b->beschreibung, 12 ) ),
+			esc_html( trim( ( ! empty( $b->gremium_id ) && isset( $kreis_namen[ (int) $b->gremium_id ] ) ? sprintf( __( 'Kreis %s', 'vereinsplugin' ), $kreis_namen[ (int) $b->gremium_id ] ) . ' · ' : '' ) . wp_trim_words( (string) $b->beschreibung, 12 ), ' ·' ) ),
 			$b->jahr ? (int) $b->jahr : '–',
 			$who ? esc_html( $who->display_name ) : '<span class="vp-muted">–</span>',
 			esc_html( trim( ( $b->konto ? $b->konto : '' ) . ' ' . ( $b->kostenstelle ? $b->kostenstelle : '' ) ) ?: '–' ),
@@ -166,6 +171,10 @@ function vp_render_budgets_section() {
 						</option>
 					<?php endforeach; ?>
 				</select></label>
+			<?php if ( function_exists( 'vp_kreis_optionen' ) && function_exists( 'pp_get_gremien' ) ) : ?>
+			<label><?php esc_html_e( 'Kreis (Kreiskasse)', 'vereinsplugin' ); ?>
+				<select name="gremium_id"><?php echo vp_kreis_optionen( (int) ( $edit_row->gremium_id ?? 0 ), __( '– Vereinskasse –', 'vereinsplugin' ) ); // phpcs:ignore ?></select></label>
+			<?php endif; ?>
 			<label><?php esc_html_e( 'SKR-Konto (optional)', 'vereinsplugin' ); ?>
 				<input type="text" name="konto" placeholder="z. B. 4980" value="<?php echo $val( 'konto' ); ?>"></label>
 			<label><?php esc_html_e( 'Kostenstelle (optional)', 'vereinsplugin' ); ?>

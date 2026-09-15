@@ -3,7 +3,7 @@
  * Plugin Name:       Vereinsplugin
  * Plugin URI:        https://github.com/pabul-logbuch/vereinsplugin
  * Description:        Alles-in-einem-Vereinsverwaltung: Wunschliste & Spenden, Sitzungs-/Protokollverwaltung, Buchhaltung & Auslagen, Veranstaltungs-Publisher – mit gemeinsamem Mitgliederbereich. Im WordPress-Dashboard erscheint bewusst nur eine einzige Seite: die Shortcode-Übersicht. Alle Verwaltung läuft über Shortcodes im Frontend.
- * Version:           0.32.0
+ * Version:           0.33.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Verein
@@ -42,7 +42,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_VERSION', '0.32.0' );
+define( 'VP_VERSION', '0.33.0' );
 define( 'VP_FILE', __FILE__ );
 define( 'VP_PATH', plugin_dir_path( __FILE__ ) );
 define( 'VP_URL', plugin_dir_url( __FILE__ ) );
@@ -278,6 +278,8 @@ require_once VP_PATH . 'includes/sepa.php';
 require_once VP_PATH . 'includes/rechnungen.php';
 require_once VP_PATH . 'includes/spenden.php';
 require_once VP_PATH . 'includes/formulare.php';
+require_once VP_PATH . 'includes/kreise-verbund.php';
+require_once VP_PATH . 'includes/projekte.php';
 require_once VP_PATH . 'includes/rest-sync-api.php';
 require_once VP_PATH . 'includes/member-area.php';
 require_once VP_PATH . 'includes/pwa.php';
@@ -321,7 +323,7 @@ function vp_activate() {
 	// Kern-Tabellen der Zusatzmodule (Rechnungen, SEPA, Spenden). Die
 	// plugins_loaded-Checks legen sie ohnehin an – hier nur, damit sie direkt
 	// nach dem Aktivieren stehen.
-	foreach ( array( 'vp_sepa_maybe_upgrade', 'vp_rechnungen_maybe_upgrade', 'vp_spenden_maybe_upgrade' ) as $fn ) {
+	foreach ( array( 'vp_sepa_maybe_upgrade', 'vp_rechnungen_maybe_upgrade', 'vp_spenden_maybe_upgrade', 'vp_projekte_maybe_upgrade', 'vp_kreis_maybe_upgrade' ) as $fn ) {
 		if ( function_exists( $fn ) ) {
 			call_user_func( $fn );
 		}

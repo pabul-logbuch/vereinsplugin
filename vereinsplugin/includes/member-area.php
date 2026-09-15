@@ -606,9 +606,12 @@ function vp_render_auslagen_pruefen_section() {
 	$approved = jb_get_auslagen( array( 'status' => 'genehmigt' ) );
 	$budgets  = function_exists( 'jb_budgets_get_all' ) ? jb_budgets_get_all() : array();
 	$budget_name = array();
+	$kreis_namen = function_exists( 'vp_kreis_namen' ) ? vp_kreis_namen() : array();
 	foreach ( $budgets as $b ) {
 		$b = (object) $b;
-		$budget_name[ (int) $b->id ] = $b->zweck;
+		// Kreisbudgets kennzeichnen – die Kassenrolle des Kreises kann sie auch selbst entscheiden.
+		$kreis = ( ! empty( $b->gremium_id ) && isset( $kreis_namen[ (int) $b->gremium_id ] ) ) ? $kreis_namen[ (int) $b->gremium_id ] . ' · ' : '';
+		$budget_name[ (int) $b->id ] = $kreis . $b->zweck;
 	}
 
 	ob_start();

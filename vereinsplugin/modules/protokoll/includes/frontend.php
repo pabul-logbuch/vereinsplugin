@@ -30,7 +30,74 @@ function pp_front_url($args = [], $anchor = '') {
 function pp_front_current_view() {
     $view = sanitize_key($_GET['pp_view'] ?? 'dashboard');
     $erlaubt = ['dashboard', 'protokolle', 'protokoll', 'live', 'themen', 'aufgaben', 'termine', 'kalender', 'kreise', 'kreis', 'sets', 'entscheide', 'ablaeufe', 'dokumente', 'dokument'];
+    // Der Kern hängt hier weitere Ansichten an (z. B. Projekte).
+    $erlaubt = (array) apply_filters('pp_front_views', $erlaubt);
     return in_array($view, $erlaubt, true) ? $view : 'dashboard';
+}
+
+/**
+ * Rendert eine (Nicht-Live-)Ansicht. Gemeinsam genutzt vom eigenen Shortcode
+ * und vom Kern-Mitgliederbereich, damit neue Ansichten nur hier dazukommen.
+ * Unbekannte Ansichten können per Action `pp_render_view_<view>` geliefert werden.
+ */
+function pp_render_view_switch($view) {
+    switch ($view) {
+        case 'protokolle': pp_render_view_protokolle(); break;
+        case 'protokoll':  pp_render_view_protokoll_detail(); break;
+        case 'entscheide': pp_render_view_entscheide(); break;
+        case 'ablaeufe':   pp_render_view_ablaeufe(); break;
+        case 'dokumente':  pp_render_view_dokumente(); break;
+        case 'dokument':   pp_render_view_dokument_detail(); break;
+        case 'kreise':     pp_render_view_kreise(); break;
+        case 'kreis':      pp_render_view_kreis_detail(); break;
+        case 'sets':       pp_render_view_sets(); break;
+        case 'themen':     pp_render_view_themen(); break;
+        case 'aufgaben':   pp_render_view_aufgaben(); break;
+        case 'termine':    pp_render_view_termine(); break;
+        case 'kalender':   pp_render_view_kalender(); break;
+        default:
+            if ($view !== 'dashboard' && has_action('pp_render_view_' . $view)) {
+                do_action('pp_render_view_' . $view);
+            } else {
+                pp_render_view_dashboard();
+            }
+    }
+}
+
+/** Navigationspunkte (key => [Label, Badge]); der Kern ergänzt per Filter. */
+function pp_front_nav_punkte() {
+    global $wpdb;
+    $offene_aufgaben = intval($wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$wpdb->prefix}pp_aufgaben WHERE status='offen' AND verantwortlich_user_id = %d",
+        get_current_user_id()
+    )));
+    $entwuerfe = intval($wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}pp_protokolle WHERE status='entwurf'"));
+
+    $punkte = [
+        'dashboard'  => ['Übersicht', ''],
+        'protokolle' => ['Protokolle', $entwuerfe ? $entwuerfe . ' Entwürfe' : ''],
+        'entscheide' => ['Entscheide', pp_entscheide_evaluation_faellig() ?: ''],
+        'kreise'     => ['Kreise & Rollen', ''],
+        'sets'       => ['Aufgaben-Sets', ''],
+        'ablaeufe'   => ['Ablauf-Vorlagen', ''],
+        'dokumente'  => ['Dokumente', ''],
+        'themen'     => ['Themenspeicher', ''],
+        'aufgaben'   => ['Aufgaben', $offene_aufgaben ? (string) $offene_aufgaben : ''],
+        'termine'    => ['Termine', ''],
+        'kalender'   => ['Kalender-Sync', ''],
+    ];
+    return (array) apply_filters('pp_front_nav_punkte', $punkte);
+}
+
+/** Welcher Navigationspunkt gehört zu einer Detailansicht? */
+function pp_front_nav_aktiv($view) {
+    $eltern = apply_filters('pp_front_nav_eltern', [
+        'protokoll' => 'protokolle',
+        'kreis'     => 'kreise',
+        'dokument'  => 'dokumente',
+        'projekt'   => 'projekte',
+    ]);
+    return $eltern[$view] ?? $view;
 }
 
 function pp_front_redirect($return_url, $args = [], $anchor = '') {
@@ -1596,6 +1663,11 @@ function pp_handle_front_save_rolle() {
         'benoetigte_faehigkeiten' => sanitize_textarea_field($_POST['benoetigte_faehigkeiten'] ?? ''),
     ];
 
+    // Kassenrolle (Spalte ergänzt der Kern, siehe includes/kreise-verbund.php).
+    if (function_exists('vp_kreis_col_exists') && vp_kreis_col_exists($wpdb->prefix . 'pp_rollenvorlagen', 'kasse')) {
+        $daten['kasse'] = empty($_POST['kasse']) ? 0 : 1;
+    }
+
     if ($id > 0) {
         $wpdb->update($wpdb->prefix . 'pp_rollenvorlagen', $daten, ['id' => $id]);
     } else {
@@ -1685,22 +1757,7 @@ function pp_shortcode_mitgliederbereich($atts) {
         echo '<main class="pp-app-main">';
         if (function_exists('pp_render_app_leiste')) pp_render_app_leiste();
         pp_render_notices();
-        switch ($view) {
-            case 'protokolle': pp_render_view_protokolle(); break;
-            case 'protokoll':  pp_render_view_protokoll_detail(); break;
-            case 'entscheide': pp_render_view_entscheide(); break;
-            case 'ablaeufe':   pp_render_view_ablaeufe(); break;
-            case 'dokumente':  pp_render_view_dokumente(); break;
-            case 'dokument':   pp_render_view_dokument_detail(); break;
-            case 'kreise':     pp_render_view_kreise(); break;
-            case 'kreis':      pp_render_view_kreis_detail(); break;
-            case 'sets':       pp_render_view_sets(); break;
-            case 'themen':     pp_render_view_themen(); break;
-            case 'aufgaben':   pp_render_view_aufgaben(); break;
-            case 'termine':    pp_render_view_termine(); break;
-            case 'kalender':   pp_render_view_kalender(); break;
-            default:           pp_render_view_dashboard(); break;
-        }
+        pp_render_view_switch($view);
         echo '</main>';
     }
 
@@ -1748,27 +1805,9 @@ function pp_render_budget_bar($protokoll, $tops) {
 // ─── SEITENLEISTE (NAVIGATION) ─────────────────────────────────────────────
 
 function pp_render_nav_sidebar($view) {
-    global $wpdb;
-    $offene_aufgaben = intval($wpdb->get_var($wpdb->prepare(
-        "SELECT COUNT(*) FROM {$wpdb->prefix}pp_aufgaben WHERE status='offen' AND verantwortlich_user_id = %d",
-        get_current_user_id()
-    )));
-    $entwuerfe = intval($wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}pp_protokolle WHERE status='entwurf'"));
-    $gremien   = pp_get_gremien();
-
-    $punkte = [
-        'dashboard'  => ['Übersicht', ''],
-        'protokolle' => ['Protokolle', $entwuerfe ? $entwuerfe . ' Entwürfe' : ''],
-        'entscheide' => ['Entscheide', pp_entscheide_evaluation_faellig() ?: ''],
-        'kreise'     => ['Kreise & Rollen', ''],
-        'sets'       => ['Aufgaben-Sets', ''],
-        'ablaeufe'   => ['Ablauf-Vorlagen', ''],
-        'dokumente'  => ['Dokumente', ''],
-        'themen'     => ['Themenspeicher', ''],
-        'aufgaben'   => ['Aufgaben', $offene_aufgaben ? (string) $offene_aufgaben : ''],
-        'termine'    => ['Termine', ''],
-        'kalender'   => ['Kalender-Sync', ''],
-    ];
+    $gremien = pp_get_gremien();
+    $punkte  = pp_front_nav_punkte();
+    $aktiv   = pp_front_nav_aktiv($view);
     ?>
     <aside class="pp-sidebar">
         <div class="pp-sidebar-head">
@@ -1778,9 +1817,7 @@ function pp_render_nav_sidebar($view) {
         <nav class="pp-sidebar-nav">
             <?php foreach ($punkte as $key => $info) : ?>
                 <a href="<?php echo esc_url(pp_front_url(['pp_view' => $key])); ?>"
-                   class="pp-sidebar-link <?php echo ($view === $key
-                        || ($view === 'protokoll' && $key === 'protokolle')
-                        || ($view === 'kreis' && $key === 'kreise')) ? 'is-active' : ''; ?>">
+                   class="pp-sidebar-link <?php echo $aktiv === $key ? 'is-active' : ''; ?>">
                     <span><?php echo esc_html($info[0]); ?></span>
                     <?php if ($info[1]) : ?><span class="pp-sidebar-badge"><?php echo esc_html($info[1]); ?></span><?php endif; ?>
                 </a>
@@ -1883,6 +1920,8 @@ function pp_render_view_dashboard() {
                 </ul>
             <?php else : ?><p class="pp-empty">Keine Termine.</p><?php endif; ?>
         </div>
+
+        <?php do_action('pp_dashboard_cards'); ?>
     </div>
     <?php
 }
@@ -3570,6 +3609,17 @@ function pp_render_view_kreis_detail() {
         Entscheidungen: <?php echo esc_html(pp_verfahren_label($kreis->standardverfahren)); ?> ·
         Protokolle: <?php echo esc_html(pp_oeffentlichkeit_label($kreis->oeffentlichkeit)); ?>
     </p>
+    <?php
+    // Reiter aus dem Kern (Übersicht, Projekte, Wunschliste, Kasse …). Ohne
+    // Kern bleibt es bei der bisherigen Seite = Reiter „Mitglieder & Rollen".
+    if (function_exists('vp_kreis_tab_nav')) {
+        $k_tab = vp_kreis_tab_nav($kreis);
+        if ($k_tab !== 'struktur') {
+            vp_kreis_render_tab($kreis, $k_tab);
+            return;
+        }
+    }
+    ?>
     <?php if ($kreis->beschreibung) : ?>
         <p><strong>Zweck:</strong> <?php echo esc_html($kreis->beschreibung); ?></p>
     <?php endif; ?>
@@ -3654,7 +3704,7 @@ function pp_render_view_kreis_detail() {
     ?>
         <div class="pp-rolle-card" id="rolle-<?php echo esc_attr($v->id); ?>">
             <div class="pp-rolle-head">
-                <strong><?php echo esc_html($v->bezeichnung); ?></strong>
+                <strong><?php echo esc_html($v->bezeichnung); ?></strong><?php if (!empty($v->kasse)) echo ' <span class="pp-badge pp-badge-ok">Kreiskasse</span>'; ?>
                 <span>
                     <a class="pp-meta" href="<?php echo esc_url(pp_front_url(['pp_view' => 'kreis', 'id' => $kreis->id, 'rolle' => $v->id], 'rolle-' . $v->id)); ?>">bearbeiten</a>
                     <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-inline">
@@ -3830,6 +3880,10 @@ function pp_render_rolle_formular($kreis, $rolle) {
         </label>
         <label>Nötige Skills <span class="pp-meta">eine Fähigkeit pro Zeile</span>
             <textarea name="benoetigte_faehigkeiten" rows="4" placeholder="Sorgfalt mit Zahlen&#10;Grundkenntnisse Buchhaltung"><?php echo esc_textarea($rolle->benoetigte_faehigkeiten ?? ''); ?></textarea>
+        </label>
+        <label class="pp-checkbox-label">
+            <span><input type="checkbox" name="kasse" value="1" <?php checked(!empty($rolle->kasse)); ?>> Diese Rolle führt die Kreiskasse</span>
+            <span class="pp-meta">Wer die Rolle innehat, plant die Budgets des Kreises, bucht Einnahmen und Ausgaben und entscheidet über Auslagen auf Kreisbudgets.</span>
         </label>
         <div class="pp-form-actions">
             <button type="submit" class="pp-btn pp-btn-primary"><?php echo $rolle ? 'Rolle speichern' : 'Rolle anlegen'; ?></button>

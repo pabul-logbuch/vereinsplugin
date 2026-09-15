@@ -97,6 +97,10 @@ function vp_sync_tables() {
 		'pp_kommentare'          => array( 'pp_kommentare',           'id', 'erstellt_am',   'pp_manage', null ),
 		'pp_aufgaben_sets'       => array( 'pp_aufgaben_sets',        'id', 'erstellt_am',   'pp_manage', null ),
 		'pp_aufgaben_set_eintraege' => array( 'pp_aufgaben_set_eintraege', 'id', 'erstellt_am', 'pp_manage', null ),
+		// Projekte (Kreise-Verbund)
+		'vp_projekte'            => array( 'vp_projekte',             'id', 'geaendert_am',  'pp_manage', null ),
+		'vp_projekt_punkte'      => array( 'vp_projekt_punkte',       'id', null,            'pp_manage', null ),
+		'vp_projekt_helfende'    => array( 'vp_projekt_helfende',     'id', null,            'pp_manage', null ),
 		// Buchhaltung
 		'jb_auslagen'            => array( 'jb_auslagen',             'id', 'eingereicht_am','jb_view_journal', 'user_id' ),
 		'jb_buchungen'           => array( 'jb_buchungen',            'id', 'erstellt_am',   'jb_view_journal', null ),

@@ -62,11 +62,16 @@
             <label for="jb-budget">Budget / Kostenstelle</label>
             <select id="jb-budget" name="budget_id">
                 <option value="0">– keinem Budget zuordnen –</option>
-                <?php foreach ($jb_budgets as $b):
+                <?php
+                // Vorauswahl aus Kreiskasse/Projekt (…&jb_budget=<id>), Kreisname vor dem Zweck.
+                $jb_budget_vorauswahl = isset($_GET['jb_budget']) ? (int) $_GET['jb_budget'] : 0;
+                $jb_kreis_namen = function_exists('vp_kreis_namen') ? vp_kreis_namen() : [];
+                foreach ($jb_budgets as $b):
                     $b = (object) $b;
-                    $rest = (float) $b->betrag - (float) $b->ausgegeben; ?>
-                    <option value="<?= (int) $b->id ?>">
-                        <?= esc_html($b->zweck) ?><?= $b->jahr ? ' (' . (int) $b->jahr . ')' : '' ?> — Rest <?= number_format($rest, 2, ',', '.') ?> €
+                    $rest = isset($b->rest) ? (float) $b->rest : (float) $b->betrag - (float) $b->ausgegeben;
+                    $kreis = !empty($b->gremium_id) && isset($jb_kreis_namen[(int) $b->gremium_id]) ? $jb_kreis_namen[(int) $b->gremium_id] . ' · ' : ''; ?>
+                    <option value="<?= (int) $b->id ?>" <?php selected($jb_budget_vorauswahl, (int) $b->id); ?>>
+                        <?= esc_html($kreis . $b->zweck) ?><?= $b->jahr ? ' (' . (int) $b->jahr . ')' : '' ?> — Rest <?= number_format($rest, 2, ',', '.') ?> €
                     </option>
                 <?php endforeach; ?>
             </select>

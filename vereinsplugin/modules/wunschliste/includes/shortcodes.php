@@ -164,6 +164,7 @@ function wl_shortcode_verwaltung() {
 
     $wuensche   = wl_get_wuensche(['orderby' => 'erstellt_am', 'order' => 'DESC']);
     $kategorien = wl_get_kategorien();
+    $kreise     = function_exists('pp_get_gremien') ? wp_list_pluck(pp_get_gremien(), 'name', 'id') : [];
 
     ob_start();
     ?>
@@ -224,6 +225,17 @@ function wl_shortcode_verwaltung() {
                             <?php endforeach; ?>
                         </datalist>
                     </div>
+                    <?php if ($kreise) : ?>
+                    <div class="wl-form-row">
+                        <label>Kreis</label>
+                        <select name="gremium_id" id="wl-edit-kreis">
+                            <option value="">– ganzer Verein –</option>
+                            <?php foreach ($kreise as $kid => $kname) : ?>
+                                <option value="<?php echo (int) $kid; ?>"><?php echo esc_html($kname); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <?php endif; ?>
                     <div class="wl-form-row">
                         <label>Status</label>
                         <select name="status" id="wl-edit-status">
@@ -298,6 +310,7 @@ function wl_shortcode_verwaltung() {
                                 data-preis-von="<?php echo esc_attr($w->preis_von); ?>"
                                 data-preis-bis="<?php echo esc_attr($w->preis_bis); ?>"
                                 data-kat="<?php echo esc_attr($w->kategorie); ?>"
+                                data-kreis="<?php echo (int) ($w->gremium_id ?? 0) ?: ''; ?>"
                                 data-status="<?php echo esc_attr($w->status); ?>"
                                 data-prio="<?php echo esc_attr($w->prioritaet); ?>"
                                 data-bild="<?php echo esc_attr($w->bild_url); ?>"
