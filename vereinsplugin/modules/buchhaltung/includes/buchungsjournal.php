@@ -3,6 +3,11 @@ defined('ABSPATH') || exit;
 
 function jb_journal_add(array $data): int {
     global $wpdb;
+    // Geldkonto festlegen (aus quelle/gegenkonto, falls nicht mitgegeben),
+    // Sphäre und Kategorie aus dem SKR-Konto.
+    if (function_exists('vp_bh_buchung_ergaenzen')) {
+        $data = vp_bh_buchung_ergaenzen($data);
+    }
     $row = [
         'buchung_datum'  => sanitize_text_field($data['buchung_datum'] ?? current_time('Y-m-d')),
         'betrag'         => (float) $data['betrag'],
@@ -30,6 +35,13 @@ function jb_journal_add(array $data): int {
         }
         if ($has_gk) {
             $row['gegenkonto'] = sanitize_text_field($data['gegenkonto'] ?? '');
+        }
+        static $has_geld = null;
+        if ($has_geld === null) {
+            $has_geld = in_array('geldkonto', (array) $wpdb->get_col('SHOW COLUMNS FROM ' . jb_table_journal()), true);
+        }
+        if ($has_geld) {
+            $row['geldkonto'] = sanitize_text_field($data['geldkonto'] ?? '');
         }
         $beleg_nr = sanitize_text_field($data['beleg_nr'] ?? '');
         if ($beleg_nr === '' && function_exists('jb_next_beleg_nr')) {
@@ -109,6 +121,29 @@ function jb_journal_get(array $args = []): array {
 
 function jb_journal_summary(int $year): array {
     global $wpdb;
+    // Aus den Buchungssätzen: Umbuchungen zwischen Geldkonten sind weder
+    // Einnahme noch Ausgabe (früher zählte allein das Vorzeichen).
+    if (function_exists('vp_bh_euer')) {
+        $e = vp_bh_euer($year);
+        $kat = [];
+        foreach ($e['pro_konto'] as $k) {
+            $kat[] = [
+                'kategorie' => $k['konto'] . ($k['name'] ? ' ' . $k['name'] : ''),
+                'einnahmen' => $k['einnahmen'],
+                'ausgaben'  => $k['ausgaben'],
+                'anzahl'    => $k['anzahl'],
+            ];
+        }
+        if ($e['ohne_konto']['anzahl']) {
+            $kat[] = ['kategorie' => __('ohne SKR-Konto', 'vereinsplugin'), 'einnahmen' => $e['ohne_konto']['einnahmen'], 'ausgaben' => $e['ohne_konto']['ausgaben'], 'anzahl' => $e['ohne_konto']['anzahl']];
+        }
+        return [
+            'kategorien'      => $kat,
+            'total_einnahmen' => $e['einnahmen'],
+            'total_ausgaben'  => -$e['ausgaben'],
+            'ueberschuss'     => $e['ueberschuss'],
+        ];
+    }
     $t = jb_table_journal();
     $rows = $wpdb->get_results($wpdb->prepare(
         "SELECT kategorie,

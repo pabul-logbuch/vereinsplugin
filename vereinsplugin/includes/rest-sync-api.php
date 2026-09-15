@@ -21,6 +21,10 @@
  *   POST /actions/journal-add      { buchung_datum, betrag, konto, … }
  *   POST /actions/bank-csv         { csv, delim } → Vorschau; { import:true, rows } → buchen
  *   GET  /report/summary?year=     Kassenbericht / EÜR-Zahlen
+ *   GET  /report/salden?jahr=      Salden, EÜR, Geldkonten, Buchführungsart eines Jahres
+ *   POST /actions/geschaeftsjahr   { jahr, methode:euer|doppik }
+ *   POST /actions/jahresabschluss  { jahr }
+ *   POST /actions/konten-zusammenlegen { von, nach }
  *   GET  /nextcloud/users|groups   Wrappt vp_nc_get_users() / vp_nc_get_groups()
  *   POST /nextcloud/sync           Wrappt vp_nc_sync( dry )
  *   GET/POST /nextcloud/beleg      Beleg-Download-Link / -Upload
@@ -103,10 +107,12 @@ function vp_sync_tables() {
 		'vp_projekt_helfende'    => array( 'vp_projekt_helfende',     'id', null,            'pp_manage', null ),
 		// Buchhaltung
 		'jb_auslagen'            => array( 'jb_auslagen',             'id', 'eingereicht_am','jb_view_journal', 'user_id' ),
-		'jb_buchungen'           => array( 'jb_buchungen',            'id', 'erstellt_am',   'jb_view_journal', null ),
+		// geaendert_am statt erstellt_am: sonst kämen nachträglich geänderte Buchungen nie in der App an.
+		'jb_buchungen'           => array( 'jb_buchungen',            'id', 'geaendert_am',  'jb_view_journal', null ),
 		'jb_budgets'             => array( 'jb_budgets',              'id', 'erstellt_am',   'jb_view_journal', null ),
 		'jb_ruecklagen'          => array( 'jb_ruecklagen',           'id', null,            'jb_view_journal', null ),
-		'jb_anfangsbestaende'    => array( 'jb_anfangsbestaende',     'id', 'erstellt_am',   'jb_view_journal', null ),
+		'jb_anfangsbestaende'    => array( 'jb_anfangsbestaende',     'id', 'geaendert_am',  'jb_view_journal', null ),
+		'jb_geschaeftsjahre'     => array( 'jb_geschaeftsjahre',      'id', 'geaendert_am',  'jb_view_journal', null ),
 		'jb_getraenke'           => array( 'jb_getraenke',            'id', null,            'jb_view_journal', null ),
 		'jb_getraenke_bewegungen'=> array( 'jb_getraenke_bewegungen', 'id', 'erstellt_am',  'jb_view_journal', null ),
 		'jb_konten'              => array( 'jb_konten',               'id', null,            'jb_submit_auslagen', null ), // Konten dürfen auch Einreicher sehen (Kategorie-Auswahl)
@@ -294,14 +300,23 @@ add_action( 'rest_api_init', function () {
 		'methods'             => 'GET',
 		'permission_callback' => $cap( 'jb_view_journal' ),
 		'callback'            => function ( WP_REST_Request $r ) {
-			$jahr = (int) $r->get_param( 'jahr' ) ?: null;
+			if ( ! function_exists( 'vp_bh_jahresdaten' ) ) {
+				return new WP_Error( 'no_fn', 'Buchungslogik nicht geladen.', array( 'status' => 400 ) );
+			}
+			$jahr = (int) $r->get_param( 'jahr' ) ?: (int) current_time( 'Y' );
 			return rest_ensure_response( array(
-				'salden'    => function_exists( 'vp_doppik_salden' ) ? vp_doppik_salden( $jahr ) : array(),
-				'map'       => function_exists( 'vp_doppik_map' ) ? vp_doppik_map() : array(),
-				'jahr'      => $jahr,
-				'basisjahr' => function_exists( 'vp_doppik_basisjahr' ) ? vp_doppik_basisjahr( $jahr ) : 0,
-				'jahre'     => function_exists( 'vp_doppik_bestand_jahre' ) ? vp_doppik_bestand_jahre() : array(),
-				'anfang'    => function_exists( 'vp_doppik_anfangsbestaende' ) ? vp_doppik_anfangsbestaende( $jahr ) : array(),
+				'jahr'       => $jahr,
+				'methode'    => vp_bh_methode( $jahr ),
+				'gesetzt'    => vp_bh_methode_gesetzt( $jahr ),
+				'salden'     => vp_doppik_salden( $jahr ),
+				'euer'       => vp_bh_euer( $jahr ),
+				'geldkonten' => vp_bh_geldkonten_stand( $jahr ),
+				'nicht_euer' => array_map( 'intval', wp_list_pluck( vp_bh_nicht_euer_konform( $jahr ), 'id' ) ),
+				'abschluss'  => vp_bh_abschluss_abweichungen( $jahr ),
+				'map'        => vp_doppik_map(),
+				'basisjahr'  => vp_doppik_basisjahr( $jahr ),
+				'jahre'      => vp_doppik_bestand_jahre(),
+				'anfang'     => vp_doppik_anfangsbestaende( $jahr ),
 			) );
 		},
 	) );
@@ -369,6 +384,10 @@ add_action( 'rest_api_init', function () {
 	$route( '/actions/zbon-import',        'jb_view_journal', 'vp_sync_action_zbon_import' );
 	$route( '/actions/split-buchung',      'jb_view_journal', 'vp_sync_action_split_buchung' );
 	$route( '/actions/zu-umbuchung',       'jb_view_journal', 'vp_sync_action_zu_umbuchung' );
+	// Geschäftsjahr: Buchführungsart, Jahresabschluss, Konten zusammenlegen (v0.33)
+	$route( '/actions/geschaeftsjahr',       'jb_edit_journal', 'vp_sync_action_geschaeftsjahr' );
+	$route( '/actions/jahresabschluss',      'jb_edit_journal', 'vp_sync_action_jahresabschluss' );
+	$route( '/actions/konten-zusammenlegen', 'jb_edit_journal', 'vp_sync_action_konten_zusammenlegen' );
 	// Rechnungen / SEPA / Spenden (v0.22)
 	$route( '/actions/rechnung-save',      'jb_view_journal', 'vp_sync_action_rechnung_save' );
 	$route( '/actions/rechnung-status',    'jb_view_journal', 'vp_sync_action_rechnung_status' );
@@ -731,6 +750,9 @@ function vp_sync_apply_one( $slug, $op, $pk, $baserev, array $fields ) {
 			return array( 'kind' => 'error', 'message' => 'DB-Insert fehlgeschlagen: ' . $wpdb->last_error );
 		}
 		$new = (int) $wpdb->insert_id;
+		if ( 'jb_buchungen' === $slug && function_exists( 'vp_bh_normalisiere_buchung' ) ) {
+			vp_bh_normalisiere_buchung( $new ); // alte App-Versionen senden kein geldkonto
+		}
 		$row = $load( $new );
 		return array( 'kind' => 'ok', 'new_pk' => $new, 'new_rev' => $row ? vp_sync_rev( $row ) : '' );
 	}
@@ -763,6 +785,9 @@ function vp_sync_apply_one( $slug, $op, $pk, $baserev, array $fields ) {
 	$ok = $wpdb->update( $table, $clean, array( $pkcol => $pk ) );
 	if ( false === $ok ) {
 		return array( 'kind' => 'error', 'message' => 'DB-Update fehlgeschlagen: ' . $wpdb->last_error );
+	}
+	if ( 'jb_buchungen' === $slug && function_exists( 'vp_bh_normalisiere_buchung' ) ) {
+		vp_bh_normalisiere_buchung( $pk );
 	}
 	$row = $load( $pk );
 	return array( 'kind' => 'ok', 'new_rev' => $row ? vp_sync_rev( $row ) : '' );
@@ -852,10 +877,12 @@ function vp_sync_quelle_map_get() {
 		}
 	}
 	return rest_ensure_response( array(
-		'map'      => vp_doppik_map(),
-		'standard' => vp_doppik_default_map(),
-		'anzahl'   => $anzahl,
-		'editable' => current_user_can( 'jb_edit_journal' ) || current_user_can( 'manage_options' ),
+		'map'       => vp_doppik_map(),
+		'standard'  => vp_doppik_default_map(),
+		'vorgaben'  => function_exists( 'vp_bh_vorgabe_quellen' ) ? vp_bh_vorgabe_quellen() : array(),
+		'anzahl'    => $anzahl,
+		'editable'  => current_user_can( 'jb_edit_journal' ) || current_user_can( 'manage_options' ),
+		'umstellung'=> get_option( 'jb_umstellung_v10_bericht', null ),
 	) );
 }
 
@@ -1015,6 +1042,30 @@ function vp_sync_action_journal_add( WP_REST_Request $req ) {
 		return new WP_Error( 'no_fn', 'Buchhaltungs-Modul nicht geladen.', array( 'status' => 400 ) );
 	}
 	$b = (array) $req->get_json_params();
+	$extra = array();
+	foreach ( array( 'gegenpartei', 'sphaere', 'budget_id', 'kostenstelle', 'ruecklage_id', 'beleg_pfad', 'auslage_id' ) as $k ) {
+		if ( isset( $b[ $k ] ) && '' !== (string) $b[ $k ] ) {
+			$extra[ $k ] = $b[ $k ];
+		}
+	}
+
+	// EÜR-Formular: Einnahme / Ausgabe / Umbuchung mit Geldkonto.
+	if ( ! empty( $b['art'] ) && function_exists( 'vp_bh_zeile_aus_euer' ) ) {
+		$art    = in_array( $b['art'], array( 'einnahme', 'ausgabe', 'umbuchung' ), true ) ? $b['art'] : '';
+		$betrag = abs( (float) str_replace( ',', '.', (string) ( $b['betrag'] ?? 0 ) ) );
+		$geld   = sanitize_text_field( (string) ( 'umbuchung' === $art ? ( $b['von'] ?? '' ) : ( $b['geldkonto'] ?? '' ) ) );
+		$konto  = sanitize_text_field( (string) ( 'umbuchung' === $art ? ( $b['nach'] ?? '' ) : ( $b['konto'] ?? '' ) ) );
+		if ( ! $art || $betrag <= 0 || ! $geld || ( 'umbuchung' === $art && ( ! $konto || $konto === $geld ) ) ) {
+			return new WP_Error( 'bad_req', 'Art, Betrag > 0 und Geldkonto nötig (Umbuchung: zwei verschiedene Konten).', array( 'status' => 400 ) );
+		}
+		$data = array_merge( $b, $extra, vp_bh_zeile_aus_euer( $art, $geld, $konto, $betrag ) );
+		if ( 'umbuchung' === $art ) {
+			$data['sphaere']   = 'neutral';
+			$data['kategorie'] = 'Umbuchung';
+		}
+		unset( $data['art'], $data['von'], $data['nach'] );
+		return rest_ensure_response( array( 'ok' => true, 'id' => (int) jb_journal_add( $data ) ) );
+	}
 
 	if ( ! empty( $b['soll_konto'] ) && ! empty( $b['haben_konto'] ) ) {
 		if ( ! function_exists( 'jb_buchungssatz_add' ) ) {
@@ -1022,7 +1073,7 @@ function vp_sync_action_journal_add( WP_REST_Request $req ) {
 		}
 		$r = jb_buchungssatz_add(
 			$b['soll_konto'], $b['haben_konto'], $b['betrag'] ?? 0,
-			$b['datum'] ?? ( $b['buchung_datum'] ?? '' ), $b['text'] ?? ( $b['beschreibung'] ?? '' ), $b['beleg_nr'] ?? ''
+			$b['datum'] ?? ( $b['buchung_datum'] ?? '' ), $b['text'] ?? ( $b['beschreibung'] ?? '' ), $b['beleg_nr'] ?? '', $extra
 		);
 		if ( is_wp_error( $r ) ) {
 			return $r;
@@ -1070,6 +1121,7 @@ function vp_sync_action_bank_csv( WP_REST_Request $req ) {
 			'kategorie'     => sanitize_text_field( (string) ( $r['kategorie'] ?? ( $r['zweck'] ?? 'Bank' ) ) ),
 			'beschreibung'  => sanitize_textarea_field( trim( (string) ( $r['name'] ?? '' ) . ' — ' . (string) ( $r['zweck'] ?? '' ), ' —' ) ),
 			'quelle'        => 'Bank KSK',
+			'geldkonto'     => sanitize_text_field( (string) ( $r['geldkonto'] ?? '' ) ),
 			'konto'         => $konto,
 			'sphaere'       => $sphaere,
 			'gegenpartei'   => sanitize_text_field( (string) ( $r['name'] ?? '' ) ),
@@ -1098,58 +1150,27 @@ function vp_sync_report_summary( WP_REST_Request $req ) {
 	// Verfügbare Jahre.
 	$years = array_map( 'intval', (array) $wpdb->get_col( "SELECT DISTINCT YEAR(buchung_datum) y FROM `$t` ORDER BY y DESC" ) );
 
-	// Gesamt Einnahmen / Ausgaben / Überschuss im Jahr.
-	$ein = (float) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(betrag),0) FROM `$t` WHERE betrag > 0 AND YEAR(buchung_datum) = %d", $year ) );
-	$aus = (float) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(betrag),0) FROM `$t` WHERE betrag < 0 AND YEAR(buchung_datum) = %d", $year ) );
-
-	// Nach Sphäre (nur wenn SKR-Spalten da).
-	$by_sphaere = array();
-	if ( $has_skr ) {
-		$rows = $wpdb->get_results( $wpdb->prepare(
-			"SELECT COALESCE(NULLIF(sphaere,''),'—') s,
-			        COALESCE(SUM(CASE WHEN betrag>0 THEN betrag ELSE 0 END),0) ein,
-			        COALESCE(SUM(CASE WHEN betrag<0 THEN -betrag ELSE 0 END),0) aus
-			 FROM `$t` WHERE YEAR(buchung_datum) = %d GROUP BY s ORDER BY s", $year
-		), ARRAY_A );
-		$labels = function_exists( 'vp_skr_sphaeren' ) ? vp_skr_sphaeren() : array();
-		foreach ( (array) $rows as $r ) {
-			$by_sphaere[] = array(
-				'sphaere' => $r['s'],
-				'label'   => $labels[ $r['s'] ] ?? $r['s'],
-				'einnahmen' => (float) $r['ein'],
-				'ausgaben'  => (float) $r['aus'],
-				'saldo'     => (float) $r['ein'] - (float) $r['aus'],
-			);
-		}
-	}
-
-	// Nach Konto.
-	$by_konto = array();
-	$konto_expr = $has_skr ? "COALESCE(NULLIF(konto,''),'—')" : "'—'";
-	$rows = $wpdb->get_results( $wpdb->prepare(
-		"SELECT $konto_expr k, kategorie,
-		        COALESCE(SUM(CASE WHEN betrag>0 THEN betrag ELSE 0 END),0) ein,
-		        COALESCE(SUM(CASE WHEN betrag<0 THEN -betrag ELSE 0 END),0) aus,
-		        COUNT(*) n
-		 FROM `$t` WHERE YEAR(buchung_datum) = %d
-		 GROUP BY k, kategorie ORDER BY (ein+aus) DESC", $year
-	), ARRAY_A );
-	$knames = array();
-	if ( $has_skr && function_exists( 'jb_konten_all' ) ) {
-		foreach ( (array) jb_konten_all( false ) as $kk ) {
-			$knames[ (string) $kk->nummer ] = $kk->bezeichnung;
-		}
-	}
-	foreach ( (array) $rows as $r ) {
+	// Einnahmen / Ausgaben aus den Buchungssätzen – Umbuchungen zwischen
+	// Geldkonten zählen nicht mit (früher entschied allein das Vorzeichen).
+	$euer       = function_exists( 'vp_bh_euer' ) ? vp_bh_euer( $year ) : array( 'einnahmen' => 0, 'ausgaben' => 0, 'pro_sphaere' => array(), 'pro_konto' => array(), 'ohne_konto' => array( 'anzahl' => 0 ) );
+	$ein        = (float) $euer['einnahmen'];
+	$aus        = -(float) $euer['ausgaben'];
+	$by_sphaere = $euer['pro_sphaere'];
+	$by_konto   = array();
+	foreach ( $euer['pro_konto'] as $k ) {
 		$by_konto[] = array(
-			'konto'     => $r['k'],
-			'name'      => $knames[ $r['k'] ] ?? '',
-			'kategorie' => $r['kategorie'],
-			'einnahmen' => (float) $r['ein'],
-			'ausgaben'  => (float) $r['aus'],
-			'anzahl'    => (int) $r['n'],
+			'konto'     => $k['konto'],
+			'name'      => $k['name'],
+			'kategorie' => $k['name'],
+			'einnahmen' => $k['einnahmen'],
+			'ausgaben'  => $k['ausgaben'],
+			'anzahl'    => $k['anzahl'],
 		);
 	}
+	if ( ! empty( $euer['ohne_konto']['anzahl'] ) ) {
+		$by_konto[] = array( 'konto' => '—', 'name' => 'ohne SKR-Konto', 'kategorie' => '', 'einnahmen' => $euer['ohne_konto']['einnahmen'], 'ausgaben' => $euer['ohne_konto']['ausgaben'], 'anzahl' => $euer['ohne_konto']['anzahl'] );
+	}
+	$konto_expr = $has_skr ? "COALESCE(NULLIF(konto,''),'—')" : "'—'";
 
 	// Umsatz je Konto über ALLE Jahre (für den Kontenplan).
 	$by_konto_all = array();
@@ -1182,12 +1203,18 @@ function vp_sync_report_summary( WP_REST_Request $req ) {
 	};
 	$journal_total = (float) $wpdb->get_var( "SELECT COALESCE(SUM(betrag),0) FROM `$t`" );
 
-	$topfe = array(
-		array( 'key' => 'bank',   'label' => 'Bankkonto (KSK)', 'saldo' => $saldo( 'bank' ) ),
-		array( 'key' => 'kasse',  'label' => 'Barkasse',         'saldo' => $saldo( 'kasse' ) ),
-		array( 'key' => 'paypal', 'label' => 'PayPal',           'saldo' => $saldo( 'paypal' ) ),
-		array( 'key' => 'zettle', 'label' => 'Zettle (Karte)',   'saldo' => $saldo( 'zettle' ) ),
-	);
+	if ( function_exists( 'vp_bh_geldkonten_stand' ) ) {
+		$topfe = array();
+		foreach ( vp_bh_geldkonten_stand( $year ) as $g ) {
+			$topfe[] = array( 'key' => $g['konto'], 'label' => trim( $g['name'] . ' · ' . $g['konto'], ' ·' ), 'saldo' => $g['ende'] );
+		}
+	} else {
+		$topfe = array(
+			array( 'key' => 'bank',   'label' => 'Bankkonto (KSK)', 'saldo' => $saldo( 'bank' ) ),
+			array( 'key' => 'kasse',  'label' => 'Barkasse',         'saldo' => $saldo( 'kasse' ) ),
+			array( 'key' => 'paypal', 'label' => 'PayPal / Zettle',  'saldo' => $saldo( 'paypal' ) ),
+		);
+	}
 
 	// Kassenbericht-Kennzahlen aus dem Buchhaltungs-Dashboard (falls geladen).
 	$dashboard = null;
@@ -1196,6 +1223,8 @@ function vp_sync_report_summary( WP_REST_Request $req ) {
 		$dashboard = array(
 			'bank'            => round( (float) ( $d['bank'] ?? 0 ), 2 ),
 			'kasse'           => round( (float) ( $d['kasse'] ?? 0 ), 2 ),
+			'paypal'          => round( (float) ( $d['paypal'] ?? 0 ), 2 ),
+			'konten'          => $d['konten'] ?? array(),
 			'kontostand'      => round( (float) ( $d['kontostand'] ?? 0 ), 2 ),
 			'getraenke_wert'  => round( (float) ( $d['getraenke_wert'] ?? 0 ), 2 ),
 			'offene_auslagen' => round( (float) ( $d['offene_auslagen'] ?? 0 ), 2 ),
@@ -1209,6 +1238,7 @@ function vp_sync_report_summary( WP_REST_Request $req ) {
 	return rest_ensure_response( array(
 		'year'            => $year,
 		'years'           => $years ?: array( $year ),
+		'methode'         => function_exists( 'vp_bh_methode' ) ? vp_bh_methode( $year ) : 'euer',
 		'has_skr'         => $has_skr,
 		'total_einnahmen' => round( $ein, 2 ),
 		'total_ausgaben'  => round( -$aus, 2 ),
@@ -2041,6 +2071,8 @@ function vp_sync_action_split_buchung( WP_REST_Request $req ) {
 			'kategorie'     => sanitize_text_field( (string) ( $teil['kategorie'] ?? ( $src['kategorie'] ?? 'Sonstige' ) ) ),
 			'beschreibung'  => sanitize_textarea_field( (string) ( $teil['beschreibung'] ?? ( $src['beschreibung'] ?? '' ) ) ),
 			'quelle'        => sanitize_text_field( (string) ( $teil['quelle'] ?? ( $src['quelle'] ?? 'Manuell' ) ) ),
+			'geldkonto'     => sanitize_text_field( (string) ( $teil['geldkonto'] ?? ( $src['geldkonto'] ?? '' ) ) ),
+			'gegenkonto'    => (string) ( $src['gegenkonto'] ?? '' ),
 			'gegenpartei'   => sanitize_text_field( (string) ( $teil['gegenpartei'] ?? ( $src['gegenpartei'] ?? '' ) ) ),
 			'konto'         => $konto,
 			'sphaere'       => ( $konto && function_exists( 'jb_konto_sphaere' ) ) ? jb_konto_sphaere( $konto ) : (string) ( $src['sphaere'] ?? '' ),
@@ -2067,82 +2099,101 @@ function vp_sync_action_split_buchung( WP_REST_Request $req ) {
 
 /**
  * POST /actions/zu-umbuchung
- *   { ids:[id], gegen_konto, gegen_quelle?, gegenbuchung?:bool }  – 1 Buchung:
- *       Buchung wird neutral gestellt (Sphäre neutral, Kategorie/Quelle
- *       „Umbuchung"); optional wird die Gegenbuchung (−Betrag) auf `gegen_konto`
- *       angelegt.
- *   { ids:[id1,id2] }  – 2 Buchungen (Summe ≈ 0): beide werden als Umbuchung
- *       neutral gestellt und als Gegenpartei verknüpft.
+ *   { ids:[id], gegen_konto }  – 1 Buchung: das SKR-Konto wird durch das
+ *       zweite Geldkonto ersetzt (z. B. Bank-Zeile „Bareinzahlung" → von
+ *       Kasse). Der Betrag bleibt, die Buchung zählt nicht mehr in der EÜR.
+ *   { ids:[id1,id2] }  – 2 Buchungen mit Summe 0 (Abgang auf dem einen, Zugang
+ *       auf dem anderen Konto) werden zu EINER Umbuchung zusammengefasst.
  */
 function vp_sync_action_zu_umbuchung( WP_REST_Request $req ) {
 	global $wpdb;
 	$t = $wpdb->prefix . 'jb_buchungen';
-	if ( ! vp_sync_columns( 'jb_buchungen' ) ) {
-		return new WP_Error( 'no_table', 'Buchungsjournal fehlt.', array( 'status' => 400 ) );
+	if ( ! in_array( 'geldkonto', vp_sync_columns( 'jb_buchungen' ), true ) ) {
+		return new WP_Error( 'no_table', 'Buchungsjournal ist noch nicht umgestellt (Plugin-Update).', array( 'status' => 400 ) );
 	}
 	$b   = vp_sync_json( $req );
 	$ids = array_values( array_filter( array_map( 'intval', (array) ( $b['ids'] ?? array() ) ) ) );
-	if ( ! $ids ) {
-		return new WP_Error( 'bad_req', 'Keine Buchung ausgewählt.', array( 'status' => 400 ) );
+	if ( ! $ids || count( $ids ) > 2 ) {
+		return new WP_Error( 'bad_req', 'Eine oder zwei Buchungen auswählen.', array( 'status' => 400 ) );
 	}
 	$rows = array();
 	foreach ( $ids as $id ) {
+		vp_bh_normalisiere_buchung( $id );
 		$r = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM `$t` WHERE id = %d", $id ), ARRAY_A );
 		if ( ! $r ) {
 			return new WP_Error( 'not_found', 'Buchung #' . $id . ' nicht gefunden.', array( 'status' => 404 ) );
 		}
 		$rows[] = $r;
 	}
-	$neutral = array( 'kategorie' => 'Umbuchung', 'quelle' => 'Umbuchung' );
-	if ( in_array( 'sphaere', vp_sync_columns( 'jb_buchungen' ), true ) ) {
-		$neutral['sphaere'] = 'neutral';
-	}
+	$neutral = array( 'kategorie' => 'Umbuchung', 'sphaere' => 'neutral', 'gegenkonto' => '' );
 
-	/* ---- zwei Buchungen: nur umtaggen ---- */
-	if ( count( $rows ) >= 2 ) {
-		$summe = 0.0;
-		foreach ( $rows as $r ) {
-			$summe += (float) $r['betrag'];
-		}
-		if ( abs( round( $summe, 2 ) ) > 0.01 ) {
+	if ( 2 === count( $rows ) ) {
+		$summe = round( (float) $rows[0]['betrag'] + (float) $rows[1]['betrag'], 2 );
+		if ( abs( $summe ) > 0.001 ) {
 			return new WP_Error( 'summe', 'Die ausgewählten Buchungen ergeben in Summe nicht 0 (' . number_format( $summe, 2, ',', '.' ) . ' €).', array( 'status' => 400 ) );
 		}
-		foreach ( $rows as $i => $r ) {
-			$other = $rows[ ( $i + 1 ) % count( $rows ) ];
-			$upd   = $neutral;
-			if ( in_array( 'gegenpartei', vp_sync_columns( 'jb_buchungen' ), true ) ) {
-				$upd['gegenpartei'] = trim( (string) ( $other['konto'] ?? '' ) . ' ' . ( $other['gegenpartei'] ?? '' ) ) ?: 'Umbuchung';
-			}
-			$wpdb->update( $t, $upd, array( 'id' => (int) $r['id'] ) );
+		$ab = (float) $rows[0]['betrag'] < 0 ? $rows[0] : $rows[1]; // Geld verlässt dieses Konto …
+		$zu = (float) $rows[0]['betrag'] < 0 ? $rows[1] : $rows[0]; // … und kommt hier an.
+		if ( (string) $ab['geldkonto'] === (string) $zu['geldkonto'] ) {
+			return new WP_Error( 'gleich', 'Beide Buchungen liegen auf demselben Geldkonto – das ist keine Umbuchung.', array( 'status' => 400 ) );
 		}
-		return rest_ensure_response( array( 'ok' => true, 'updated' => $ids ) );
-	}
-
-	/* ---- eine Buchung: neutral stellen (+ optional Gegenbuchung) ---- */
-	$src   = $rows[0];
-	$gk    = sanitize_text_field( (string) ( $b['gegen_konto'] ?? '' ) );
-	$upd   = $neutral;
-	if ( in_array( 'gegenpartei', vp_sync_columns( 'jb_buchungen' ), true ) && $gk ) {
-		$upd['gegenpartei'] = $gk;
-	}
-	$wpdb->update( $t, $upd, array( 'id' => (int) $src['id'] ) );
-
-	$new = 0;
-	if ( ! empty( $b['gegenbuchung'] ) && function_exists( 'jb_journal_add' ) ) {
-		$gq  = sanitize_text_field( (string) ( $b['gegen_quelle'] ?? 'Umbuchung' ) );
-		$new = (int) jb_journal_add( array(
-			'buchung_datum' => $src['buchung_datum'],
-			'betrag'        => -1 * (float) $src['betrag'],
-			'kategorie'     => 'Umbuchung',
-			'beschreibung'  => (string) ( $src['beschreibung'] ?? 'Umbuchung' ),
-			'quelle'        => $gq ?: 'Umbuchung',
-			'konto'         => $gk,
-			'sphaere'       => ( $gk && function_exists( 'jb_konto_sphaere' ) ) ? jb_konto_sphaere( $gk ) : 'neutral',
-			'gegenpartei'   => trim( (string) ( $src['konto'] ?? '' ) . ' ' . ( $src['gegenpartei'] ?? '' ) ) ?: 'Umbuchung',
-			'beleg_referenz'=> (string) ( $src['beleg_referenz'] ?? '' ),
+		$upd = array_merge( $neutral, array(
+			'konto'        => (string) $zu['geldkonto'],
+			'beschreibung' => trim( (string) $ab['beschreibung'] . ( $zu['beschreibung'] && $zu['beschreibung'] !== $ab['beschreibung'] ? ' / ' . $zu['beschreibung'] : '' ) ),
 		) );
+		$wpdb->update( $t, $upd, array( 'id' => (int) $ab['id'] ) );
+		$wpdb->delete( $t, array( 'id' => (int) $zu['id'] ) );
+		vp_bh_cache_leeren();
+		return rest_ensure_response( array( 'ok' => true, 'updated' => array( (int) $ab['id'] ), 'deleted' => array( (int) $zu['id'] ) ) );
 	}
-	return rest_ensure_response( array( 'ok' => true, 'updated' => array( (int) $src['id'] ), 'created' => $new ? array( $new ) : array() ) );
+
+	$gk = sanitize_text_field( (string) ( $b['gegen_konto'] ?? '' ) );
+	if ( ! $gk || vp_bh_ist_erfolg( $gk ) || $gk === (string) $rows[0]['geldkonto'] ) {
+		return new WP_Error( 'bad_req', 'Als zweites Konto ein anderes Geld- oder Bestandskonto wählen.', array( 'status' => 400 ) );
+	}
+	$wpdb->update( $t, array_merge( $neutral, array( 'konto' => $gk ) ), array( 'id' => (int) $rows[0]['id'] ) );
+	vp_bh_cache_leeren();
+	return rest_ensure_response( array( 'ok' => true, 'updated' => array( (int) $rows[0]['id'] ), 'deleted' => array() ) );
+}
+
+/** POST /actions/geschaeftsjahr  { jahr, methode: euer|doppik } */
+function vp_sync_action_geschaeftsjahr( WP_REST_Request $req ) {
+	if ( ! function_exists( 'vp_bh_methode_setzen' ) ) {
+		return new WP_Error( 'no_fn', 'Buchungslogik nicht geladen.', array( 'status' => 400 ) );
+	}
+	$b = vp_sync_json( $req );
+	$r = vp_bh_methode_setzen( (int) ( $b['jahr'] ?? 0 ), (string) ( $b['methode'] ?? '' ) );
+	if ( is_wp_error( $r ) ) {
+		$r->add_data( array( 'status' => 400 ) );
+		return $r;
+	}
+	return rest_ensure_response( array( 'ok' => true, 'jahr' => (int) $b['jahr'], 'methode' => vp_bh_methode( (int) $b['jahr'] ) ) );
+}
+
+/** POST /actions/jahresabschluss  { jahr } – Endbestände → Anfangsbestände des Folgejahres */
+function vp_sync_action_jahresabschluss( WP_REST_Request $req ) {
+	if ( ! function_exists( 'vp_bh_jahresabschluss' ) ) {
+		return new WP_Error( 'no_fn', 'Buchungslogik nicht geladen.', array( 'status' => 400 ) );
+	}
+	$jahr = (int) ( vp_sync_json( $req )['jahr'] ?? 0 );
+	if ( $jahr < 1990 || $jahr > 2200 ) {
+		return new WP_Error( 'bad_req', 'Jahr fehlt.', array( 'status' => 400 ) );
+	}
+	return rest_ensure_response( array_merge( array( 'ok' => true ), vp_bh_jahresabschluss( $jahr ) ) );
+}
+
+/** POST /actions/konten-zusammenlegen  { von, nach } */
+function vp_sync_action_konten_zusammenlegen( WP_REST_Request $req ) {
+	if ( ! function_exists( 'vp_bh_konten_zusammenlegen' ) ) {
+		return new WP_Error( 'no_fn', 'Buchungslogik nicht geladen.', array( 'status' => 400 ) );
+	}
+	$b = vp_sync_json( $req );
+	$r = vp_bh_konten_zusammenlegen( $b['von'] ?? '', $b['nach'] ?? '' );
+	if ( is_wp_error( $r ) ) {
+		$r->add_data( array( 'status' => 400 ) );
+		return $r;
+	}
+	return rest_ensure_response( array_merge( array( 'ok' => true ), $r ) );
 }
 
 /* =========================================================================

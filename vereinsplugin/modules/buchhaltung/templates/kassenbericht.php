@@ -25,7 +25,7 @@ $base = get_permalink() ?: remove_query_arg( 'year' );
 		<?php endforeach; ?>
 	</p>
 
-	<h4><?php esc_html_e( 'Jahresergebnis (EÜR)', 'vereinsplugin' ); ?></h4>
+	<h4><?php echo esc_html( function_exists( 'vp_bh_methode' ) && 'doppik' === vp_bh_methode( $year ) ? __( 'Jahresergebnis (GuV, Doppik)', 'vereinsplugin' ) : __( 'Jahresergebnis (EÜR)', 'vereinsplugin' ) ); ?></h4>
 	<div class="jb-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin:1rem 0">
 		<div class="jb-box" style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:12px"><strong><?php esc_html_e( 'Einnahmen', 'vereinsplugin' ); ?></strong><br>+<?php echo esc_html( $euro( $summary['total_einnahmen'] ) ); ?></div>
 		<div class="jb-box" style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:12px"><strong><?php esc_html_e( 'Ausgaben', 'vereinsplugin' ); ?></strong><br>&ndash;<?php echo esc_html( $euro( abs( (float) $summary['total_ausgaben'] ) ) ); ?></div>
@@ -37,9 +37,15 @@ $base = get_permalink() ?: remove_query_arg( 'year' );
 		<div class="vp-table-wrap"><table class="vp-table">
 			<tbody>
 				<tr><th colspan="2">1. <?php esc_html_e( 'Kontostand (berechnet aus Buchungen)', 'vereinsplugin' ); ?></th></tr>
-				<tr><td><?php esc_html_e( 'Bankkonto (KSK)', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['bank'] ) ); ?></td></tr>
-				<tr><td><?php esc_html_e( 'Barkasse', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['kasse'] ) ); ?></td></tr>
-				<?php if ( isset( $d['paypal'] ) ) : ?><tr><td><?php esc_html_e( 'PayPal / Zettle', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['paypal'] ) ); ?></td></tr><?php endif; ?>
+				<?php if ( ! empty( $d['konten'] ) ) : ?>
+					<?php foreach ( $d['konten'] as $gk ) : ?>
+						<tr><td><?php echo esc_html( $gk['name'] ?: $gk['konto'] ); ?> <span class="vp-muted"><?php echo esc_html( $gk['konto'] ); ?></span></td><td style="text-align:right"><?php echo esc_html( $euro( $gk['saldo'] ) ); ?></td></tr>
+					<?php endforeach; ?>
+				<?php else : ?>
+					<tr><td><?php esc_html_e( 'Bankkonto (KSK)', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['bank'] ) ); ?></td></tr>
+					<tr><td><?php esc_html_e( 'Barkasse', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['kasse'] ) ); ?></td></tr>
+					<?php if ( isset( $d['paypal'] ) ) : ?><tr><td><?php esc_html_e( 'PayPal / Zettle', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['paypal'] ) ); ?></td></tr><?php endif; ?>
+				<?php endif; ?>
 				<tr style="font-weight:700"><td><?php esc_html_e( 'Kontostand gesamt', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['kontostand'] ) ); ?></td></tr>
 
 				<tr><th colspan="2">2. <?php esc_html_e( 'Getränke', 'vereinsplugin' ); ?></th></tr>
@@ -58,13 +64,13 @@ $base = get_permalink() ?: remove_query_arg( 'year' );
 				<tr style="font-weight:700;font-size:1.05em"><td><?php esc_html_e( 'Freies / verfügbares Budget', 'vereinsplugin' ); ?></td><td style="text-align:right"><?php echo esc_html( $euro( $d['frei'] ) ); ?></td></tr>
 			</tbody>
 		</table></div>
-		<p class="vp-muted"><?php esc_html_e( 'Freies Budget = Kontostand − offene Auslagen − Rücklagenbedarf − verplantes Budget. Kontostände = Anfangsbestand + Buchungen mit passender Quelle; Anfangsbestände unter „Buchhaltung → Bestände“.', 'vereinsplugin' ); ?></p>
+		<p class="vp-muted"><?php esc_html_e( 'Freies Budget = Kontostand − offene Auslagen − Rücklagenbedarf − verplantes Budget. Kontostand je Geldkonto = Anfangsbestand + alle Zu- und Abgänge auf diesem Konto; Anfangsbestände unter „Buchhaltung → Geschäftsjahr“.', 'vereinsplugin' ); ?></p>
 	<?php else : ?>
 		<p class="vp-muted"><?php esc_html_e( 'Detaillierter Stand nicht verfügbar (Buchhaltungs-Modul).', 'vereinsplugin' ); ?></p>
 	<?php endif; ?>
 
 	<?php if ( ! empty( $summary['kategorien'] ) ) : ?>
-		<h4><?php esc_html_e( 'Nach Kategorie / Konto', 'vereinsplugin' ); ?> (<?php echo (int) $year; ?>)</h4>
+		<h4><?php esc_html_e( 'Nach Konto', 'vereinsplugin' ); ?> (<?php echo (int) $year; ?>)</h4>
 		<div class="vp-table-wrap"><table class="vp-table">
 			<thead><tr><th><?php esc_html_e( 'Kategorie', 'vereinsplugin' ); ?></th><th style="text-align:right"><?php esc_html_e( 'Einnahmen', 'vereinsplugin' ); ?></th><th style="text-align:right"><?php esc_html_e( 'Ausgaben', 'vereinsplugin' ); ?></th><th style="text-align:right"><?php esc_html_e( 'Anz.', 'vereinsplugin' ); ?></th></tr></thead>
 			<tbody>

@@ -182,6 +182,13 @@ function jb_topf_saldo(string $key): float {
     $quellen = $map[$key] ?? [];
     if (!$quellen) return (float) get_option('jb_anfangsbestand_' . $key, 0);
 
+    // Stand des Geldkontos, auf das dieser Topf zeigt (Zettle = PayPal).
+    if (function_exists('vp_bh_jahresdaten')) {
+        $konto = vp_bh_vorgabe_geldkonto($quellen[0]);
+        $d = vp_bh_jahresdaten();
+        return round(($d['konten'][$konto]['ende'] ?? 0) / 100, 2);
+    }
+
     // Bevorzugt der buchhalterisch saubere Weg: Saldo des zugehörigen
     // Geldkontos aus der Doppik (berücksichtigt Umbuchungen über gegenkonto
     // und Vorzeichen korrekt, nicht nur die „quelle").
@@ -228,10 +235,23 @@ function jb_topf_saldo(string $key): float {
 function jb_get_dashboard_data(): array {
     global $wpdb;
 
-    $bank   = jb_topf_saldo('bank');
-    $kasse  = jb_topf_saldo('kasse');
-    $paypal = jb_topf_saldo('paypal') + jb_topf_saldo('zettle');
-    $kontostand = $bank + $kasse + $paypal;
+    $konten = [];
+    if (function_exists('vp_bh_geldkonten_stand')) {
+        // Alle Geldkonten einzeln – jedes nur einmal, auch wenn mehrere
+        // Töpfe (z. B. PayPal und Zettle-Karte) darauf zeigen.
+        foreach (vp_bh_geldkonten_stand() as $g) {
+            $konten[] = ['konto' => $g['konto'], 'name' => $g['name'], 'saldo' => $g['ende']];
+        }
+        $kontostand = round(array_sum(array_column($konten, 'saldo')), 2);
+        $bank   = jb_topf_saldo('bank');
+        $kasse  = jb_topf_saldo('kasse');
+        $paypal = jb_topf_saldo('paypal');
+    } else {
+        $bank   = jb_topf_saldo('bank');
+        $kasse  = jb_topf_saldo('kasse');
+        $paypal = jb_topf_saldo('paypal') + jb_topf_saldo('zettle');
+        $kontostand = $bank + $kasse + $paypal;
+    }
 
     $ruecklagen        = jb_ruecklagen_bedarf_gesamt();
     $verplantes        = jb_budgets_rest_total();
@@ -247,7 +267,7 @@ function jb_get_dashboard_data(): array {
     $frei = $kontostand - $ruecklagen - $verplantes - $offene_auslagen;
 
     return compact(
-        'bank', 'kasse', 'paypal', 'kontostand',
+        'bank', 'kasse', 'paypal', 'kontostand', 'konten',
         'ruecklagen', 'verplantes', 'offene_auslagen',
         'getraenke_wert', 'frei'
     );

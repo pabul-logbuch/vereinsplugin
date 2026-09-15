@@ -9,8 +9,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "test": "node --test \"src/sync/*.test.js\"",
-    "test:full": "npm rebuild better-sqlite3 && node --test \"src/sync/*.test.js\"; npm run rebuild",
+    "test": "node --test \"src/sync/*.test.js\" \"src/ui/*.test.js\"",
+    "test:full": "npm rebuild better-sqlite3 && node --test \"src/sync/*.test.js\" \"src/ui/*.test.js\"; npm run rebuild",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac"

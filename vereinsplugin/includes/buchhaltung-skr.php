@@ -14,7 +14,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_SKR_DB_VERSION', '9' );
+define( 'VP_SKR_DB_VERSION', '10' );
 
 /* =========================================================================
  * Schema
@@ -70,6 +70,17 @@ function vp_skr_maybe_upgrade() {
 		UNIQUE KEY jahr_konto (jahr, konto)
 	) {$collate};" );
 
+	// Buchführungsart je Geschäftsjahr (v0.33): EÜR oder Doppik.
+	dbDelta( "CREATE TABLE " . $wpdb->prefix . "jb_geschaeftsjahre (
+		id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+		jahr SMALLINT NOT NULL DEFAULT 0,
+		methode VARCHAR(10) NOT NULL DEFAULT 'euer',
+		notiz VARCHAR(200) NOT NULL DEFAULT '',
+		erstellt_am DATETIME NULL DEFAULT NULL,
+		PRIMARY KEY  (id),
+		UNIQUE KEY jahr (jahr)
+	) {$collate};" );
+
 	// Spalten an jb_buchungen ergänzen.
 	$add = function ( $table, $column, $definition ) use ( $wpdb ) {
 		$exists = $wpdb->get_var( $wpdb->prepare(
@@ -90,11 +101,20 @@ function vp_skr_maybe_upgrade() {
 	// v0.21: Buchung direkt auf ein Budget / eine Kostenstelle buchen.
 	$add( $j, 'budget_id', "`budget_id` BIGINT UNSIGNED DEFAULT NULL" );
 	$add( $j, 'kostenstelle', "`kostenstelle` VARCHAR(50) NOT NULL DEFAULT ''" );
+	// v0.33: Das Geldkonto steht fest in der Buchung, statt bei jedem Lesen
+	// aus der „quelle" abgeleitet zu werden.
+	$add( $j, 'geldkonto', "`geldkonto` VARCHAR(10) NOT NULL DEFAULT ''" );
+	// Änderungszeit, damit die Desktop-App auch nachträglich geänderte
+	// Buchungen abholt (bisher kamen nur neu angelegte an).
+	foreach ( array( $j, jb_table_anfangsbestaende(), $wpdb->prefix . 'jb_geschaeftsjahre' ) as $zt ) {
+		$add( $zt, 'geaendert_am', '`geaendert_am` DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP' );
+	}
 
-	// Geldkonten für die Doppik-Ansicht sicherstellen (idempotent).
+	// Hilfskonten sicherstellen (idempotent). Kein PayPal-Konto mehr: das legt
+	// jeder Verein selbst an – ein automatisch nachgelegtes 1220 hat früher ein
+	// umnummeriertes PayPal-Konto verdoppelt.
 	if ( function_exists( 'jb_table_konten' ) ) {
 		foreach ( array(
-			array( '1220', 'PayPal', 'bestand', 'neutral' ),
 			array( '1600', 'Verbindlichkeiten ggü. Mitgliedern (Auslagen)', 'bestand', 'neutral' ),
 			// Auffangkonten: Buchungen ohne SKR-Konto landen hier, damit sie
 			// den Kontostand des Geldkontos korrekt bewegen und sichtbar
@@ -127,6 +147,9 @@ function vp_skr_maybe_upgrade() {
 
 	vp_skr_seed();
 	vp_skr_migriere_anfangsbestaende();
+	if ( function_exists( 'vp_bh_umstellung_v10' ) ) {
+		vp_bh_umstellung_v10();
+	}
 	update_option( 'vp_skr_db_version', VP_SKR_DB_VERSION );
 }
 
@@ -176,6 +199,17 @@ function vp_skr_migriere_anfangsbestaende() {
  * eurem Steuerbüro / DATEV abgleichen. Alles im Frontend editierbar.
  * ====================================================================== */
 
+/** Kontotypen mit Klartext. */
+function vp_skr_typen() {
+	return array(
+		'geld'     => __( 'Geldkonto (Bank, Kasse, PayPal)', 'vereinsplugin' ),
+		'einnahme' => __( 'Einnahme / Ertrag', 'vereinsplugin' ),
+		'ausgabe'  => __( 'Ausgabe / Aufwand', 'vereinsplugin' ),
+		'bestand'  => __( 'Bestand (Forderung, Verbindlichkeit …)', 'vereinsplugin' ),
+		'neutral'  => __( 'Neutral / Verrechnung', 'vereinsplugin' ),
+	);
+}
+
 function vp_skr_sphaeren() {
 	return array(
 		'ideell'        => __( 'Ideeller Bereich', 'vereinsplugin' ),
@@ -189,8 +223,8 @@ function vp_skr_sphaeren() {
 function vp_skr49_starter_konten() {
 	// nummer, bezeichnung, typ, sphaere
 	return array(
-		array( '1000', 'Kasse (Bargeld)', 'bestand', 'neutral' ),
-		array( '1200', 'Bank', 'bestand', 'neutral' ),
+		array( '1000', 'Kasse (Bargeld)', 'geld', 'neutral' ),
+		array( '1200', 'Bank', 'geld', 'neutral' ),
 		array( '1360', 'Geldtransit / Wechselgeld', 'neutral', 'neutral' ),
 
 		array( '4100', 'Echte Mitgliedsbeiträge', 'einnahme', 'ideell' ),
@@ -342,14 +376,16 @@ function vp_render_buchhaltung_hub() {
 	$view = isset( $_GET['vp_bh'] ) ? sanitize_key( wp_unslash( $_GET['vp_bh'] ) ) : 'journal';
 	$tabs = array(
 		'journal'    => __( 'Journal', 'vereinsplugin' ),
-		'belege'     => __( 'Belege', 'vereinsplugin' ),
-		'import'     => __( 'Bank-Import', 'vereinsplugin' ),
 		'auswertung' => __( 'Auswertung', 'vereinsplugin' ),
+		'jahr'       => __( 'Geschäftsjahr', 'vereinsplugin' ),
+		'import'     => __( 'Bank-Import', 'vereinsplugin' ),
+		'belege'     => __( 'Belege', 'vereinsplugin' ),
 		'ruecklagen' => __( 'Rücklagen', 'vereinsplugin' ),
 		'konten'     => __( 'Kontenplan', 'vereinsplugin' ),
-		'bestaende'  => __( 'Bestände', 'vereinsplugin' ),
-		'doppik'     => __( 'Doppik', 'vereinsplugin' ),
 	);
+	// Alte Links (bis v0.32) weiter bedienen.
+	$alt = array( 'bestaende' => 'jahr', 'doppik' => 'auswertung' );
+	$view = $alt[ $view ] ?? $view;
 	if ( ! isset( $tabs[ $view ] ) ) {
 		$view = 'journal';
 	}
@@ -358,11 +394,12 @@ function vp_render_buchhaltung_hub() {
 	ob_start();
 	echo '<h2>' . esc_html__( 'Buchhaltung', 'vereinsplugin' ) . '</h2>';
 	echo '<nav class="vp-subnav">';
+	$jahr_param = isset( $_GET['jahr'] ) ? array( 'jahr' => (int) $_GET['jahr'] ) : array();
 	foreach ( $tabs as $k => $label ) {
 		printf(
 			'<a class="%s" href="%s">%s</a>',
 			$k === $view ? 'is-active' : '',
-			esc_url( add_query_arg( array( 'vp_tab' => 'buchhaltung', 'vp_bh' => $k ), $base ) ),
+			esc_url( add_query_arg( array_merge( array( 'vp_tab' => 'buchhaltung', 'vp_bh' => $k ), $jahr_param ), $base ) ),
 			esc_html( $label )
 		);
 	}
@@ -385,11 +422,8 @@ function vp_render_buchhaltung_hub() {
 		case 'konten':
 			echo vp_bh_konten(); // phpcs:ignore
 			break;
-		case 'bestaende':
-			echo vp_bh_bestaende(); // phpcs:ignore
-			break;
-		case 'doppik':
-			echo function_exists( 'vp_bh_doppik' ) ? vp_bh_doppik() : ''; // phpcs:ignore
+		case 'jahr':
+			echo vp_bh_geschaeftsjahr(); // phpcs:ignore
 			break;
 		default:
 			echo vp_bh_journal(); // phpcs:ignore
@@ -412,12 +446,14 @@ function vp_bh_belege() {
 		$a     = function_exists( 'jb_get_auslage' ) ? jb_get_auslage( $aid ) : null;
 		if ( $a && empty( $a['buchung_id'] ) && function_exists( 'jb_journal_add' ) ) {
 			$konto = sanitize_text_field( wp_unslash( $_POST['konto'] ?? ( $a['konto'] ?? '' ) ) );
+			$geld  = sanitize_text_field( wp_unslash( $_POST['geldkonto'] ?? '' ) );
 			$bid = jb_journal_add( array(
 				'buchung_datum' => $a['ausgabe_datum'],
 				'betrag'        => -abs( (float) $a['betrag'] ),
 				'kategorie'     => $konto ? ( $konto . ' ' . ( jb_konto_get( $konto )->bezeichnung ?? '' ) ) : ( $a['kategorie'] ?? 'Beleg' ),
 				'beschreibung'  => 'Beleg #' . $aid . ': ' . $a['beschreibung'],
 				'quelle'        => 'Manuell',
+				'geldkonto'     => $geld,
 				'beleg_pfad'    => $a['beleg_pfad'],
 				'konto'         => $konto,
 				'sphaere'       => jb_konto_sphaere( $konto ),
@@ -461,7 +497,11 @@ function vp_bh_belege() {
 			foreach ( $konten as $k ) {
 				echo '<option value="' . esc_attr( $k->nummer ) . '"' . selected( $a['konto'] ?? '', $k->nummer, false ) . '>' . esc_html( $k->nummer . ' · ' . $k->bezeichnung ) . '</option>';
 			}
-			echo '</select><button class="vp-btn vp-btn-primary" name="vp_beleg_buchen" value="1">' . esc_html__( 'Als Buchung übernehmen', 'vereinsplugin' ) . '</button>';
+			echo '</select>';
+			if ( function_exists( 'vp_bh_konto_options' ) ) {
+				echo '<select name="geldkonto" aria-label="' . esc_attr__( 'Bezahlt von', 'vereinsplugin' ) . '">' . vp_bh_konto_options( vp_bh_vorgabe_geldkonto( 'Bank KSK' ), 'geld' ) . '</select>'; // phpcs:ignore
+			}
+			echo '<button class="vp-btn vp-btn-primary" name="vp_beleg_buchen" value="1">' . esc_html__( 'Als Buchung übernehmen', 'vereinsplugin' ) . '</button>';
 			echo '</form>';
 		}
 		echo '</div>';
@@ -592,267 +632,7 @@ function vp_bh_ruecklagen() {
 	return ob_get_clean();
 }
 
-/* ---- Journal ---- */
-
-function vp_bh_journal() {
-	global $wpdb;
-	$can_edit = current_user_can( 'jb_edit_journal' ) || current_user_can( 'manage_options' );
-	$msg = '';
-
-	if ( $can_edit && isset( $_POST['vp_bh_add'] ) && check_admin_referer( 'vp_bh_journal', 'vp_bh_nonce' ) ) {
-		$typ    = ( 'einnahme' === ( $_POST['typ'] ?? '' ) ) ? 1 : -1;
-		$betrag = $typ * abs( (float) str_replace( ',', '.', sanitize_text_field( wp_unslash( $_POST['betrag'] ?? '0' ) ) ) );
-		$konto  = sanitize_text_field( wp_unslash( $_POST['konto'] ?? '' ) );
-		if ( function_exists( 'jb_journal_add' ) && $betrag ) {
-			jb_journal_add( array(
-				'buchung_datum' => sanitize_text_field( wp_unslash( $_POST['datum'] ?? gmdate( 'Y-m-d' ) ) ),
-				'betrag'        => $betrag,
-				'kategorie'     => $konto ? ( $konto . ' ' . ( jb_konto_get( $konto )->bezeichnung ?? '' ) ) : sanitize_text_field( wp_unslash( $_POST['kategorie'] ?? 'Sonstige' ) ),
-				'beschreibung'  => sanitize_textarea_field( wp_unslash( $_POST['zweck'] ?? '' ) ),
-				'quelle'        => 'Manuell',
-				'beleg_referenz'=> sanitize_text_field( wp_unslash( $_POST['beleg'] ?? '' ) ),
-				'konto'         => $konto,
-				'sphaere'       => jb_konto_sphaere( $konto ),
-				'gegenpartei'   => sanitize_text_field( wp_unslash( $_POST['gegenpartei'] ?? '' ) ),
-				'ruecklage_id'  => (int) ( $_POST['ruecklage_id'] ?? 0 ),
-				'budget_id'     => (int) ( $_POST['budget_id'] ?? 0 ),
-				'kostenstelle'  => sanitize_text_field( wp_unslash( $_POST['kostenstelle'] ?? '' ) ),
-			) );
-			$msg = __( 'Buchung gespeichert.', 'vereinsplugin' );
-		}
-	}
-	if ( $can_edit && isset( $_POST['vp_bh_del'] ) && check_admin_referer( 'vp_bh_journal', 'vp_bh_nonce' ) && function_exists( 'jb_journal_delete' ) ) {
-		jb_journal_delete( (int) $_POST['id'] );
-		$msg = __( 'Buchung gelöscht.', 'vereinsplugin' );
-	}
-	if ( $can_edit && isset( $_POST['vp_bh_edit'] ) && check_admin_referer( 'vp_bh_journal', 'vp_bh_nonce' ) ) {
-		$eid    = (int) ( $_POST['id'] ?? 0 );
-		$typ    = ( 'einnahme' === ( $_POST['typ'] ?? '' ) ) ? 1 : -1;
-		$betrag = $typ * abs( (float) str_replace( ',', '.', sanitize_text_field( wp_unslash( $_POST['betrag'] ?? '0' ) ) ) );
-		$konto  = sanitize_text_field( wp_unslash( $_POST['konto'] ?? '' ) );
-		if ( $eid && $betrag ) {
-			$upd = array(
-				'buchung_datum' => sanitize_text_field( wp_unslash( $_POST['datum'] ?? gmdate( 'Y-m-d' ) ) ),
-				'betrag'        => $betrag,
-				'beschreibung'  => sanitize_textarea_field( wp_unslash( $_POST['zweck'] ?? '' ) ),
-				'gegenpartei'   => sanitize_text_field( wp_unslash( $_POST['gegenpartei'] ?? '' ) ),
-				'beleg_nr'      => sanitize_text_field( wp_unslash( $_POST['beleg'] ?? '' ) ),
-				'konto'         => $konto,
-				'sphaere'       => $konto ? jb_konto_sphaere( $konto ) : sanitize_text_field( wp_unslash( $_POST['sphaere'] ?? '' ) ),
-				'kategorie'     => $konto ? ( $konto . ' ' . ( jb_konto_get( $konto )->bezeichnung ?? '' ) ) : sanitize_text_field( wp_unslash( $_POST['zweck'] ?? 'Sonstige' ) ),
-			);
-			if ( isset( $_POST['quelle'] ) ) {
-				$upd['quelle'] = sanitize_text_field( wp_unslash( $_POST['quelle'] ) );
-			}
-			if ( isset( $_POST['ruecklage_id'] ) && in_array( 'ruecklage_id', (array) $wpdb->get_col( 'SHOW COLUMNS FROM ' . jb_table_journal() ), true ) ) {
-				$rlid = (int) $_POST['ruecklage_id'];
-				$upd['ruecklage_id'] = $rlid ?: null;
-				if ( $rlid && function_exists( 'jb_table_ruecklagen' ) ) {
-					$wpdb->update( jb_table_ruecklagen(), array( 'letzte_zahlung' => $upd['buchung_datum'] ), array( 'id' => $rlid ) );
-				}
-			}
-			$jcols = (array) $wpdb->get_col( 'SHOW COLUMNS FROM ' . jb_table_journal() );
-			if ( isset( $_POST['budget_id'] ) && in_array( 'budget_id', $jcols, true ) ) {
-				$upd['budget_id'] = (int) $_POST['budget_id'] ?: null;
-			}
-			if ( isset( $_POST['kostenstelle'] ) && in_array( 'kostenstelle', $jcols, true ) ) {
-				$upd['kostenstelle'] = sanitize_text_field( wp_unslash( $_POST['kostenstelle'] ) );
-			}
-			$wpdb->update( jb_table_journal(), $upd, array( 'id' => $eid ) );
-			$msg = __( 'Buchung aktualisiert.', 'vereinsplugin' );
-		}
-	}
-	if ( $can_edit && isset( $_POST['vp_bh_beleg_up'] ) && check_admin_referer( 'vp_bh_journal', 'vp_bh_nonce' ) ) {
-		$msg = vp_bh_journal_beleg_upload( (int) $_POST['id'], $_FILES['beleg_file'] ?? array() );
-	}
-	if ( $can_edit && isset( $_POST['vp_bh_split'] ) && check_admin_referer( 'vp_bh_journal', 'vp_bh_nonce' ) ) {
-		$sid  = (int) ( $_POST['id'] ?? 0 );
-		$sbet = (float) str_replace( ',', '.', sanitize_text_field( wp_unslash( $_POST['split_betrag'] ?? '0' ) ) );
-		$skon = sanitize_text_field( wp_unslash( $_POST['split_konto'] ?? '' ) );
-		$src  = $sid ? $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . jb_table_journal() . ' WHERE id = %d', $sid ), ARRAY_A ) : null;
-		if ( $src && $sbet && abs( $sbet ) < abs( (float) $src['betrag'] ) + 0.005 ) {
-			jb_journal_add( array(
-				'buchung_datum' => $src['buchung_datum'],
-				'betrag'        => $sbet,
-				'kategorie'     => $skon ? ( $skon . ' ' . ( jb_konto_get( $skon )->bezeichnung ?? '' ) ) : sanitize_text_field( wp_unslash( $_POST['split_zweck'] ?? 'Teilbuchung' ) ),
-				'beschreibung'  => sanitize_text_field( wp_unslash( $_POST['split_zweck'] ?? '' ) ) ?: ( $src['beschreibung'] ?? '' ),
-				'quelle'        => $src['quelle'] ?? 'Manuell',
-				'konto'         => $skon,
-				'sphaere'       => $skon ? jb_konto_sphaere( $skon ) : ( $src['sphaere'] ?? '' ),
-				'gegenpartei'   => $src['gegenpartei'] ?? '',
-				'beleg_referenz'=> $src['beleg_referenz'] ?? '',
-				'beleg_pfad'    => $src['beleg_pfad'] ?? '',
-			) );
-			$wpdb->update( jb_table_journal(), array( 'betrag' => round( (float) $src['betrag'] - $sbet, 2 ) ), array( 'id' => $sid ) );
-			$msg = __( 'Buchung aufgeteilt.', 'vereinsplugin' );
-		} else {
-			$msg = __( 'Aufteilen nicht möglich (Betrag prüfen).', 'vereinsplugin' );
-		}
-	}
-
-	$jahr  = isset( $_GET['jahr'] ) ? (int) $_GET['jahr'] : (int) gmdate( 'Y' );
-	$rows  = function_exists( 'jb_journal_get' ) ? jb_journal_get( array( 'year' => $jahr ) ) : array();
-	$konten = jb_konten_all();
-	$ruecklagen = function_exists( 'jb_ruecklagen_get_all' ) ? jb_ruecklagen_get_all() : array();
-	$rl_options = static function ( $selected ) use ( $ruecklagen ) {
-		$html = '<option value="0">' . esc_html__( '– keine –', 'vereinsplugin' ) . '</option>';
-		foreach ( $ruecklagen as $rr ) {
-			$rr = (object) $rr;
-			$html .= '<option value="' . (int) $rr->id . '"' . selected( (int) $selected, (int) $rr->id, false ) . '>' . esc_html( $rr->bezeichnung ) . '</option>';
-		}
-		return $html;
-	};
-
-	$budgets     = function_exists( 'jb_budgets_get_all' ) ? jb_budgets_get_all() : array();
-	$bud_options = static function ( $selected ) use ( $budgets ) {
-		$html = '<option value="0">' . esc_html__( '– kein Budget –', 'vereinsplugin' ) . '</option>';
-		foreach ( $budgets as $bb ) {
-			$bb    = (object) $bb;
-			$label = $bb->zweck . ( $bb->kostenstelle ? ' · ' . $bb->kostenstelle : '' )
-				. ' (' . number_format( (float) ( $bb->rest ?? 0 ), 2, ',', '.' ) . ' € frei)';
-			$html .= '<option value="' . (int) $bb->id . '"' . selected( (int) $selected, (int) $bb->id, false ) . '>' . esc_html( $label ) . '</option>';
-		}
-		return $html;
-	};
-	$ks_liste = function_exists( 'jb_kostenstellen' ) ? jb_kostenstellen() : array();
-	$ks_field = static function ( $name, $value ) use ( $ks_liste ) {
-		$html = '<input type="text" name="' . esc_attr( $name ) . '" value="' . esc_attr( (string) $value ) . '" list="vp_ks_liste">';
-		return $html;
-	};
-
-	ob_start();
-	if ( $ks_liste ) {
-		echo '<datalist id="vp_ks_liste">';
-		foreach ( $ks_liste as $ks ) {
-			echo '<option value="' . esc_attr( $ks ) . '">';
-		}
-		echo '</datalist>';
-	}
-	if ( $msg ) {
-		echo '<div class="vp-note">' . esc_html( $msg ) . '</div>';
-	}
-	echo vp_bh_year_switcher( $jahr );
-
-	if ( $can_edit ) {
-		?>
-		<details class="vp-card"><summary><strong><?php esc_html_e( 'Neue Buchung erfassen', 'vereinsplugin' ); ?></strong></summary>
-		<form method="post" class="vp-form" style="margin-top:12px">
-			<?php wp_nonce_field( 'vp_bh_journal', 'vp_bh_nonce' ); ?>
-			<div class="vp-form-grid">
-				<label><?php esc_html_e( 'Datum', 'vereinsplugin' ); ?><input type="date" name="datum" value="<?php echo esc_attr( gmdate( 'Y-m-d' ) ); ?>"></label>
-				<label><?php esc_html_e( 'Art', 'vereinsplugin' ); ?>
-					<select name="typ"><option value="ausgabe"><?php esc_html_e( 'Ausgabe', 'vereinsplugin' ); ?></option><option value="einnahme"><?php esc_html_e( 'Einnahme', 'vereinsplugin' ); ?></option></select></label>
-				<label><?php esc_html_e( 'Betrag (€)', 'vereinsplugin' ); ?><input type="text" name="betrag" inputmode="decimal" placeholder="0,00"></label>
-				<label><?php esc_html_e( 'Konto (SKR 49)', 'vereinsplugin' ); ?>
-					<select name="konto">
-						<option value=""><?php esc_html_e( '– nicht zugeordnet –', 'vereinsplugin' ); ?></option>
-						<?php foreach ( $konten as $k ) : ?>
-							<option value="<?php echo esc_attr( $k->nummer ); ?>"><?php echo esc_html( $k->nummer . ' · ' . $k->bezeichnung ); ?></option>
-						<?php endforeach; ?>
-					</select></label>
-				<label><?php esc_html_e( 'Gegenpartei', 'vereinsplugin' ); ?><input type="text" name="gegenpartei"></label>
-				<?php if ( $ruecklagen ) : ?>
-					<label><?php esc_html_e( 'Für Rücklage (optional)', 'vereinsplugin' ); ?>
-						<select name="ruecklage_id"><?php echo $rl_options( 0 ); // phpcs:ignore ?></select></label>
-				<?php endif; ?>
-				<?php if ( $budgets ) : ?>
-					<label><?php esc_html_e( 'Budget belasten (optional)', 'vereinsplugin' ); ?>
-						<select name="budget_id"><?php echo $bud_options( 0 ); // phpcs:ignore ?></select></label>
-				<?php endif; ?>
-				<label><?php esc_html_e( 'Kostenstelle', 'vereinsplugin' ); ?><?php echo $ks_field( 'kostenstelle', '' ); // phpcs:ignore ?></label>
-				<label class="vp-col-2"><?php esc_html_e( 'Verwendungszweck', 'vereinsplugin' ); ?><input type="text" name="zweck"></label>
-				<label><?php esc_html_e( 'Beleg-Nr.', 'vereinsplugin' ); ?><input type="text" name="beleg"></label>
-			</div>
-			<p><button class="vp-btn vp-btn-primary" name="vp_bh_add" value="1"><?php esc_html_e( 'Buchen', 'vereinsplugin' ); ?></button></p>
-		</form>
-		</details>
-		<?php
-	}
-
-	$has_nc = function_exists( 'jb_nc' );
-	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr>'
-		. '<th>' . esc_html__( 'Beleg-Nr.', 'vereinsplugin' ) . '</th>'
-		. '<th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Konto', 'vereinsplugin' ) . '</th>'
-		. '<th>' . esc_html__( 'Gegenpartei / Zweck', 'vereinsplugin' ) . '</th>'
-		. '<th style="text-align:right">' . esc_html__( 'Betrag', 'vereinsplugin' ) . '</th>'
-		. '<th>' . esc_html__( 'Beleg', 'vereinsplugin' ) . '</th>'
-		. ( $can_edit ? '<th></th>' : '' ) . '</tr></thead><tbody>';
-	foreach ( $rows as $r ) {
-		$betrag = (float) $r['betrag'];
-		$rid    = (int) $r['id'];
-
-		$beleg_cell = '<span class="vp-muted">–</span>';
-		if ( ! empty( $r['beleg_pfad'] ) && $has_nc ) {
-			$beleg_cell = '<a class="vp-btn" target="_blank" rel="noopener" href="' . esc_url( jb_nc()->get_download_url( $r['beleg_pfad'] ) ) . '">' . esc_html__( 'ansehen', 'vereinsplugin' ) . '</a>';
-		} elseif ( $can_edit && $has_nc ) {
-			$beleg_cell = '<form method="post" enctype="multipart/form-data" style="display:flex;gap:4px;align-items:center">'
-				. wp_nonce_field( 'vp_bh_journal', 'vp_bh_nonce', true, false )
-				. '<input type="hidden" name="id" value="' . $rid . '">'
-				. '<input type="file" name="beleg_file" accept=".pdf,.jpg,.jpeg,.png,.webp" required style="max-width:120px">'
-				. '<button class="vp-btn" name="vp_bh_beleg_up" value="1">↑</button></form>';
-		}
-
-		$edit_cell = '';
-		if ( $can_edit ) {
-			$opts = '<option value="">' . esc_html__( '– nicht zugeordnet –', 'vereinsplugin' ) . '</option>';
-			foreach ( $konten as $k ) {
-				$opts .= '<option value="' . esc_attr( $k->nummer ) . '"' . selected( (string) $k->nummer, (string) $r['konto'], false ) . '>'
-					. esc_html( $k->nummer . ' · ' . $k->bezeichnung ) . '</option>';
-			}
-			$q_cur = (string) ( $r['quelle'] ?? '' );
-			$q_opt = '';
-			foreach ( array( 'Bank KSK', 'Zettle-Bar', 'Zettle-Karte', 'PayPal', 'Auslage', 'Umbuchung', 'Manuell' ) as $q ) {
-				$q_opt .= '<option' . selected( $q, $q_cur, false ) . '>' . esc_html( $q ) . '</option>';
-			}
-			$edit_cell = '<td><details class="vp-inline-edit"><summary class="vp-btn">✎</summary>'
-				. '<form method="post" class="vp-form" style="margin-top:8px;min-width:280px">'
-				. wp_nonce_field( 'vp_bh_journal', 'vp_bh_nonce', true, false )
-				. '<input type="hidden" name="id" value="' . $rid . '">'
-				. '<label>' . esc_html__( 'Datum', 'vereinsplugin' ) . '<input type="date" name="datum" value="' . esc_attr( $r['buchung_datum'] ) . '"></label>'
-				. '<label>' . esc_html__( 'Art', 'vereinsplugin' ) . '<select name="typ"><option value="ausgabe"' . selected( $betrag < 0, true, false ) . '>' . esc_html__( 'Ausgabe', 'vereinsplugin' ) . '</option><option value="einnahme"' . selected( $betrag >= 0, true, false ) . '>' . esc_html__( 'Einnahme', 'vereinsplugin' ) . '</option></select></label>'
-				. '<label>' . esc_html__( 'Betrag (€)', 'vereinsplugin' ) . '<input type="text" name="betrag" inputmode="decimal" value="' . esc_attr( number_format( abs( $betrag ), 2, ',', '' ) ) . '"></label>'
-				. '<label>' . esc_html__( 'Konto (SKR 49)', 'vereinsplugin' ) . '<select name="konto">' . $opts . '</select></label>'
-				. '<label>' . esc_html__( 'Topf / Quelle', 'vereinsplugin' ) . '<select name="quelle">' . $q_opt . '</select></label>'
-				. ( $ruecklagen ? '<label>' . esc_html__( 'Für Rücklage', 'vereinsplugin' ) . '<select name="ruecklage_id">' . $rl_options( (int) ( $r['ruecklage_id'] ?? 0 ) ) . '</select></label>' : '' )
-				. ( $budgets ? '<label>' . esc_html__( 'Budget belasten', 'vereinsplugin' ) . '<select name="budget_id">' . $bud_options( (int) ( $r['budget_id'] ?? 0 ) ) . '</select></label>' : '' )
-				. '<label>' . esc_html__( 'Kostenstelle', 'vereinsplugin' ) . $ks_field( 'kostenstelle', $r['kostenstelle'] ?? '' ) . '</label>'
-				. '<label>' . esc_html__( 'Gegenpartei', 'vereinsplugin' ) . '<input type="text" name="gegenpartei" value="' . esc_attr( $r['gegenpartei'] ?? '' ) . '"></label>'
-				. '<label>' . esc_html__( 'Verwendungszweck', 'vereinsplugin' ) . '<input type="text" name="zweck" value="' . esc_attr( $r['beschreibung'] ?? '' ) . '"></label>'
-				. '<label>' . esc_html__( 'Beleg-Nr.', 'vereinsplugin' ) . '<input type="text" name="beleg" value="' . esc_attr( $r['beleg_nr'] ?? '' ) . '"></label>'
-				. '<p><button class="vp-btn vp-btn-primary" name="vp_bh_edit" value="1">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button> '
-				. '<button class="vp-btn vp-btn-danger" name="vp_bh_del" value="1" onclick="return confirm(\'' . esc_js( __( 'Buchung löschen?', 'vereinsplugin' ) ) . '\')">' . esc_html__( 'Löschen', 'vereinsplugin' ) . '</button></p>'
-				. '</form>'
-				. '<form method="post" class="vp-form" style="margin-top:8px;border-top:1px solid #e2e5ea;padding-top:8px">'
-				. wp_nonce_field( 'vp_bh_journal', 'vp_bh_nonce', true, false )
-				. '<input type="hidden" name="id" value="' . $rid . '">'
-				. '<strong>' . esc_html__( 'Teil abspalten', 'vereinsplugin' ) . '</strong>'
-				. '<label>' . esc_html__( 'Betrag (mit Vorzeichen, z. B. −3,00)', 'vereinsplugin' ) . '<input type="text" name="split_betrag" inputmode="decimal" placeholder="-3,00"></label>'
-				. '<label>' . esc_html__( 'Konto', 'vereinsplugin' ) . '<select name="split_konto">' . $opts . '</select></label>'
-				. '<label>' . esc_html__( 'Zweck', 'vereinsplugin' ) . '<input type="text" name="split_zweck" value="' . esc_attr__( 'Bankgebühr', 'vereinsplugin' ) . '"></label>'
-				. '<p><button class="vp-btn" name="vp_bh_split" value="1">' . esc_html__( 'Abspalten', 'vereinsplugin' ) . '</button> '
-				. '<span class="vp-muted">' . esc_html__( 'Der Betrag wird von dieser Buchung abgezogen und als eigene Buchung angelegt.', 'vereinsplugin' ) . '</span></p>'
-				. '</form></details></td>';
-		}
-
-		printf(
-			'<tr><td>%s</td><td>%s</td><td>%s</td><td>%s<br><span class="vp-muted">%s</span></td><td style="text-align:right;%s">%s €</td><td>%s</td>%s</tr>',
-			esc_html( $r['beleg_nr'] ?? '' ),
-			esc_html( $r['buchung_datum'] ),
-			esc_html( $r['konto'] ?: '–' ),
-			esc_html( $r['gegenpartei'] ?? '' ),
-			esc_html( wp_trim_words( (string) $r['beschreibung'], 14 ) ),
-			$betrag < 0 ? 'color:#b91c1c' : 'color:#166534',
-			esc_html( number_format( $betrag, 2, ',', '.' ) ),
-			$beleg_cell,
-			$edit_cell
-		);
-	}
-	if ( ! $rows ) {
-		echo '<tr><td colspan="7" class="vp-muted">' . esc_html__( 'Keine Buchungen in diesem Jahr.', 'vereinsplugin' ) . '</td></tr>';
-	}
-	echo '</tbody></table></div>';
-	return ob_get_clean();
-}
+/* ---- Journal, Auswertung, Geschäftsjahr: includes/buchhaltung-ansichten.php ---- */
 
 /** Beleg-Datei zu einer Journalbuchung nach Nextcloud hochladen. */
 function vp_bh_journal_beleg_upload( $buchung_id, $file ) {
@@ -878,95 +658,6 @@ function vp_bh_journal_beleg_upload( $buchung_id, $file ) {
 	}
 	$wpdb->update( jb_table_journal(), array( 'beleg_pfad' => $nc_path ), array( 'id' => $buchung_id ) );
 	return __( 'Beleg hochgeladen.', 'vereinsplugin' );
-}
-
-function vp_bh_year_switcher( $jahr ) {
-	$base = get_permalink() ?: remove_query_arg( 'jahr' );
-	$out  = '<p class="vp-subnav">';
-	for ( $y = (int) gmdate( 'Y' ); $y >= (int) gmdate( 'Y' ) - 4; $y-- ) {
-		$out .= sprintf(
-			'<a class="%s" href="%s">%d</a>',
-			$y === (int) $jahr ? 'is-active' : '',
-			esc_url( add_query_arg( array( 'vp_tab' => 'buchhaltung', 'vp_bh' => sanitize_key( $_GET['vp_bh'] ?? 'journal' ), 'jahr' => $y ), $base ) ),
-			$y
-		);
-	}
-	return $out . '</p>';
-}
-
-/* ---- Auswertung ---- */
-
-function vp_bh_auswertung() {
-	global $wpdb;
-	$jahr = isset( $_GET['jahr'] ) ? (int) $_GET['jahr'] : (int) gmdate( 'Y' );
-	$j    = jb_table_journal();
-
-	$konto_rows = $wpdb->get_results( $wpdb->prepare(
-		"SELECT konto,
-		        SUM(CASE WHEN betrag>0 THEN betrag ELSE 0 END) ein,
-		        SUM(CASE WHEN betrag<0 THEN -betrag ELSE 0 END) aus,
-		        COUNT(*) n
-		 FROM {$j} WHERE YEAR(buchung_datum)=%d GROUP BY konto ORDER BY konto", $jahr
-	) );
-
-	$sph_rows = $wpdb->get_results( $wpdb->prepare(
-		"SELECT sphaere,
-		        SUM(CASE WHEN betrag>0 THEN betrag ELSE 0 END) ein,
-		        SUM(CASE WHEN betrag<0 THEN -betrag ELSE 0 END) aus
-		 FROM {$j} WHERE YEAR(buchung_datum)=%d GROUP BY sphaere", $jahr
-	) );
-
-	$sph_labels = vp_skr_sphaeren();
-	$konto_name = array();
-	foreach ( jb_konten_all( false ) as $k ) {
-		$konto_name[ $k->nummer ] = $k->bezeichnung;
-	}
-
-	$total_ein = 0.0; $total_aus = 0.0;
-
-	ob_start();
-	echo vp_bh_year_switcher( $jahr );
-
-	echo '<h3>' . esc_html__( 'Nach Sphäre (Gemeinnützigkeit)', 'vereinsplugin' ) . '</h3>';
-	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Sphäre', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Einnahmen', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Ausgaben', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Saldo', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
-	foreach ( $sph_rows as $s ) {
-		$ein = (float) $s->ein; $aus = (float) $s->aus;
-		$total_ein += $ein; $total_aus += $aus;
-		printf(
-			'<tr><td>%s</td><td style="text-align:right">%s €</td><td style="text-align:right">%s €</td><td style="text-align:right">%s €</td></tr>',
-			esc_html( $sph_labels[ $s->sphaere ] ?? ( $s->sphaere ?: __( 'ohne Sphäre', 'vereinsplugin' ) ) ),
-			esc_html( number_format( $ein, 2, ',', '.' ) ),
-			esc_html( number_format( $aus, 2, ',', '.' ) ),
-			esc_html( number_format( $ein - $aus, 2, ',', '.' ) )
-		);
-	}
-	printf(
-		'<tr style="font-weight:700"><td>%s</td><td style="text-align:right">%s €</td><td style="text-align:right">%s €</td><td style="text-align:right">%s €</td></tr>',
-		esc_html__( 'Gesamt (EÜR-Überschuss)', 'vereinsplugin' ),
-		esc_html( number_format( $total_ein, 2, ',', '.' ) ),
-		esc_html( number_format( $total_aus, 2, ',', '.' ) ),
-		esc_html( number_format( $total_ein - $total_aus, 2, ',', '.' ) )
-	);
-	echo '</tbody></table></div>';
-
-	echo '<h3>' . esc_html__( 'Nach Konto', 'vereinsplugin' ) . '</h3>';
-	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Konto', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Einnahmen', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Ausgaben', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Anzahl', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
-	foreach ( $konto_rows as $r ) {
-		printf(
-			'<tr><td>%s%s</td><td style="text-align:right">%s €</td><td style="text-align:right">%s €</td><td style="text-align:right">%d</td></tr>',
-			esc_html( $r->konto ?: '—' ),
-			$r->konto && isset( $konto_name[ $r->konto ] ) ? ' · <span class="vp-muted">' . esc_html( $konto_name[ $r->konto ] ) . '</span>' : '',
-			esc_html( number_format( (float) $r->ein, 2, ',', '.' ) ),
-			esc_html( number_format( (float) $r->aus, 2, ',', '.' ) ),
-			(int) $r->n
-		);
-	}
-	echo '</tbody></table></div>';
-
-	if ( is_callable( 'jb_page_export' ) || function_exists( 'jb_export_euer_csv' ) ) {
-		echo '<p><a class="vp-btn" href="' . esc_url( admin_url( 'admin.php?page=jb_export&year=' . $jahr ) ) . '">' . esc_html__( 'EÜR / DATEV-Export öffnen', 'vereinsplugin' ) . '</a></p>';
-	}
-	return ob_get_clean();
 }
 
 /* ---- Bank-Import (CSV) ---- */
@@ -1004,6 +695,7 @@ function vp_bh_import() {
 			}
 			$konto = sanitize_text_field( $konto_map[ $i ] ?? ( $r['konto'] ?? '' ) );
 			jb_journal_add( array(
+				'geldkonto'     => sanitize_text_field( wp_unslash( $_POST['geldkonto'] ?? '' ) ),
 				'buchung_datum' => sanitize_text_field( $r['datum'] ),
 				'betrag'        => $betrag,
 				'kategorie'     => $konto ? ( $konto . ' ' . ( jb_konto_get( $konto )->bezeichnung ?? '' ) ) : 'Import',
@@ -1043,6 +735,9 @@ function vp_bh_import() {
 			);
 		}
 		$out .= '</tbody></table></div>';
+		if ( function_exists( 'vp_bh_konto_options' ) ) {
+			$out .= '<p><label>' . esc_html__( 'Diese Umsätze gehören zum Konto', 'vereinsplugin' ) . ' <select name="geldkonto">' . vp_bh_konto_options( vp_bh_vorgabe_geldkonto( 'Bank KSK' ), 'geld' ) . '</select></label></p>';
+		}
 		$out .= '<p><button class="vp-btn vp-btn-primary" name="vp_imp_commit" value="1">' . esc_html( sprintf( __( '%d Buchungen importieren', 'vereinsplugin' ), count( $parsed ) ) ) . '</button></p></form>';
 		return $out;
 	}
@@ -1218,6 +913,7 @@ function vp_bh_konten() {
 		echo '<div class="vp-note">' . esc_html( $msg ) . '</div>';
 	}
 	echo '<div class="vp-note vp-note-warn">' . esc_html__( 'Die Kontonummern sind ein SKR-49-Startvorschlag. Bitte mit eurem Steuerbüro / eurer DATEV-Vorlage abgleichen und anpassen.', 'vereinsplugin' ) . '</div>';
+	echo '<p class="vp-muted">' . esc_html__( 'Typ „Geldkonto" für alles, wo echtes Geld liegt (Bank, Barkasse, PayPal) – nur diese Konten stehen bei Einnahmen und Ausgaben zur Auswahl und im Kassenbericht. „Bestand" für Forderungen, Verbindlichkeiten oder Geldtransit, „Einnahme"/„Ausgabe" für den Zweck einer Buchung.', 'vereinsplugin' ) . '</p>';
 
 	echo '<h3>' . esc_html__( 'Konten', 'vereinsplugin' ) . '</h3>';
 	if ( ! $can_edit ) {
@@ -1225,7 +921,7 @@ function vp_bh_konten() {
 		foreach ( $konten as $k ) {
 			printf(
 				'<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-				esc_html( $k->nummer ), esc_html( $k->bezeichnung ), esc_html( $k->typ ),
+				esc_html( $k->nummer ), esc_html( $k->bezeichnung ), esc_html( vp_skr_typen()[ $k->typ ] ?? $k->typ ),
 				esc_html( $sph[ $k->sphaere ] ?? $k->sphaere ), $k->aktiv ? '✓' : '–'
 			);
 		}
@@ -1239,8 +935,8 @@ function vp_bh_konten() {
 			echo '<input name="nummer" value="' . esc_attr( $k->nummer ) . '" size="6" aria-label="Nr.">';
 			echo '<input name="bezeichnung" value="' . esc_attr( $k->bezeichnung ) . '" aria-label="Bezeichnung" style="flex:1;min-width:160px">';
 			echo '<select name="typ" aria-label="Typ">';
-			foreach ( array( 'einnahme', 'ausgabe', 'bestand', 'neutral' ) as $t ) {
-				echo '<option value="' . esc_attr( $t ) . '"' . selected( $k->typ, $t, false ) . '>' . esc_html( $t ) . '</option>';
+			foreach ( vp_skr_typen() as $t => $tl ) {
+				echo '<option value="' . esc_attr( $t ) . '"' . selected( $k->typ, $t, false ) . '>' . esc_html( $tl ) . '</option>';
 			}
 			echo '</select><select name="sphaere" aria-label="Sphäre">';
 			foreach ( $sph as $sk => $sl ) {
@@ -1259,7 +955,11 @@ function vp_bh_konten() {
 		echo '<form method="post" class="vp-form" style="margin-top:10px">' . wp_nonce_field( 'vp_konten', 'vp_konten_nonce', true, false );
 		echo '<div class="vp-form-grid"><label>' . esc_html__( 'Nummer', 'vereinsplugin' ) . '<input name="nummer"></label>';
 		echo '<label>' . esc_html__( 'Bezeichnung', 'vereinsplugin' ) . '<input name="bezeichnung"></label>';
-		echo '<label>' . esc_html__( 'Typ', 'vereinsplugin' ) . '<select name="typ"><option>einnahme</option><option selected>ausgabe</option><option>bestand</option><option>neutral</option></select></label>';
+		echo '<label>' . esc_html__( 'Typ', 'vereinsplugin' ) . '<select name="typ">';
+		foreach ( vp_skr_typen() as $t => $tl ) {
+			echo '<option value="' . esc_attr( $t ) . '"' . selected( 'ausgabe', $t, false ) . '>' . esc_html( $tl ) . '</option>';
+		}
+		echo '</select></label>';
 		echo '<label>' . esc_html__( 'Sphäre', 'vereinsplugin' ) . '<select name="sphaere">';
 		foreach ( $sph as $sk => $sl ) {
 			echo '<option value="' . esc_attr( $sk ) . '">' . esc_html( $sl ) . '</option>';
@@ -1284,192 +984,6 @@ function vp_bh_konten() {
 		echo '<div class="vp-form-grid"><label>' . esc_html__( 'Stichwort', 'vereinsplugin' ) . '<input name="stichwort"></label>';
 		echo '<label>' . esc_html__( 'Konto-Nr.', 'vereinsplugin' ) . '<input name="regel_konto"></label></div>';
 		echo '<p><button class="vp-btn vp-btn-primary" name="vp_regel_save" value="1">' . esc_html__( 'Regel hinzufügen', 'vereinsplugin' ) . '</button></p></form>';
-	}
-	return ob_get_clean();
-}
-
-/* ---- Bestände (Anfangsbestände der Geld-Töpfe) ---- */
-
-function vp_bh_bestaende() {
-	if ( ! function_exists( 'jb_topf_saldo' ) ) {
-		return '<div class="vp-note">' . esc_html__( 'Nicht verfügbar.', 'vereinsplugin' ) . '</div>';
-	}
-	global $wpdb;
-	$can_edit = current_user_can( 'jb_edit_journal' ) || current_user_can( 'manage_options' );
-	$t        = jb_table_anfangsbestaende();
-	$msg      = '';
-
-	// Standard-Geldkonten; weitere Konten lassen sich frei ergänzen.
-	$geldkonten = array(
-		'1200' => __( 'Bankkonto (KSK)', 'vereinsplugin' ),
-		'1000' => __( 'Barkasse', 'vereinsplugin' ),
-		'1220' => __( 'PayPal', 'vereinsplugin' ),
-		'1360' => __( 'Zettle (Karte)', 'vereinsplugin' ),
-	);
-
-	if ( $can_edit && isset( $_POST['vp_anf_save'] ) && check_admin_referer( 'vp_bestaende', 'vp_bestaende_nonce' ) ) {
-		$jahr    = (int) ( $_POST['anf_jahr'] ?? 0 );
-		$werte   = (array) ( $_POST['anf'] ?? array() );
-		if ( $jahr > 1990 && $jahr < 2200 ) {
-			foreach ( $werte as $konto => $roh ) {
-				$konto  = sanitize_text_field( wp_unslash( (string) $konto ) );
-				$roh    = sanitize_text_field( wp_unslash( (string) $roh ) );
-				if ( '' === $konto ) {
-					continue;
-				}
-				$vorhanden = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM `{$t}` WHERE jahr = %d AND konto = %s", $jahr, $konto ) );
-				if ( '' === trim( $roh ) ) {
-					if ( $vorhanden ) {
-						$wpdb->delete( $t, array( 'id' => (int) $vorhanden ) );
-					}
-					continue;
-				}
-				$betrag = round( (float) str_replace( ',', '.', $roh ), 2 );
-				if ( $vorhanden ) {
-					$wpdb->update( $t, array( 'betrag' => $betrag ), array( 'id' => (int) $vorhanden ) );
-				} else {
-					$wpdb->insert( $t, array( 'jahr' => $jahr, 'konto' => $konto, 'betrag' => $betrag, 'erstellt_am' => current_time( 'mysql' ) ) );
-				}
-			}
-			$msg = sprintf( __( 'Anfangsbestände %d gespeichert.', 'vereinsplugin' ), $jahr );
-		}
-	}
-	if ( $can_edit && isset( $_POST['vp_anf_uebernehmen'] ) && check_admin_referer( 'vp_bestaende', 'vp_bestaende_nonce' ) ) {
-		// Endbestände des Vorjahres als Anfangsbestände des Folgejahres setzen.
-		$von = (int) ( $_POST['anf_von_jahr'] ?? 0 );
-		$nach = $von + 1;
-		if ( $von > 1990 && function_exists( 'vp_doppik_salden' ) ) {
-			foreach ( vp_doppik_salden( $von ) as $s ) {
-				if ( ! in_array( $s['typ'], array( 'bestand', 'neutral' ), true ) ) {
-					continue;
-				}
-				$vorhanden = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM `{$t}` WHERE jahr = %d AND konto = %s", $nach, $s['konto'] ) );
-				$row = array( 'jahr' => $nach, 'konto' => $s['konto'], 'betrag' => round( (float) $s['saldo'], 2 ) );
-				if ( $vorhanden ) {
-					$wpdb->update( $t, $row, array( 'id' => (int) $vorhanden ) );
-				} else {
-					$row['notiz']       = sprintf( __( 'Endbestand %d übernommen', 'vereinsplugin' ), $von );
-					$row['erstellt_am'] = current_time( 'mysql' );
-					$wpdb->insert( $t, $row );
-				}
-			}
-			$msg = sprintf( __( 'Endbestände %1$d als Anfangsbestände %2$d übernommen.', 'vereinsplugin' ), $von, $nach );
-		}
-	}
-
-	if ( $can_edit && isset( $_POST['vp_quellen_save'] ) && check_admin_referer( 'vp_bestaende', 'vp_bestaende_nonce' ) ) {
-		$zeilen = array();
-		foreach ( (array) ( $_POST['quelle_konto'] ?? array() ) as $q => $k ) {
-			$q = sanitize_text_field( wp_unslash( (string) $q ) );
-			$k = sanitize_text_field( wp_unslash( (string) $k ) );
-			if ( '' !== $q && '' !== $k ) {
-				$zeilen[] = $q . ' = ' . $k;
-			}
-		}
-		update_option( 'jb_quelle_konto_map', implode( "\n", $zeilen ) );
-		$msg = __( 'Zuordnung der Geld-Töpfe gespeichert.', 'vereinsplugin' );
-	}
-
-	$jahre = function_exists( 'vp_doppik_bestand_jahre' ) ? vp_doppik_bestand_jahre() : array();
-	$jahr  = isset( $_GET['anf_jahr'] ) ? (int) $_GET['anf_jahr'] : 0;
-	if ( ! $jahr ) {
-		$jahr = $jahre ? (int) max( $jahre ) : (int) current_time( 'Y' );
-	}
-	$werte = array();
-	foreach ( (array) $wpdb->get_results( $wpdb->prepare( "SELECT konto, betrag, notiz FROM `{$t}` WHERE jahr = %d", $jahr ), ARRAY_A ) as $r ) {
-		$werte[ (string) $r['konto'] ] = $r;
-	}
-	// Auch Konten anzeigen, für die es zwar Werte, aber keinen Standardnamen gibt.
-	foreach ( array_keys( $werte ) as $k ) {
-		if ( ! isset( $geldkonten[ $k ] ) ) {
-			$kk = function_exists( 'jb_konto_get' ) ? jb_konto_get( $k ) : null;
-			$geldkonten[ $k ] = $kk ? $kk->bezeichnung : $k;
-		}
-	}
-	$base = get_permalink() ?: '';
-
-	ob_start();
-	echo '<h2>' . esc_html__( 'Jahresanfangsbestände', 'vereinsplugin' ) . '</h2>';
-	if ( $msg ) {
-		echo '<div class="vp-note">' . esc_html( $msg ) . '</div>';
-	}
-	echo '<p class="vp-muted">' . esc_html__( 'Je Geschäftsjahr der tatsächliche Kontostand am 1. Januar. Alle Auswertungen rechnen ab dem Anfangsbestand des jüngsten hinterlegten Jahres.', 'vereinsplugin' ) . '</p>';
-
-	// Jahreswechsler
-	if ( $jahre ) {
-		echo '<p>';
-		foreach ( $jahre as $j ) {
-			$aktiv = ( (int) $j === $jahr ) ? ' vp-btn-primary' : '';
-			echo '<a class="vp-btn' . $aktiv . '" href="' . esc_url( add_query_arg( array( 'vp_tab' => 'buchhaltung', 'vp_bh' => 'bestaende', 'anf_jahr' => (int) $j ), $base ) ) . '">' . (int) $j . '</a> ';
-		}
-		echo '</p>';
-	}
-
-	echo '<form method="post">' . wp_nonce_field( 'vp_bestaende', 'vp_bestaende_nonce', true, false );
-	echo '<p><label>' . esc_html__( 'Geschäftsjahr', 'vereinsplugin' ) . ' <input type="number" name="anf_jahr" value="' . (int) $jahr . '" min="1990" max="2200" style="width:100px"' . ( $can_edit ? '' : ' disabled' ) . '></label></p>';
-	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Konto', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Anfangsbestand 1.1.', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Aktueller Stand (berechnet)', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
-	$topf_key = array( '1200' => 'bank', '1000' => 'kasse', '1220' => 'paypal', '1360' => 'zettle' );
-	foreach ( $geldkonten as $konto => $label ) {
-		$val   = isset( $werte[ $konto ] ) ? number_format( (float) $werte[ $konto ]['betrag'], 2, ',', '' ) : '';
-		$stand = isset( $topf_key[ $konto ] ) ? jb_topf_saldo( $topf_key[ $konto ] ) : null;
-		printf(
-			'<tr><td>%s<br><span class="vp-muted">%s</span></td><td style="text-align:right">%s</td><td style="text-align:right">%s</td></tr>',
-			esc_html( $konto ),
-			esc_html( $label ),
-			$can_edit
-				? '<input type="text" name="anf[' . esc_attr( $konto ) . ']" inputmode="decimal" value="' . esc_attr( $val ) . '" placeholder="—" style="width:120px;text-align:right">'
-				: esc_html( $val ?: '–' ),
-			null === $stand ? '<span class="vp-muted">–</span>' : '<strong>' . esc_html( number_format( $stand, 2, ',', '.' ) ) . ' €</strong>'
-		);
-	}
-	echo '</tbody></table></div>';
-	if ( $can_edit ) {
-		echo '<p><button class="vp-btn vp-btn-primary" name="vp_anf_save" value="1">' . esc_html__( 'Anfangsbestände speichern', 'vereinsplugin' ) . '</button> ';
-		echo '<span class="vp-muted">' . esc_html__( 'Leeres Feld = kein Anfangsbestand für dieses Konto/Jahr.', 'vereinsplugin' ) . '</span></p>';
-		echo '<p style="border-top:1px solid #e2e5ea;padding-top:10px">'
-			. '<label>' . esc_html__( 'Jahresabschluss: Endbestände übernehmen aus', 'vereinsplugin' )
-			. ' <input type="number" name="anf_von_jahr" value="' . (int) $jahr . '" min="1990" max="2200" style="width:100px"></label> '
-			. '<button class="vp-btn" name="vp_anf_uebernehmen" value="1">' . esc_html__( 'als Anfangsbestand des Folgejahres setzen', 'vereinsplugin' ) . '</button></p>';
-	}
-	echo '</form>';
-
-	// ── Zuordnung Geld-Topf → Konto ──────────────────────────────────────────
-	if ( function_exists( 'vp_doppik_map' ) ) {
-		$map    = vp_doppik_map();
-		$konten = function_exists( 'jb_konten_all' ) ? jb_konten_all( false ) : array();
-		echo '<h3 style="margin-top:24px">' . esc_html__( 'Welcher Geld-Topf liegt auf welchem Konto?', 'vereinsplugin' ) . '</h3>';
-		echo '<p class="vp-muted">' . esc_html__( 'Jede Buchung nennt einen Geld-Topf („Quelle"). Diese Zuordnung bestimmt, auf welchem Bestandskonto das Geld landet – rückwirkend für alle Buchungen. Wer z. B. PayPal auf ein anderes Konto legt, verschiebt damit sämtliche PayPal-Buchungen dorthin; nichts muss neu gebucht werden.', 'vereinsplugin' ) . '</p>';
-		echo '<form method="post">' . wp_nonce_field( 'vp_bestaende', 'vp_bestaende_nonce', true, false );
-		echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Geld-Topf (Quelle)', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Konto', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Buchungen', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
-		$anzahl = array();
-		foreach ( (array) $wpdb->get_results( 'SELECT quelle, COUNT(*) n FROM ' . jb_table_journal() . ' GROUP BY quelle', ARRAY_A ) as $r ) {
-			$anzahl[ (string) $r['quelle'] ] = (int) $r['n'];
-		}
-		foreach ( $map as $quelle => $konto ) {
-			$sel = '';
-			foreach ( $konten as $k ) {
-				$sel .= '<option value="' . esc_attr( $k->nummer ) . '"' . selected( (string) $k->nummer, (string) $konto, false ) . '>'
-					. esc_html( $k->nummer . ' · ' . $k->bezeichnung ) . '</option>';
-			}
-			printf(
-				'<tr><td>%s</td><td>%s</td><td style="text-align:right">%s</td></tr>',
-				esc_html( $quelle ),
-				$can_edit
-					? '<select name="quelle_konto[' . esc_attr( $quelle ) . ']">' . $sel . '</select>'
-					: esc_html( $konto ),
-				esc_html( (string) ( $anzahl[ $quelle ] ?? 0 ) )
-			);
-		}
-		echo '</tbody></table></div>';
-		if ( $can_edit ) {
-			echo '<p><button class="vp-btn vp-btn-primary" name="vp_quellen_save" value="1">' . esc_html__( 'Zuordnung speichern', 'vereinsplugin' ) . '</button></p>';
-		}
-		echo '</form>';
-	}
-
-	$alt = (string) get_option( 'jb_anfangsbestand_datum', '' );
-	if ( $alt && ! $jahre ) {
-		echo '<p class="vp-muted">' . esc_html( sprintf( __( 'Noch keine Jahreswerte hinterlegt – es gilt weiter der alte Stichtag %s.', 'vereinsplugin' ), $alt ) ) . '</p>';
 	}
 	return ob_get_clean();
 }

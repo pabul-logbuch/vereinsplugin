@@ -31,7 +31,11 @@ const SPHAEREN = [
 ];
 const JA_NEIN = [['1', 'Ja'], ['0', 'Nein']];
 
-const KONTO_GRUPPE = { einnahme: 'Einnahmen / Erträge', ausgabe: 'Ausgaben / Aufwand' };
+const KONTO_GRUPPE = { geld: 'Geldkonten', einnahme: 'Einnahmen / Erträge', ausgabe: 'Ausgaben / Aufwand' };
+const KONTO_TYPEN = [
+  ['geld', 'Geldkonto (Bank, Kasse, PayPal)'], ['einnahme', 'Einnahme / Ertrag'], ['ausgabe', 'Ausgabe / Aufwand'],
+  ['bestand', 'Bestand (Forderung, Verbindlichkeit …)'], ['neutral', 'Neutral / Verrechnung'],
+];
 // Gemeinsame Konfiguration für alle „Konto (SKR 49)"-Felder: Wert = Kontonummer,
 // Anzeige = „Nr – Bezeichnung", gruppiert nach Typ, sortiert nach Nummer.
 const KONTO_FROM = {
@@ -163,7 +167,16 @@ const T = {
     fields: {
       id: { label: 'ID', readonly: true },
       buchung_datum: { label: 'Datum', type: 'date' },
-      betrag: { label: 'Betrag (€, negativ = Ausgabe)', type: 'money' },
+      betrag: {
+        label: 'Betrag (€) – Wirkung auf das Geldkonto',
+        hint: 'Positiv = Zugang auf dem Geldkonto, negativ = Abgang. Bequemer im Buchungsjournal über „Bearbeiten".',
+        type: 'money',
+      },
+      geldkonto: {
+        label: 'Geldkonto – wo?',
+        hint: 'Das Konto, auf dem das Geld liegt (Bank, Kasse, PayPal). Bei Doppik-Buchungssätzen die eine Seite des Satzes.',
+        type: 'select', from: KONTO_FROM,
+      },
       kategorie: {
         label: 'Kategorie (Altfeld – folgt dem Konto)',
         type: 'datalist',
@@ -171,8 +184,8 @@ const T = {
       },
       beschreibung: { label: 'Beschreibung', type: 'textarea' },
       quelle: {
-        label: 'Geldtopf (Quelle) – wo?',
-        hint: 'Welches Geld sich bewegt. Negativer Betrag = raus aus diesem Topf, positiver = rein. Dahinter steht ein Bestandskonto (Bank 1200, Kasse 1000 …).',
+        label: 'Herkunft (nur Info)',
+        hint: 'Woher die Buchung stammt (Bank-Import, Z-Bon …). Seit v0.33 ohne Wirkung auf die Konten – maßgeblich ist das Geldkonto.',
         type: 'select',
         options: [
           ['', '—'],
@@ -191,8 +204,8 @@ const T = {
         type: 'select', from: KONTO_FROM,
       },
       gegenkonto: {
-        label: 'Gegenkonto (nur Umbuchung)',
-        hint: 'Nur wenn Geld zwischen zwei Töpfen wandert: der zweite Geldtopf. Sonst leer lassen.',
+        label: 'Gegenkonto (veraltet)',
+        hint: 'Nur noch bei Buchungen alter App-Versionen gefüllt; wird beim Speichern in Geldkonto umgerechnet. Leer lassen.',
         type: 'select', from: KONTO_FROM,
       },
       sphaere: {
@@ -230,6 +243,7 @@ const T = {
       },
       erstellt_am: { label: 'Erstellt am', readonly: true },
       erstellt_von: { label: 'Erstellt von (User-ID)', readonly: true },
+      geaendert_am: { label: 'Geändert am', readonly: true },
     },
   },
   jb_budgets: {
@@ -278,6 +292,21 @@ const T = {
       betrag: { label: 'Bestand am 1.1. (€)', type: 'money' },
       notiz: { label: 'Notiz' },
       erstellt_am: { label: 'Erstellt am', readonly: true },
+      geaendert_am: { label: 'Geändert am', readonly: true },
+    },
+  },
+  jb_geschaeftsjahre: {
+    label: 'Geschäftsjahre (EÜR/Doppik)',
+    group: 'Bearbeiten',
+    editable: false,
+    title: (r) => `${r.jahr} · ${r.methode === 'doppik' ? 'Doppik' : 'EÜR'}`,
+    fields: {
+      id: { label: 'ID', readonly: true },
+      jahr: { label: 'Geschäftsjahr', readonly: true },
+      methode: { label: 'Buchführungsart', readonly: true, hint: 'Ändern unter Kassier:in → Geschäftsjahr.' },
+      notiz: { label: 'Notiz', readonly: true },
+      erstellt_am: { label: 'Erstellt am', readonly: true },
+      geaendert_am: { label: 'Geändert am', readonly: true },
     },
   },
   jb_konten: {
@@ -293,7 +322,7 @@ const T = {
         label: 'Typ',
         type: 'select',
         allowEmpty: false,
-        options: [['einnahme', 'Einnahme'], ['ausgabe', 'Ausgabe']],
+        options: KONTO_TYPEN,
       },
       sphaere: { label: 'Sphäre', type: 'select', options: SPHAEREN },
       aktiv: { label: 'Aktiv', type: 'select', allowEmpty: false, options: JA_NEIN },
