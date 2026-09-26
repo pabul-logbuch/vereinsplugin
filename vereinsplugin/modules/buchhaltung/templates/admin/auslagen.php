@@ -17,7 +17,7 @@ $status_labels = ['ausstehend'=>'Ausstehend','genehmigt'=>'Genehmigt','abgelehnt
             <td><?=esc_html($a['user_name'])?></td>
             <td><?=esc_html($a['ausgabe_datum'])?></td>
             <td><strong><?=number_format((float)$a['betrag'],2,',','.')?> €</strong></td>
-            <td><?=esc_html($a['beschreibung'])?><br><small><?=esc_html($a['kategorie'])?></small></td>
+            <td><?=esc_html($a['beschreibung'])?><br><small><?=!empty($a['haendler'])?esc_html($a['haendler']).' · ':''?><?=esc_html($a['kategorie'])?></small></td>
             <td><span class="jb-badge" style="background:<?=['ausstehend'=>'#f59e0b','genehmigt'=>'#10b981','abgelehnt'=>'#ef4444','ausgezahlt'=>'#6b7280'][$a['status']]??'#999'?>"><?=$status_labels[$a['status']]??$a['status']?></span></td>
             <td><?=$a['beleg_pfad']?'<a href="'.esc_url(jb_nc()->get_download_url($a['beleg_pfad'])).'" target="_blank" class="button button-small">📎</a>':'–'?></td>
             <td>
@@ -25,6 +25,9 @@ $status_labels = ['ausstehend'=>'Ausstehend','genehmigt'=>'Genehmigt','abgelehnt
                 <button class="button button-primary jb-approve" data-id="<?=$a['id']?>">✓</button>
                 <button class="button jb-reject" data-id="<?=$a['id']?>">✗</button>
             <?php elseif ($a['status']==='genehmigt' && current_user_can('jb_mark_paid')): ?>
+                <?php if (function_exists('vp_auslage_girocode_html')): ?>
+                <details><summary>Überweisen (GiroCode)</summary><?=vp_auslage_girocode_html($a)?></details>
+                <?php endif; ?>
                 <button class="button jb-mark-paid" data-id="<?=$a['id']?>">Ausgezahlt</button>
             <?php else: echo '–'; endif; ?>
             </td>

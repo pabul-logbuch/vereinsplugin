@@ -117,6 +117,12 @@ function vp_core_setup_roles() {
 		remove_role( 'vp_antrag_offen' );
 	}
 
+	// „Ehemaliges Mitglied“: rechtelose Rolle für ausgetretene Mitglieder, deren
+	// Daten (Beiträge, Spenden, Mandatshistorie) erhalten bleiben sollen.
+	if ( ! get_role( 'vp_ehemalig' ) ) {
+		add_role( 'vp_ehemalig', __( 'Ehemaliges Mitglied', 'vereinsplugin' ), array() );
+	}
+
 	// administrator + editor: alles inkl. der „Vorstand“-Caps.
 	$vorstand_extra = array(
 		'jb_view_auslagen', 'jb_approve_auslagen', 'jb_mark_paid',

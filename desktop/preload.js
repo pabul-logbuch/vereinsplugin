@@ -5,10 +5,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 const invoke = (ch, payload) => ipcRenderer.invoke(ch, payload);
 
 contextBridge.exposeInMainWorld('api', {
+  platform: process.platform,
   config: {
     get: () => invoke('config:get'),
     set: (cfg) => invoke('config:set', cfg),
     test: () => invoke('config:test'),
+    logout: () => invoke('config:logout'),
   },
   me: () => invoke('me:get'),
   report: {

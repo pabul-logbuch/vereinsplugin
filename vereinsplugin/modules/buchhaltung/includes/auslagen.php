@@ -20,9 +20,18 @@ function jb_submit_auslage(array $data, array $file): int|WP_Error {
     // 'erstattung' = Auslage mit Rückzahlung, 'beleg' = nur Beleg archivieren.
     $modus     = ($data['modus'] ?? 'erstattung') === 'beleg' ? 'beleg' : 'erstattung';
 
+    $haendler  = sanitize_text_field(wp_unslash($data['haendler'] ?? ''));
+
     if ($betrag <= 0)    return new WP_Error('invalid_betrag', 'Betrag muss größer als 0 sein.');
     if (empty($datum))   return new WP_Error('invalid_datum',  'Datum fehlt.');
     if (empty($beschr))  return new WP_Error('invalid_beschr', 'Beschreibung fehlt.');
+
+    // Konto für die Rückzahlung (Profil-Konto, neu eingegeben oder bar).
+    $ziel = ['inhaber' => '', 'iban' => ''];
+    if ($modus === 'erstattung' && function_exists('vp_auslage_zahlungsziel_aus_formular')) {
+        $ziel = vp_auslage_zahlungsziel_aus_formular($user_id, $data);
+        if (is_wp_error($ziel)) return $ziel;
+    }
 
     global $wpdb;
     $t = jb_table_auslagen();
@@ -41,6 +50,11 @@ function jb_submit_auslage(array $data, array $file): int|WP_Error {
     $al_cols = $wpdb->get_col('SHOW COLUMNS FROM ' . $t);
     if (in_array('konto', (array) $al_cols, true)) {
         $row_ins['konto'] = $konto;
+    }
+    if (in_array('zahl_iban', (array) $al_cols, true)) {
+        $row_ins['haendler']     = $haendler;
+        $row_ins['zahl_inhaber'] = $ziel['inhaber'];
+        $row_ins['zahl_iban']    = $ziel['iban'];
     }
     $wpdb->insert($t, $row_ins);
     $id = (int) $wpdb->insert_id;
@@ -216,10 +230,11 @@ function jb_notify_kassier_new(int $auslage_id): void {
     $kassier_email = get_option('jb_kassier_email', get_option('admin_email'));
     $subject = '[JuFo] Neue Auslage von ' . $auslage['user_name'];
     $body = sprintf(
-        "Hallo,\n\n%s hat eine neue Auslage eingereicht:\n\nBetrag: %.2f €\nDatum: %s\nKategorie: %s\nBeschreibung: %s\n\nZur Genehmigung: %s\n",
+        "Hallo,\n\n%s hat eine neue Auslage eingereicht:\n\nBetrag: %.2f €\nDatum: %s\nHändler: %s\nKategorie: %s\nBeschreibung: %s\n\nZur Genehmigung: %s\n",
         $auslage['user_name'],
         $auslage['betrag'],
         $auslage['ausgabe_datum'],
+        ($auslage['haendler'] ?? '') ?: '–',
         $auslage['kategorie'],
         $auslage['beschreibung'],
         admin_url('admin.php?page=jb_auslagen&id=' . $auslage_id)

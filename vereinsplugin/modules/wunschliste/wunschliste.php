@@ -23,7 +23,6 @@ require_once WL_PATH . 'includes/voting.php';
 require_once WL_PATH . 'includes/voting-ajax.php';
 require_once WL_PATH . 'includes/voting-admin.php';
 require_once WL_PATH . 'includes/import.php';
-require_once WL_PATH . 'includes/member-import.php';
 require_once WL_PATH . 'includes/shifts.php';
 require_once WL_PATH . 'includes/shifts-admin-frontend.php';
 require_once WL_PATH . 'includes/shifts-ajax.php';

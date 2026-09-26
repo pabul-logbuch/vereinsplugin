@@ -1022,6 +1022,11 @@ function vp_sync_action_auslage_submit( WP_REST_Request $req ) {
 		'konto'         => sanitize_text_field( (string) ( $p['konto'] ?? '' ) ),
 		'modus'         => ( ( $p['modus'] ?? 'erstattung' ) === 'beleg' || ! empty( $p['nur_beleg'] ) ) ? 'beleg' : 'erstattung',
 		'budget_id'     => ! empty( $p['budget_id'] ) ? (int) $p['budget_id'] : 0,
+		'haendler'      => sanitize_text_field( (string) ( $p['haendler'] ?? '' ) ),
+		// Ohne Auswahl nimmt jb_submit_auslage() das hinterlegte Profil-Konto.
+		'zahl_wahl'     => sanitize_key( (string) ( $p['zahl_wahl'] ?? '' ) ),
+		'zahl_inhaber'  => (string) ( $p['zahl_inhaber'] ?? '' ),
+		'zahl_iban'     => (string) ( $p['zahl_iban'] ?? '' ),
 	);
 	$files = $req->get_file_params();
 	$file  = $files['file'] ?? array();

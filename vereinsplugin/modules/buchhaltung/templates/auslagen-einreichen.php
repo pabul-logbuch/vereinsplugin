@@ -26,6 +26,12 @@
         </div>
 
         <div class="jb-field">
+            <label for="jb-haendler">Wo gekauft? (Händler) *</label>
+            <input type="text" id="jb-haendler" name="haendler" maxlength="150"
+                   placeholder="z. B. Rewe, Bauhaus, Amazon" required>
+        </div>
+
+        <div class="jb-field">
             <label for="jb-betrag">Betrag (€) *</label>
             <input type="number" id="jb-betrag" name="betrag" step="0.01" min="0.01"
                    placeholder="0,00" required>
@@ -84,6 +90,39 @@
                       placeholder="z. B. Putzmittel für Küche (Rewe)" required></textarea>
         </div>
 
+        <?php
+        // Konto für die Rückzahlung: hinterlegte Profil-Konten, neues Konto oder bar.
+        $jb_konten_user = function_exists('vp_user_bankkonten') ? vp_user_bankkonten(get_current_user_id()) : [];
+        if (function_exists('vp_user_bankkonten')): ?>
+        <div class="jb-field" id="jb-zahl-wrap">
+            <label>Rückzahlung auf *</label>
+            <?php $jb_erstes = true; foreach ($jb_konten_user as $jb_key => $jb_k): ?>
+                <label style="font-weight:400;display:block;margin:4px 0">
+                    <input type="radio" name="zahl_wahl" value="<?= esc_attr($jb_key) ?>" <?= $jb_erstes ? 'checked' : '' ?>>
+                    <?= esc_html($jb_k['inhaber']) ?> · <?= esc_html(vp_iban_format($jb_k['iban'])) ?>
+                    <small class="jb-muted">(<?= esc_html($jb_k['label']) ?>)</small>
+                </label>
+            <?php $jb_erstes = false; endforeach; ?>
+            <label style="font-weight:400;display:block;margin:4px 0">
+                <input type="radio" name="zahl_wahl" value="neu" <?= $jb_konten_user ? '' : 'checked' ?>>
+                <?= $jb_konten_user ? 'Anderes Konto' : 'Konto angeben' ?>
+            </label>
+            <div id="jb-zahl-neu" style="margin:6px 0 6px 22px<?= $jb_konten_user ? ';display:none' : '' ?>">
+                <input type="text" name="zahl_inhaber" placeholder="Kontoinhaber:in"
+                       value="<?= esc_attr(wp_get_current_user()->display_name) ?>" autocomplete="name" style="margin-bottom:6px">
+                <input type="text" name="zahl_iban" placeholder="IBAN, z. B. DE89 3704 0044 0532 0130 00" autocomplete="off">
+                <label style="font-weight:400;display:block;margin:4px 0">
+                    <input type="checkbox" name="zahl_speichern" value="1" <?= $jb_konten_user ? '' : 'checked' ?>>
+                    in meinem Profil als Konto für Erstattungen speichern
+                </label>
+            </div>
+            <label style="font-weight:400;display:block;margin:4px 0">
+                <input type="radio" name="zahl_wahl" value="bar">
+                Bar auszahlen
+            </label>
+        </div>
+        <?php endif; ?>
+
         <div class="jb-field">
             <label for="jb-beleg">Beleg (Foto/PDF) *</label>
             <div class="jb-upload-area" id="jb-upload-area">
@@ -114,6 +153,17 @@
             $('#jb-upload-hint').hide();
         });
 
+        // Kontoauswahl nur bei Erstattung, Eingabefelder nur bei „anderes Konto“.
+        function jbZahlSichtbar() {
+            const erst = $('input[name=modus]:checked').val() !== 'beleg';
+            const neu  = $('input[name=zahl_wahl]:checked').val() === 'neu';
+            $('#jb-zahl-wrap').toggle(erst);
+            $('#jb-zahl-neu').toggle(neu);
+            $('#jb-zahl-neu input[name=zahl_iban]').prop('required', erst && neu);
+        }
+        $('#jb-auslage-form').on('change', 'input[name=modus], input[name=zahl_wahl]', jbZahlSichtbar);
+        jbZahlSichtbar();
+
         // Submit
         $('#jb-auslage-form').on('submit', function(e) {
             e.preventDefault();
@@ -130,6 +180,7 @@
                             '✓ ' + r.data.message + ' Die Auslage bekommt die ID #' + r.data.id + '.'
                         ).show();
                         $('#jb-auslage-form')[0].reset();
+                        jbZahlSichtbar();
                         $('#jb-upload-preview').hide();
                         $('#jb-upload-hint').show();
                     } else {

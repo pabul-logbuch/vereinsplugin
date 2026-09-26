@@ -365,10 +365,22 @@ function vp_shortcode_member_area( $atts ) {
 					if ( ! $in_group ) {
 						continue;
 					}
+					// Benannte Gruppen sind einklappbar – offen, wenn der aktive
+					// Bereich darin liegt (sonst merkt sich app.js den Zustand).
 					if ( $g_label ) {
-						echo '<div class="vp-nav-group">' . esc_html( $g_label ) . '</div>';
+						printf(
+							'<details class="vp-nav-fold vp-nav-fold-group" data-fold="%s"%s><summary class="vp-nav-group">%s</summary>',
+							esc_attr( $g ),
+							isset( $in_group[ $active ] ) ? ' open data-has-active="1"' : '',
+							esc_html( $g_label )
+						);
 					}
 					foreach ( $in_group as $key => $s ) {
+						// Bereiche mit Unterpunkten (z. B. Sitzungen & Protokolle).
+						if ( ! empty( $s['children'] ) && is_callable( $s['children'] ) ) {
+							vp_render_nav_children( $key, $s, $base_url, $key === $active );
+							continue;
+						}
 						$url = add_query_arg( 'vp_tab', $key, $base_url );
 						printf(
 							'<a class="vp-nav-item%s" href="%s" data-vp-tab="%s">%s</a>',
@@ -377,6 +389,9 @@ function vp_shortcode_member_area( $atts ) {
 							esc_attr( $key ),
 							esc_html( $s['label'] )
 						);
+					}
+					if ( $g_label ) {
+						echo '</details>';
 					}
 				}
 				?>
@@ -479,10 +494,10 @@ function vp_render_profile_section() {
 			'last_name'  => sanitize_text_field( wp_unslash( $_POST['last_name'] ?? '' ) ),
 			'user_email' => sanitize_email( wp_unslash( $_POST['user_email'] ?? $u->user_email ) ),
 		) );
-		foreach ( array( 'vp_telefon', 'vp_strasse', 'vp_plz', 'vp_ort', 'vp_land', 'vp_sepa_iban', 'vp_sepa_kontoinhaber' ) as $k ) {
+		foreach ( array( 'vp_telefon', 'vp_strasse', 'vp_plz', 'vp_ort', 'vp_land', 'vp_sepa_iban', 'vp_sepa_kontoinhaber', 'vp_erstattung_iban', 'vp_erstattung_kontoinhaber' ) as $k ) {
 			update_user_meta( $uid, $k, sanitize_text_field( wp_unslash( $_POST[ $k ] ?? '' ) ) );
 		}
-		$msg = __( 'Profil gespeichert.', 'vereinsplugin' );
+		$msg = __( 'Profil gespeichert.', 'vereinsplugin' ) . vp_member_ibans_normalisieren( $uid );
 		$u   = wp_get_current_user();
 	}
 
@@ -505,9 +520,18 @@ function vp_render_profile_section() {
 			<label><?php esc_html_e( 'PLZ', 'vereinsplugin' ); ?><input type="text" name="vp_plz" value="<?php echo $m( 'vp_plz' ); ?>"></label>
 			<label><?php esc_html_e( 'Ort', 'vereinsplugin' ); ?><input type="text" name="vp_ort" value="<?php echo $m( 'vp_ort' ); ?>"></label>
 			<label><?php esc_html_e( 'Land', 'vereinsplugin' ); ?><input type="text" name="vp_land" value="<?php echo $m( 'vp_land' ); ?>"></label>
-			<label class="vp-col-2"><?php esc_html_e( 'SEPA Kontoinhaber:in', 'vereinsplugin' ); ?><input type="text" name="vp_sepa_kontoinhaber" value="<?php echo $m( 'vp_sepa_kontoinhaber' ); ?>"></label>
-			<label class="vp-col-2"><?php esc_html_e( 'SEPA IBAN', 'vereinsplugin' ); ?><input type="text" name="vp_sepa_iban" value="<?php echo $m( 'vp_sepa_iban' ); ?>"></label>
 		</div>
+		<fieldset>
+			<legend><?php esc_html_e( 'Bankverbindungen', 'vereinsplugin' ); ?></legend>
+			<div class="vp-form-grid">
+				<p class="vp-muted vp-col-2"><?php esc_html_e( 'Konto für den Mitgliedsbeitrag (SEPA-Lastschrift):', 'vereinsplugin' ); ?></p>
+				<label class="vp-col-2"><?php esc_html_e( 'Kontoinhaber:in', 'vereinsplugin' ); ?><input type="text" name="vp_sepa_kontoinhaber" value="<?php echo $m( 'vp_sepa_kontoinhaber' ); ?>"></label>
+				<label class="vp-col-2"><?php esc_html_e( 'IBAN', 'vereinsplugin' ); ?><input type="text" name="vp_sepa_iban" value="<?php echo $m( 'vp_sepa_iban' ); ?>" autocomplete="off"></label>
+				<p class="vp-muted vp-col-2"><?php esc_html_e( 'Konto für Erstattungen von Auslagen – leer lassen, wenn dafür das Beitragskonto genutzt werden soll:', 'vereinsplugin' ); ?></p>
+				<label class="vp-col-2"><?php esc_html_e( 'Kontoinhaber:in', 'vereinsplugin' ); ?><input type="text" name="vp_erstattung_kontoinhaber" value="<?php echo $m( 'vp_erstattung_kontoinhaber' ); ?>"></label>
+				<label class="vp-col-2"><?php esc_html_e( 'IBAN', 'vereinsplugin' ); ?><input type="text" name="vp_erstattung_iban" value="<?php echo $m( 'vp_erstattung_iban' ); ?>" autocomplete="off"></label>
+			</div>
+		</fieldset>
 		<p><button class="vp-btn vp-btn-primary" name="vp_profil_save" value="1"><?php esc_html_e( 'Speichern', 'vereinsplugin' ); ?></button>
 		<a class="vp-btn" href="<?php echo esc_url( admin_url( 'profile.php' ) ); ?>"><?php esc_html_e( 'Passwort ändern', 'vereinsplugin' ); ?></a></p>
 	</form>
@@ -570,29 +594,518 @@ function vp_render_schichtplaene_section() {
 	return ob_get_clean();
 }
 
-/* ---- Vorstand: Mitgliederliste ---- */
+/* ---- Vorstand: Mitglieder ansehen und bearbeiten ---- */
+
+/**
+ * Rollen, die im Verein vorkommen: Schlüssel => Anzeigename. Nur Rollen, die es
+ * auf dieser Installation wirklich gibt (vp_antrag_offen z. B. nur, wenn der
+ * Antragsablauf „wartender Zugang“ eingestellt ist).
+ */
+function vp_member_role_labels() {
+	$labels = array(
+		VP_MEMBER_ROLE    => __( 'Vereinsmitglied', 'vereinsplugin' ),
+		'pp_mitglied'     => __( 'Vereinsmitglied (alte Rolle)', 'vereinsplugin' ),
+		'editor'          => __( 'Vorstand', 'vereinsplugin' ),
+		'administrator'   => __( 'Administrator:in', 'vereinsplugin' ),
+		'vp_antrag_offen' => __( 'Antrag offen (kein Zugang)', 'vereinsplugin' ),
+		'vp_ehemalig'     => __( 'Ehemaliges Mitglied (kein Zugang)', 'vereinsplugin' ),
+	);
+	foreach ( array_keys( $labels ) as $role ) {
+		if ( ! get_role( $role ) ) {
+			unset( $labels[ $role ] );
+		}
+	}
+	return $labels;
+}
+
+/** Rollen, die hier vergeben werden dürfen – die Altlast `pp_mitglied` nicht. */
+function vp_member_assignable_roles() {
+	$roles = vp_member_role_labels();
+	unset( $roles['pp_mitglied'] );
+	return $roles;
+}
+
+function vp_member_roles_text( $user ) {
+	$labels = vp_member_role_labels();
+	$names  = array();
+	foreach ( (array) $user->roles as $r ) {
+		$names[] = isset( $labels[ $r ] ) ? $labels[ $r ] : $r;
+	}
+	return $names ? implode( ', ', $names ) : __( 'keine Rolle', 'vereinsplugin' );
+}
+
+/**
+ * Darf die aktuelle Person dieses Konto bearbeiten? Konten mit Admin-Rechten
+ * darf nur eine Administrator:in anfassen – sonst könnte der Vorstand (Editor)
+ * das Passwort/die Mail einer Admin-Person ändern und sich so hochstufen.
+ */
+function vp_member_can_edit( $user ) {
+	if ( ! current_user_can( 'vp_manage_members' ) || ! $user || ! $user->exists() ) {
+		return false;
+	}
+	return ! user_can( $user->ID, 'manage_options' ) || current_user_can( 'manage_options' );
+}
+
+/** Rollenwechsel: nur mit `promote_users` (Admin) und nie an sich selbst. */
+function vp_member_can_edit_role( $user ) {
+	return vp_member_can_edit( $user )
+		&& current_user_can( 'promote_users' )
+		&& (int) $user->ID !== get_current_user_id();
+}
+
+/** URL in den Mitglieder-Bereich (Liste oder ein einzelnes Konto). */
+function vp_members_url( $args = array() ) {
+	$base = get_permalink();
+	if ( ! $base ) {
+		$base = remove_query_arg( array( 'vp_member', 'vp_q', 'vp_role' ) );
+	}
+	return add_query_arg( array_merge( array( 'vp_tab' => 'mitglieder' ), $args ), $base );
+}
+
+/**
+ * Query-Parameter der Ziel-URL als Hidden-Felder ausgeben. Nötig für GET-
+ * Formulare: bei „einfachen“ Permalinks steckt die Seiten-ID (?page_id=…) im
+ * action-Attribut und würde beim Absenden verloren gehen.
+ */
+function vp_hidden_query_fields( $url ) {
+	$query = wp_parse_url( $url, PHP_URL_QUERY );
+	if ( ! $query ) {
+		return;
+	}
+	parse_str( $query, $args );
+	foreach ( $args as $k => $v ) {
+		if ( is_scalar( $v ) ) {
+			printf( '<input type="hidden" name="%s" value="%s">', esc_attr( $k ), esc_attr( $v ) );
+		}
+	}
+}
+
+/** Einfache Textfelder am Mitgliedskonto (gleiche Schlüssel wie Antrag + Sync). */
+function vp_member_meta_keys() {
+	return array(
+		'vp_telefon', 'vp_geburtsdatum', 'vp_strasse', 'vp_plz', 'vp_ort', 'vp_land',
+		'vp_mitglied_seit', 'vp_ausgetreten_am', 'vp_mitglieds_nr', 'vp_mitgliedsart',
+		'vp_beitrag', 'vp_beitrag_intervall',
+		'vp_sepa_kontoinhaber', 'vp_sepa_iban', 'vp_mandatsref',
+		'vp_erstattung_kontoinhaber', 'vp_erstattung_iban',
+	);
+}
+
+/**
+ * IBANs am Konto normalisieren (Leerzeichen raus, Großbuchstaben). Eine
+ * kaputte IBAN blockiert das Speichern nicht, wird aber gemeldet.
+ * Gibt den Warnhinweis (mit führendem Leerzeichen) oder '' zurück.
+ */
+function vp_member_ibans_normalisieren( $user_id ) {
+	if ( ! function_exists( 'vp_iban_normalize' ) ) {
+		return '';
+	}
+	$zusatz = '';
+	foreach ( array( 'vp_sepa_iban', 'vp_erstattung_iban' ) as $k ) {
+		$iban = vp_iban_normalize( (string) get_user_meta( $user_id, $k, true ) );
+		update_user_meta( $user_id, $k, $iban );
+		if ( '' !== $iban && function_exists( 'vp_iban_valid' ) && ! vp_iban_valid( $iban ) ) {
+			$zusatz .= ' ' . sprintf( __( 'Achtung: Die IBAN %s sieht nicht gültig aus.', 'vereinsplugin' ), $iban );
+		}
+	}
+	return $zusatz;
+}
+
+function vp_mitgliedsarten() {
+	return array(
+		''          => __( '– nicht festgelegt –', 'vereinsplugin' ),
+		'aktiv'     => __( 'aktiv', 'vereinsplugin' ),
+		'passiv'    => __( 'passiv', 'vereinsplugin' ),
+		'foerdernd' => __( 'fördernd', 'vereinsplugin' ),
+	);
+}
+
+function vp_beitrag_intervalle() {
+	return array(
+		''                 => __( '– kein Beitrag –', 'vereinsplugin' ),
+		'monatlich'        => __( 'monatlich', 'vereinsplugin' ),
+		'vierteljaehrlich' => __( 'vierteljährlich', 'vereinsplugin' ),
+		'halbjaehrlich'    => __( 'halbjährlich', 'vereinsplugin' ),
+		'jaehrlich'        => __( 'jährlich', 'vereinsplugin' ),
+	);
+}
+
+/** Ämter der Person aus ProtokollPro: „Kreis · Rolle“ (nur laufende Amtszeiten). */
+function vp_member_aemter( $user_id ) {
+	if ( ! function_exists( 'pp_get_gremien' ) || ! function_exists( 'pp_get_rollenvorlagen_fuer_gremium' ) ) {
+		return array();
+	}
+	$out = array();
+	foreach ( pp_get_gremien( null, false ) as $g ) {
+		foreach ( pp_get_rollenvorlagen_fuer_gremium( $g->id ) as $vorlage ) {
+			foreach ( pp_get_aktuelle_besetzungen( $vorlage->id ) as $b ) {
+				if ( (int) $b->user_id === (int) $user_id ) {
+					$out[] = array(
+						'gremium_id' => (int) $g->id,
+						'text'       => $g->name . ' · ' . $vorlage->bezeichnung,
+					);
+				}
+			}
+		}
+	}
+	return $out;
+}
 
 function vp_render_members_section() {
 	if ( ! current_user_can( 'vp_manage_members' ) ) {
 		return '<div class="vp-note vp-note-error">' . esc_html__( 'Keine Berechtigung.', 'vereinsplugin' ) . '</div>';
 	}
-	$users = get_users( array( 'role__in' => array( VP_MEMBER_ROLE, 'pp_mitglied' ), 'orderby' => 'display_name' ) );
-	ob_start();
-	echo '<h2>' . esc_html__( 'Mitglieder', 'vereinsplugin' ) . ' <span class="vp-muted">(' . count( $users ) . ')</span></h2>';
-	echo '<p><a class="vp-btn" href="' . esc_url( admin_url( 'admin.php?page=wunschliste-mitglied' ) ) . '">' . esc_html__( 'Mitglied manuell anlegen', 'vereinsplugin' ) . '</a> ';
-	echo '<a class="vp-btn" href="' . esc_url( admin_url( 'admin.php?page=wunschliste-mitglieder-import' ) ) . '">' . esc_html__( 'CSV-Import', 'vereinsplugin' ) . '</a></p>';
-	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Name', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'E-Mail', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Ort', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Mitglied seit', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
+	$edit_id = isset( $_GET['vp_member'] ) ? (int) $_GET['vp_member'] : 0;
+	if ( isset( $_POST['vp_member_id'] ) ) {
+		$edit_id = (int) $_POST['vp_member_id'];
+	}
+	return $edit_id ? vp_render_member_edit( $edit_id ) : vp_render_members_list();
+}
+
+/* ---- Liste ---- */
+
+function vp_render_members_list() {
+	$labels = vp_member_role_labels();
+
+	$q    = isset( $_GET['vp_q'] ) ? sanitize_text_field( wp_unslash( $_GET['vp_q'] ) ) : '';
+	$role = isset( $_GET['vp_role'] ) ? sanitize_key( wp_unslash( $_GET['vp_role'] ) ) : 'alle';
+	if ( 'alle' !== $role && ! isset( $labels[ $role ] ) ) {
+		$role = 'alle';
+	}
+
+	$users = get_users( array( 'role__in' => array_keys( $labels ), 'orderby' => 'display_name' ) );
+	$total = count( $users );
+	$needle = $q ? vp_strtolower( $q ) : '';
+
+	$rows = array();
 	foreach ( $users as $usr ) {
+		if ( 'alle' !== $role && ! in_array( $role, (array) $usr->roles, true ) ) {
+			continue;
+		}
+		// Ehemalige nur zeigen, wenn ausdrücklich danach gefiltert wird.
+		if ( 'alle' === $role && array( 'vp_ehemalig' ) === array_values( (array) $usr->roles ) ) {
+			continue;
+		}
+		$ort = (string) get_user_meta( $usr->ID, 'vp_ort', true );
+		if ( $needle ) {
+			$heu = vp_strtolower( implode( ' ', array(
+				$usr->display_name, $usr->user_email, $usr->user_login, $ort,
+				(string) get_user_meta( $usr->ID, 'vp_plz', true ),
+			) ) );
+			if ( false === strpos( $heu, $needle ) ) {
+				continue;
+			}
+		}
+		$rows[] = array( 'user' => $usr, 'ort' => $ort );
+	}
+
+	$list_url = vp_members_url();
+
+	ob_start();
+	echo '<h2>' . esc_html__( 'Mitglieder', 'vereinsplugin' ) . ' <span class="vp-muted">(' . (int) count( $rows )
+		. ( count( $rows ) !== $total ? ' / ' . (int) $total : '' ) . ')</span></h2>';
+
+	if ( current_user_can( 'manage_options' ) ) {
+		echo '<p><a class="vp-btn" href="' . esc_url( admin_url( 'admin.php?page=wunschliste-mitglied' ) ) . '">' . esc_html__( 'Mitglied manuell anlegen', 'vereinsplugin' ) . '</a> ';
+		echo '<a class="vp-btn" href="' . esc_url( admin_url( 'admin.php?page=wunschliste-mitglieder-import' ) ) . '">' . esc_html__( 'CSV-Import', 'vereinsplugin' ) . '</a></p>';
+	}
+	?>
+	<form method="get" class="vp-form vp-member-filter" action="<?php echo esc_url( $list_url ); ?>">
+		<?php vp_hidden_query_fields( $list_url ); ?>
+		<label><?php esc_html_e( 'Suche (Name, E-Mail, Ort)', 'vereinsplugin' ); ?>
+			<input type="search" name="vp_q" value="<?php echo esc_attr( $q ); ?>"></label>
+		<label><?php esc_html_e( 'Rolle', 'vereinsplugin' ); ?>
+			<select name="vp_role">
+				<option value="alle"><?php esc_html_e( 'alle Rollen (ohne Ehemalige)', 'vereinsplugin' ); ?></option>
+				<?php foreach ( $labels as $key => $label ) : ?>
+					<option value="<?php echo esc_attr( $key ); ?>" <?php selected( $role, $key ); ?>><?php echo esc_html( $label ); ?></option>
+				<?php endforeach; ?>
+			</select></label>
+		<p><button class="vp-btn vp-btn-primary"><?php esc_html_e( 'Filtern', 'vereinsplugin' ); ?></button>
+		<?php if ( $q || 'alle' !== $role ) : ?>
+			<a class="vp-btn" href="<?php echo esc_url( $list_url ); ?>"><?php esc_html_e( 'Zurücksetzen', 'vereinsplugin' ); ?></a>
+		<?php endif; ?></p>
+	</form>
+	<?php
+
+	if ( ! $rows ) {
+		echo '<p class="vp-muted">' . esc_html__( 'Keine Mitglieder in dieser Ansicht.', 'vereinsplugin' ) . '</p>';
+		return ob_get_clean();
+	}
+
+	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr>'
+		. '<th>' . esc_html__( 'Name', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'Rolle', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'E-Mail', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'Ort', 'vereinsplugin' ) . '</th>'
+		. '<th>' . esc_html__( 'Mitglied seit', 'vereinsplugin' ) . '</th>'
+		. '<th></th></tr></thead><tbody>';
+
+	foreach ( $rows as $row ) {
+		$usr  = $row['user'];
+		$url  = vp_members_url( array( 'vp_member' => $usr->ID ) );
+		$seit = (string) get_user_meta( $usr->ID, 'vp_mitglied_seit', true );
+		$seit_ts = $seit ? strtotime( $seit ) : 0;
 		printf(
-			'<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+			'<tr><td><a href="%1$s">%2$s</a></td><td><span class="vp-badge">%3$s</span></td><td>%4$s</td><td>%5$s</td><td>%6$s</td>'
+			. '<td><a class="vp-btn" href="%1$s">%7$s</a></td></tr>',
+			esc_url( $url ),
 			esc_html( $usr->display_name ),
+			esc_html( vp_member_roles_text( $usr ) ),
 			esc_html( $usr->user_email ),
-			esc_html( get_user_meta( $usr->ID, 'vp_ort', true ) ),
-			esc_html( get_user_meta( $usr->ID, 'vp_mitglied_seit', true ) )
+			esc_html( $row['ort'] ),
+			esc_html( $seit_ts ? date_i18n( 'd.m.Y', $seit_ts ) : $seit ),
+			esc_html__( 'Bearbeiten', 'vereinsplugin' )
 		);
 	}
 	echo '</tbody></table></div>';
 	return ob_get_clean();
+}
+
+function vp_strtolower( $s ) {
+	return function_exists( 'mb_strtolower' ) ? mb_strtolower( $s, 'UTF-8' ) : strtolower( $s );
+}
+
+/* ---- Einzelnes Mitglied bearbeiten ---- */
+
+function vp_render_member_edit( $user_id ) {
+	$user      = get_userdata( (int) $user_id );
+	$back      = '<p><a class="vp-btn" href="' . esc_url( vp_members_url() ) . '">' . esc_html__( '← Zur Mitgliederliste', 'vereinsplugin' ) . '</a></p>';
+	if ( ! $user || ! vp_member_can_edit( $user ) ) {
+		return '<div class="vp-note vp-note-error">' . esc_html__( 'Dieses Konto kann hier nicht bearbeitet werden. Konten mit Administrator-Rechten ändert nur eine Administrator:in.', 'vereinsplugin' ) . '</div>' . $back;
+	}
+
+	$msg   = '';
+	$is_err = false;
+	if ( isset( $_POST['vp_member_pwmail'] ) && check_admin_referer( 'vp_member_edit', 'vp_member_nonce' ) ) {
+		$sent = retrieve_password( $user->user_login );
+		if ( is_wp_error( $sent ) ) {
+			$msg    = $sent->get_error_message();
+			$is_err = true;
+		} else {
+			$msg = __( 'Link zum Passwort-Setzen wurde an die hinterlegte E-Mail-Adresse geschickt.', 'vereinsplugin' );
+		}
+	} elseif ( isset( $_POST['vp_member_save'] ) && check_admin_referer( 'vp_member_edit', 'vp_member_nonce' ) ) {
+		list( $state, $msg ) = vp_member_save( $user );
+		$is_err = ( 'error' === $state );
+		$user   = get_userdata( (int) $user_id ); // Frisch laden: Rolle/Name können sich geändert haben.
+	}
+
+	$m = function ( $k ) use ( $user ) { return esc_attr( get_user_meta( $user->ID, $k, true ) ); };
+	$can_role = vp_member_can_edit_role( $user );
+	$aemter   = vp_member_aemter( $user->ID );
+
+	ob_start();
+	echo $back; // phpcs:ignore WordPress.Security.EscapeOutput
+	echo '<h2>' . esc_html( $user->display_name ) . ' <span class="vp-badge">' . esc_html( vp_member_roles_text( $user ) ) . '</span></h2>';
+	echo '<p class="vp-muted">' . esc_html( sprintf(
+		/* translators: 1: user login, 2: registration date */
+		__( 'Benutzername: %1$s · Konto angelegt am %2$s', 'vereinsplugin' ),
+		$user->user_login,
+		date_i18n( 'd.m.Y', strtotime( $user->user_registered ) )
+	) ) . '</p>';
+	if ( $msg ) {
+		echo '<div class="vp-note' . ( $is_err ? ' vp-note-error' : '' ) . '">' . esc_html( $msg ) . '</div>';
+	}
+	?>
+	<form method="post" class="vp-form vp-card vp-member-edit">
+		<?php wp_nonce_field( 'vp_member_edit', 'vp_member_nonce' ); ?>
+		<input type="hidden" name="vp_member_id" value="<?php echo (int) $user->ID; ?>">
+
+		<fieldset>
+			<legend><?php esc_html_e( 'Stammdaten', 'vereinsplugin' ); ?></legend>
+			<div class="vp-form-grid">
+				<label><?php esc_html_e( 'Vorname', 'vereinsplugin' ); ?><input type="text" name="first_name" value="<?php echo esc_attr( $user->first_name ); ?>"></label>
+				<label><?php esc_html_e( 'Nachname', 'vereinsplugin' ); ?><input type="text" name="last_name" value="<?php echo esc_attr( $user->last_name ); ?>"></label>
+				<label class="vp-col-2"><?php esc_html_e( 'Anzeigename (erscheint überall im Mitgliederbereich)', 'vereinsplugin' ); ?><input type="text" name="display_name" value="<?php echo esc_attr( $user->display_name ); ?>"></label>
+				<label><?php esc_html_e( 'E-Mail', 'vereinsplugin' ); ?><input type="email" name="user_email" value="<?php echo esc_attr( $user->user_email ); ?>"></label>
+				<label><?php esc_html_e( 'Telefon', 'vereinsplugin' ); ?><input type="tel" name="vp_telefon" value="<?php echo $m( 'vp_telefon' ); ?>"></label>
+				<label><?php esc_html_e( 'Geburtsdatum', 'vereinsplugin' ); ?><input type="date" name="vp_geburtsdatum" value="<?php echo $m( 'vp_geburtsdatum' ); ?>"></label>
+			</div>
+		</fieldset>
+
+		<fieldset>
+			<legend><?php esc_html_e( 'Anschrift', 'vereinsplugin' ); ?></legend>
+			<div class="vp-form-grid">
+				<label class="vp-col-2"><?php esc_html_e( 'Straße & Nr.', 'vereinsplugin' ); ?><input type="text" name="vp_strasse" value="<?php echo $m( 'vp_strasse' ); ?>"></label>
+				<label><?php esc_html_e( 'PLZ', 'vereinsplugin' ); ?><input type="text" name="vp_plz" value="<?php echo $m( 'vp_plz' ); ?>"></label>
+				<label><?php esc_html_e( 'Ort', 'vereinsplugin' ); ?><input type="text" name="vp_ort" value="<?php echo $m( 'vp_ort' ); ?>"></label>
+				<label><?php esc_html_e( 'Land', 'vereinsplugin' ); ?><input type="text" name="vp_land" value="<?php echo $m( 'vp_land' ); ?>"></label>
+			</div>
+		</fieldset>
+
+		<fieldset>
+			<legend><?php esc_html_e( 'Mitgliedschaft', 'vereinsplugin' ); ?></legend>
+			<div class="vp-form-grid">
+				<label class="vp-col-2"><?php esc_html_e( 'Rolle im Verein', 'vereinsplugin' ); ?>
+					<?php if ( $can_role ) : ?>
+						<select name="vp_member_role">
+							<?php
+							$rollen  = array_values( (array) $user->roles );
+							$aktuell = $rollen ? $rollen[0] : '';
+							foreach ( vp_member_assignable_roles() as $key => $label ) {
+								printf( '<option value="%s"%s>%s</option>', esc_attr( $key ), selected( $aktuell, $key, false ), esc_html( $label ) );
+							}
+							?>
+						</select>
+					<?php else : ?>
+						<input type="text" value="<?php echo esc_attr( vp_member_roles_text( $user ) ); ?>" disabled>
+					<?php endif; ?>
+				</label>
+				<?php if ( ! $can_role ) : ?>
+					<p class="vp-muted vp-col-2"><?php
+						echo (int) $user->ID === get_current_user_id()
+							? esc_html__( 'Die eigene Rolle kann hier nicht geändert werden.', 'vereinsplugin' )
+							: esc_html__( 'Rollen vergibt nur eine Administrator:in.', 'vereinsplugin' );
+					?></p>
+				<?php endif; ?>
+				<label><?php esc_html_e( 'Mitglieds-Nr.', 'vereinsplugin' ); ?><input type="text" name="vp_mitglieds_nr" value="<?php echo $m( 'vp_mitglieds_nr' ); ?>"></label>
+				<label><?php esc_html_e( 'Mitgliedsart', 'vereinsplugin' ); ?>
+					<select name="vp_mitgliedsart">
+						<?php
+						$art = (string) get_user_meta( $user->ID, 'vp_mitgliedsart', true );
+						foreach ( vp_mitgliedsarten() as $key => $label ) {
+							printf( '<option value="%s"%s>%s</option>', esc_attr( $key ), selected( $art, $key, false ), esc_html( $label ) );
+						}
+						?>
+					</select></label>
+				<label><?php esc_html_e( 'Mitglied seit', 'vereinsplugin' ); ?><input type="date" name="vp_mitglied_seit" value="<?php echo $m( 'vp_mitglied_seit' ); ?>"></label>
+				<label><?php esc_html_e( 'Ausgetreten am', 'vereinsplugin' ); ?><input type="date" name="vp_ausgetreten_am" value="<?php echo $m( 'vp_ausgetreten_am' ); ?>"></label>
+				<?php $gruppen = (string) get_user_meta( $user->ID, 'vp_gruppen', true ); if ( $gruppen ) : ?>
+					<p class="vp-muted vp-col-2"><?php echo esc_html( sprintf( __( 'Aus der alten Vereinsverwaltung: %s', 'vereinsplugin' ), $gruppen ) ); ?></p>
+				<?php endif; ?>
+				<label><?php esc_html_e( 'Beitrag (€)', 'vereinsplugin' ); ?><input type="number" step="0.01" min="0" name="vp_beitrag" value="<?php echo $m( 'vp_beitrag' ); ?>"></label>
+				<label class="vp-col-2"><?php esc_html_e( 'Beitragsintervall', 'vereinsplugin' ); ?>
+					<select name="vp_beitrag_intervall">
+						<?php
+						$iv = (string) get_user_meta( $user->ID, 'vp_beitrag_intervall', true );
+						foreach ( vp_beitrag_intervalle() as $key => $label ) {
+							printf( '<option value="%s"%s>%s</option>', esc_attr( $key ), selected( $iv, $key, false ), esc_html( $label ) );
+						}
+						?>
+					</select></label>
+				<label class="vp-col-2"><?php esc_html_e( 'Interne Notiz (nur für den Vorstand sichtbar)', 'vereinsplugin' ); ?>
+					<textarea name="vp_notiz" rows="3"><?php echo esc_textarea( get_user_meta( $user->ID, 'vp_notiz', true ) ); ?></textarea></label>
+			</div>
+		</fieldset>
+
+		<fieldset>
+			<legend><?php esc_html_e( 'SEPA-Lastschrift', 'vereinsplugin' ); ?></legend>
+			<div class="vp-form-grid">
+				<label class="vp-col-2"><?php esc_html_e( 'Kontoinhaber:in', 'vereinsplugin' ); ?><input type="text" name="vp_sepa_kontoinhaber" value="<?php echo $m( 'vp_sepa_kontoinhaber' ); ?>"></label>
+				<label class="vp-col-2"><?php esc_html_e( 'IBAN', 'vereinsplugin' ); ?><input type="text" name="vp_sepa_iban" value="<?php echo $m( 'vp_sepa_iban' ); ?>"></label>
+				<label><?php esc_html_e( 'Mandatsreferenz', 'vereinsplugin' ); ?><input type="text" name="vp_mandatsref" value="<?php echo $m( 'vp_mandatsref' ); ?>"></label>
+				<label class="vp-check vp-col-2"><input type="checkbox" name="vp_sepa_mandat" value="1" <?php checked( (string) get_user_meta( $user->ID, 'vp_sepa_mandat', true ), '1' ); ?>>
+					<span><?php esc_html_e( 'SEPA-Mandat liegt vor', 'vereinsplugin' ); ?></span></label>
+			</div>
+		</fieldset>
+
+		<fieldset>
+			<legend><?php esc_html_e( 'Konto für Erstattungen (Auslagen)', 'vereinsplugin' ); ?></legend>
+			<div class="vp-form-grid">
+				<label class="vp-col-2"><?php esc_html_e( 'Kontoinhaber:in', 'vereinsplugin' ); ?><input type="text" name="vp_erstattung_kontoinhaber" value="<?php echo $m( 'vp_erstattung_kontoinhaber' ); ?>"></label>
+				<label class="vp-col-2"><?php esc_html_e( 'IBAN', 'vereinsplugin' ); ?><input type="text" name="vp_erstattung_iban" value="<?php echo $m( 'vp_erstattung_iban' ); ?>"></label>
+				<p class="vp-muted vp-col-2"><?php esc_html_e( 'Leer = Rückzahlungen gehen auf das SEPA-Konto.', 'vereinsplugin' ); ?></p>
+			</div>
+		</fieldset>
+
+		<p>
+			<button class="vp-btn vp-btn-primary" name="vp_member_save" value="1"><?php esc_html_e( 'Speichern', 'vereinsplugin' ); ?></button>
+			<button class="vp-btn" name="vp_member_pwmail" value="1"><?php esc_html_e( 'Passwort-Link per E-Mail senden', 'vereinsplugin' ); ?></button>
+			<a class="vp-btn" href="<?php echo esc_url( vp_members_url() ); ?>"><?php esc_html_e( 'Abbrechen', 'vereinsplugin' ); ?></a>
+		</p>
+	</form>
+
+	<?php if ( $aemter ) : ?>
+		<div class="vp-card">
+			<h3><?php esc_html_e( 'Ämter und Kreise', 'vereinsplugin' ); ?></h3>
+			<ul class="vp-member-aemter">
+				<?php foreach ( $aemter as $amt ) : ?>
+					<li><?php
+						if ( function_exists( 'vp_kreis_url' ) ) {
+							printf( '<a href="%s">%s</a>', esc_url( vp_kreis_url( $amt['gremium_id'], 'struktur' ) ), esc_html( $amt['text'] ) );
+						} else {
+							echo esc_html( $amt['text'] );
+						}
+					?></li>
+				<?php endforeach; ?>
+			</ul>
+			<p class="vp-muted"><?php esc_html_e( 'Ämter und Amtszeiten werden im jeweiligen Kreis unter „Mitglieder & Rollen“ gepflegt.', 'vereinsplugin' ); ?></p>
+		</div>
+	<?php endif; ?>
+	<?php
+	return ob_get_clean();
+}
+
+/**
+ * Speichert das Formular. Gibt ['ok'|'error', Meldung] zurück.
+ */
+function vp_member_save( $user ) {
+	$id   = (int) $user->ID;
+	$data = array( 'ID' => $id );
+	foreach ( array( 'first_name', 'last_name', 'display_name' ) as $k ) {
+		$data[ $k ] = sanitize_text_field( wp_unslash( $_POST[ $k ] ?? '' ) );
+	}
+	if ( '' === $data['display_name'] ) {
+		$data['display_name'] = trim( $data['first_name'] . ' ' . $data['last_name'] ) ?: $user->user_login;
+	}
+
+	$email = sanitize_email( wp_unslash( $_POST['user_email'] ?? '' ) );
+	// Leer ist erlaubt (importierte Ehemalige, Paare mit gemeinsamer Adresse) –
+	// dann gibt es eben keinen Login. Eine falsch getippte Adresse nicht.
+	if ( '' !== trim( (string) wp_unslash( $_POST['user_email'] ?? '' ) ) && ! is_email( $email ) ) {
+		return array( 'error', __( 'Bitte eine gültige E-Mail-Adresse eintragen – ohne sie kann sich die Person nicht einloggen.', 'vereinsplugin' ) );
+	}
+	$owner = $email ? email_exists( $email ) : false;
+	if ( $owner && (int) $owner !== $id ) {
+		return array( 'error', __( 'Diese E-Mail-Adresse gehört bereits zu einem anderen Konto.', 'vereinsplugin' ) );
+	}
+	$data['user_email'] = $email;
+
+	$res = wp_update_user( $data );
+	if ( is_wp_error( $res ) ) {
+		return array( 'error', $res->get_error_message() );
+	}
+
+	foreach ( vp_member_meta_keys() as $k ) {
+		update_user_meta( $id, $k, sanitize_text_field( wp_unslash( $_POST[ $k ] ?? '' ) ) );
+	}
+	update_user_meta( $id, 'vp_sepa_mandat', empty( $_POST['vp_sepa_mandat'] ) ? 0 : 1 );
+	update_user_meta( $id, 'vp_notiz', sanitize_textarea_field( wp_unslash( $_POST['vp_notiz'] ?? '' ) ) );
+
+	$zusatz = '' === $email ? ' ' . __( 'Ohne E-Mail-Adresse kann sich die Person nicht einloggen.', 'vereinsplugin' ) : '';
+
+	// Beitrag als Zahl mit Punkt ablegen – SEPA und Auswertungen rechnen damit.
+	$beitrag = str_replace( ',', '.', (string) get_user_meta( $id, 'vp_beitrag', true ) );
+	update_user_meta( $id, 'vp_beitrag', '' === trim( $beitrag ) ? '' : (float) $beitrag );
+
+	// IBANs wie im SEPA-Modul normalisieren (das Mandat entsteht ohnehin erst dort).
+	$zusatz .= vp_member_ibans_normalisieren( $id );
+
+	if ( vp_member_can_edit_role( $user ) ) {
+		$neu        = sanitize_key( wp_unslash( $_POST['vp_member_role'] ?? '' ) );
+		$assignable = vp_member_assignable_roles();
+		// Bewusst set_role statt add_role: pro Konto gibt es genau eine Rolle
+		// (siehe core-roles.php – Vorstand/Admin erben die Mitglieds-Caps).
+		if ( $neu && isset( $assignable[ $neu ] ) && array( $neu ) !== array_values( (array) $user->roles ) ) {
+			$wpu = new WP_User( $id );
+			$wpu->set_role( $neu );
+			$zusatz .= ' ' . sprintf(
+				/* translators: %s = role name */
+				__( 'Neue Rolle: %s.', 'vereinsplugin' ),
+				$assignable[ $neu ]
+			);
+		}
+	}
+
+	/**
+	 * Mitgliedsdaten wurden im Mitgliederbereich geändert (z. B. für Sync-Module).
+	 *
+	 * @param int $id
+	 */
+	do_action( 'vp_member_updated', $id );
+
+	return array( 'ok', __( 'Gespeichert.', 'vereinsplugin' ) . $zusatz );
 }
 
 /* ---- Vorstand: Auslagen prüfen ---- */
@@ -614,6 +1127,9 @@ function vp_render_auslagen_pruefen_section() {
 		$budget_name[ (int) $b->id ] = $kreis . $b->zweck;
 	}
 
+	// GiroCode-Renderer auch laden, wenn erst per AJAX genehmigt wird.
+	wp_enqueue_script( 'vp-girocode' );
+
 	ob_start();
 	echo '<h2>' . esc_html__( 'Auslagen prüfen', 'vereinsplugin' ) . '</h2>';
 
@@ -626,13 +1142,16 @@ function vp_render_auslagen_pruefen_section() {
 			esc_html( $r->user_name ),
 			esc_html( date_i18n( 'd.m.Y', strtotime( $r->ausgabe_datum ) ) )
 		);
-		echo '<div class="vp-muted">' . esc_html( $r->kategorie ) . ' — ' . esc_html( $r->beschreibung ) . '</div>';
+		echo '<div class="vp-muted">' . ( ! empty( $r->haendler ) ? esc_html( $r->haendler ) . ' · ' : '' ) . esc_html( $r->kategorie ) . ' — ' . esc_html( $r->beschreibung ) . '</div>';
 		$bid = isset( $r->budget_id ) ? (int) $r->budget_id : 0;
 		if ( $bid && isset( $budget_name[ $bid ] ) ) {
 			echo '<div class="vp-muted">' . esc_html__( 'Budget:', 'vereinsplugin' ) . ' ' . esc_html( $budget_name[ $bid ] ) . '</div>';
 		}
 		if ( ! empty( $r->beleg_pfad ) && function_exists( 'jb_nc' ) ) {
 			echo '<div><a class="vp-btn" target="_blank" rel="noopener" href="' . esc_url( jb_nc()->get_download_url( $r->beleg_pfad ) ) . '">' . esc_html__( 'Beleg ansehen', 'vereinsplugin' ) . '</a></div>';
+		}
+		if ( 'genehmigt' === $r->status && function_exists( 'vp_auslage_girocode_html' ) ) {
+			echo vp_auslage_girocode_html( $r ); // phpcs:ignore WordPress.Security.EscapeOutput -- baut escaped HTML
 		}
 		echo '<div class="vp-auslage-actions">';
 		if ( 'ausstehend' === $r->status ) {
@@ -700,7 +1219,17 @@ function vp_render_auslagen_pruefen_section() {
 					var ok = res && (res.success === true);
 					if (ok) {
 						msg.textContent = '<?php echo $t_ok; ?>';
-						card.style.opacity = .45;
+						var giro = res.data && res.data.girocode;
+						if (act === 'approve' && giro) {
+							// Genehmigt: GiroCode zum Überweisen direkt anzeigen, Karte bleibt aktiv.
+							var box = document.createElement('div');
+							box.innerHTML = giro;
+							card.querySelector('.vp-auslage-actions').replaceWith(box);
+							if (window.vpGirocode) { window.vpGirocode.renderAll(box); }
+							msg.textContent = '<?php echo esc_js( __( 'Genehmigt – jetzt überweisen und danach unter „Genehmigt“ als ausgezahlt markieren.', 'vereinsplugin' ) ); ?>';
+						} else {
+							card.style.opacity = .45;
+						}
 					} else {
 						msg.textContent = (res && res.data) ? res.data : '<?php echo $t_err; ?>';
 						btns.forEach(function(b){ b.disabled = false; });
@@ -817,4 +1346,56 @@ function vp_member_area_assets() {
 	if ( is_readable( $js_file ) ) {
 		wp_enqueue_script( 'vp-app', VP_URL . 'assets/app.js', array( 'jquery' ), filemtime( $js_file ), true );
 	}
+}
+
+/**
+ * Seitenleisten-Eintrag mit Unterpunkten. `children` liefert
+ * [ [ key, label ('' = ohne Überschrift), items => [ [label, badge, url, aktiv, badge_parent] ] ] ].
+ * Gruppen mit Überschrift werden als eingeklappte Untergruppe gezeigt.
+ */
+function vp_render_nav_children( $key, $s, $base_url, $section_active ) {
+	$gruppen = (array) call_user_func( $s['children'], $base_url, $section_active );
+
+	$badge = '';
+	foreach ( $gruppen as $gr ) {
+		foreach ( $gr['items'] as $it ) {
+			if ( ! empty( $it['badge_parent'] ) && '' !== (string) $it['badge'] ) {
+				$badge = $it['badge'];
+			}
+		}
+	}
+
+	printf(
+		'<details class="vp-nav-fold vp-nav-parent%1$s" data-fold="%2$s"%3$s><summary class="vp-nav-item"><span class="vp-nav-label">%4$s</span>%5$s</summary><div class="vp-nav-children">',
+		$section_active ? ' has-active' : '',
+		esc_attr( 'bereich-' . $key ),
+		$section_active ? ' open data-has-active="1"' : '',
+		esc_html( $s['label'] ),
+		$badge ? '<span class="vp-nav-badge">' . esc_html( $badge ) . '</span>' : ''
+	);
+	foreach ( $gruppen as $gr ) {
+		$sub_active = (bool) array_filter( $gr['items'], function ( $it ) { return ! empty( $it['aktiv'] ); } );
+		if ( '' !== $gr['label'] ) {
+			printf(
+				'<details class="vp-nav-fold vp-nav-subfold" data-fold="%s"%s><summary class="vp-nav-sublabel">%s</summary><div class="vp-nav-children">',
+				esc_attr( 'bereich-' . $key . '-' . $gr['key'] ),
+				$sub_active ? ' open data-has-active="1"' : '',
+				esc_html( $gr['label'] )
+			);
+		}
+		foreach ( $gr['items'] as $it ) {
+			printf(
+				'<a class="vp-nav-item vp-nav-child%s" href="%s" data-vp-tab="%s">%s%s</a>',
+				! empty( $it['aktiv'] ) ? ' is-active' : '',
+				esc_url( $it['url'] ),
+				esc_attr( $key ),
+				esc_html( $it['label'] ),
+				'' !== (string) $it['badge'] ? '<span class="vp-nav-badge">' . esc_html( $it['badge'] ) . '</span>' : ''
+			);
+		}
+		if ( '' !== $gr['label'] ) {
+			echo '</div></details>';
+		}
+	}
+	echo '</div></details>';
 }

@@ -11,7 +11,11 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
 - **Sitzungen & Protokolle** – Gremien, Konsent-Protokolle, TOPs, Themenspeicher,
   Aufgaben, Termine, Organigramm, PWA/App.
 - **Buchhaltung & Auslagen** – EÜR, Auslagen-Erstattung mit Beleg, Budgets,
-  Getränkekasse, Nextcloud-Belegablage.
+  Getränkekasse, Nextcloud-Belegablage. Beim Einreichen wählt man das Konto
+  für die Rückzahlung (aus dem Profil, neu eingegeben oder bar); nach der
+  Genehmigung zeigt der Vorstand einen **GiroCode** (EPC-QR) mit dem
+  Verwendungszweck „Rückzahlung Einkauf bei [Händler] am [Datum], Zweck
+  [Kostenstelle, Budget, Konto]“ zum Scannen in der Banking-App.
 - **Veranstaltungs-Publisher** – Veranstaltungen an Mastodon, Bluesky, Telegram,
   Presse, Signal u. a. verteilen (Frontend-UI folgt in Stage 2).
 
@@ -52,6 +56,24 @@ wieder einblenden“** reaktivieren.
   sehen keine Admin-Bar. Abschaltbar in den Einstellungen.
 - Vorstand = WordPress-Rollen **Administrator/Redakteur**: zusätzlich Kassen-
   und Versand-Rechte (`jbf_send_external`, `jb_approve_auslagen` …).
+- Im Mitgliederbereich unter **Mitglieder** (Recht `vp_manage_members`) lassen
+  sich Konten suchen, filtern und bearbeiten: Stammdaten, Anschrift, Beitrag,
+  SEPA-Angaben, Konto für Erstattungen, interne Notiz sowie ein Link „Passwort-Link per E-Mail senden“.
+  Die **Rolle** ändert nur eine Administrator:in (Recht `promote_users`), nie
+  die eigene; Konten mit Admin-Rechten sind für den Vorstand gesperrt. Ämter in
+  Kreisen werden dort nur angezeigt – gepflegt werden sie im Kreis unter
+  „Mitglieder & Rollen“.
+- **Mitglieder-Import** (Mitgliederbereich → „CSV-Import“): liest einfache
+  Listen (`name;email`) ebenso wie den Voll-Export der alten Vereinsverwaltung
+  (Mitglieds-ID, Anschrift, Beitrag, Bankverbindung, Status, Gruppen). In der
+  Vorschau wird jede Zeile mit einem bestehenden WordPress-Konto verbunden
+  (Vorschlag über Mitglieds-Nr., E-Mail oder Namen, frei änderbar), neu angelegt
+  oder übersprungen; Status-/Gruppenwerte werden einmal zugeordnet (Mitgliedsart,
+  ausgetreten, Kreis). Ausgetretene landen in der rechtelosen Rolle
+  **Ehemaliges Mitglied** (`vp_ehemalig`) und tauchen in der Liste nur im
+  eigenen Filter auf. Optional: SEPA-Mandate anlegen, Einladung mit
+  Passwort-Link verschicken. Ein erneuter Import erkennt die Personen über die
+  Mitglieds-Nr. wieder.
 
 ## Updates über GitHub
 

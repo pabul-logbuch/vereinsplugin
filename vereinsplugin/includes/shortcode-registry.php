@@ -158,7 +158,7 @@ function vp_shortcode_catalog() {
 function vp_admin_direct_links() {
 	return array(
 		array( 'label' => __( 'Mitglied anlegen', 'vereinsplugin' ),        'url' => admin_url( 'admin.php?page=wunschliste-mitglied' ) ),
-		array( 'label' => __( 'Mitglieder-Import (CSV/XML)', 'vereinsplugin' ), 'url' => admin_url( 'admin.php?page=wunschliste-mitglieder-import' ) ),
+		array( 'label' => __( 'Mitglieder-Import (CSV/XML, Altsystem-Export)', 'vereinsplugin' ), 'url' => admin_url( 'admin.php?page=wunschliste-mitglieder-import' ) ),
 		array( 'label' => __( 'Wunschlisten-Import (CSV/XML)', 'vereinsplugin' ), 'url' => admin_url( 'admin.php?page=wunschliste-import' ) ),
 		array( 'label' => __( 'Abstimmung: Gast-Codes', 'vereinsplugin' ),   'url' => admin_url( 'admin.php?page=wunschliste-gastcodes' ) ),
 		array( 'label' => __( 'Schichtplan-Import (CSV/XML)', 'vereinsplugin' ), 'url' => admin_url( 'admin.php?page=wunschliste-schichtplan-import' ) ),

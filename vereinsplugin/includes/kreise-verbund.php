@@ -100,7 +100,7 @@ function vp_kreis_url( $gremium_id, $tab = 'uebersicht', $extra = array() ) {
 
 /** Nach einem Formular zurück – alte Hinweis-Parameter vorher entfernen. */
 function vp_kreis_redirect( $args = array() ) {
-	$ret = isset( $_POST['pp_return'] ) ? remove_query_arg( array( 'pp_saved', 'pp_error', 'pp_set_erzeugt', 'pp_set_uebersprungen' ), wp_unslash( $_POST['pp_return'] ) ) : '';
+	$ret = isset( $_POST['pp_return'] ) ? remove_query_arg( array( 'pp_saved', 'pp_error', 'pp_set_erzeugt', 'pp_set_uebersprungen', 'vp_bs_neu', 'vp_bs_ablauf', 'vp_bs_pr', 'vp_bs_kalk', 'vp_bs_todos', 'vp_bs_doppelt' ), wp_unslash( $_POST['pp_return'] ) ) : '';
 	pp_front_redirect( $ret, $args );
 }
 
@@ -875,7 +875,7 @@ function vp_kreis_render_kasse( $kreis ) {
 			<tr>
 				<td><?php echo esc_html( mysql2date( 'd.m.Y', $a->ausgabe_datum ) ); ?></td>
 				<td><?php echo esc_html( $a->user_name ); ?></td>
-				<td><?php echo esc_html( $a->beschreibung ); ?>
+				<td><?php echo esc_html( ( ! empty( $a->haendler ) ? $a->haendler . ': ' : '' ) . $a->beschreibung ); ?>
 					<?php if ( ! empty( $a->beleg_pfad ) && function_exists( 'jb_nc' ) ) : ?>
 						<a class="pp-meta" target="_blank" rel="noopener" href="<?php echo esc_url( jb_nc()->get_download_url( $a->beleg_pfad ) ); ?>"><?php esc_html_e( 'Beleg', 'vereinsplugin' ); ?></a>
 					<?php endif; ?></td>
@@ -894,6 +894,11 @@ function vp_kreis_render_kasse( $kreis ) {
 								<button type="submit" name="entscheidung" value="paid" class="pp-btn pp-btn-small"><?php esc_html_e( 'Ausgezahlt', 'vereinsplugin' ); ?></button>
 							<?php endif; ?>
 						</form>
+						<?php if ( 'genehmigt' === $a->status && function_exists( 'vp_auslage_girocode_html' ) ) : ?>
+							<details><summary><?php esc_html_e( 'Überweisen (GiroCode)', 'vereinsplugin' ); ?></summary>
+								<?php echo vp_auslage_girocode_html( $a ); // phpcs:ignore WordPress.Security.EscapeOutput ?>
+							</details>
+						<?php endif; ?>
 					<?php endif; ?>
 				</td>
 			</tr>

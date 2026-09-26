@@ -38,7 +38,7 @@ $status_labels = [
                     <td><?= esc_html($a['ausgabe_datum']) ?></td>
                     <td><strong><?= number_format((float)$a['betrag'], 2, ',', '.') ?> €</strong></td>
                     <td><?= esc_html($a['beschreibung']) ?><br>
-                        <small class="jb-muted"><?= esc_html($a['kategorie']) ?><?php
+                        <small class="jb-muted"><?= !empty($a['haendler']) ? esc_html($a['haendler']) . ' · ' : '' ?><?= esc_html($a['kategorie']) ?><?php
                         $__bid = (int) ($a['budget_id'] ?? 0);
                         if ($__bid && isset($jb_budget_names[$__bid])) {
                             echo ' · ' . esc_html($jb_budget_names[$__bid]);

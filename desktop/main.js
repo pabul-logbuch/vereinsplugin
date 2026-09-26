@@ -68,6 +68,9 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: 'Vereinssync',
+    backgroundColor: '#f3f2f2',
+    // macOS: Fenstertitel in die App-Titelleiste integrieren (Ampel links oben).
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -107,6 +110,18 @@ ipcMain.handle('config:set', (_e, cfg) => {
       user: (cfg.user || '').trim(),
       pass: cfg.pass ? cfg.pass : cur.pass, // leer lassen = altes Passwort behalten
     });
+    return ok(true);
+  } catch (e) {
+    return fail(e);
+  }
+});
+
+// Abmelden: gespeichertes App-Passwort verwerfen. URL und Benutzer bleiben als
+// Vorbelegung fürs nächste Login, der lokale Datenspiegel bleibt erhalten.
+ipcMain.handle('config:logout', () => {
+  try {
+    const cur = loadCreds();
+    saveCreds({ baseUrl: cur.baseUrl, user: cur.user, pass: '' });
     return ok(true);
   } catch (e) {
     return fail(e);

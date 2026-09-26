@@ -25,6 +25,9 @@ function jb_create_tables() {
         ausgezahlt_am   DATETIME DEFAULT NULL,
         buchung_id      BIGINT UNSIGNED DEFAULT NULL,
         budget_id       BIGINT UNSIGNED DEFAULT NULL,
+        haendler        VARCHAR(150) NOT NULL DEFAULT '',
+        zahl_inhaber    VARCHAR(70) NOT NULL DEFAULT '',
+        zahl_iban       VARCHAR(40) NOT NULL DEFAULT '',
         KEY user_id (user_id),
         KEY status (status),
         KEY budget_id (budget_id)

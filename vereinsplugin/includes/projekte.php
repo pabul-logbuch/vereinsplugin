@@ -6,6 +6,8 @@
  * Veranstaltung braucht – ohne Daten doppelt zu halten:
  *
  *   Übersicht            Ziel, Eckdaten, Kennzahlen, Verknüpfungen
+ *   Bausteine            kombinierbare Vorlagen, die alle Listen unten füllen
+ *                        (siehe projekt-bausteine.php)
  *   Ablauf               vp_projekt_punkte (bereich=ablauf; Vorbereitung,
  *                        Ablauf am Tag, Nachbereitung)
  *   ToDos                pp_aufgaben.projekt_id → erscheinen auch in „Meine
@@ -27,7 +29,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_PROJEKT_DB_VERSION', '1' );
+define( 'VP_PROJEKT_DB_VERSION', '2' );
 
 function vp_projekt_table()          { global $wpdb; return $wpdb->prefix . 'vp_projekte'; }
 function vp_projekt_punkte_table()   { global $wpdb; return $wpdb->prefix . 'vp_projekt_punkte'; }
@@ -62,6 +64,7 @@ function vp_projekte_maybe_upgrade() {
 		schicht_event_id BIGINT UNSIGNED DEFAULT NULL,
 		veranstaltung_post_id BIGINT UNSIGNED DEFAULT NULL,
 		formular_id BIGINT UNSIGNED DEFAULT NULL,
+		bausteine TEXT NULL,
 		notizen TEXT NULL,
 		erstellt_von BIGINT UNSIGNED DEFAULT NULL,
 		erstellt_am DATETIME NULL,
@@ -86,6 +89,7 @@ function vp_projekte_maybe_upgrade() {
 		betrag DECIMAL(10,2) DEFAULT NULL,
 		status VARCHAR(20) NOT NULL DEFAULT 'offen',
 		verantwortlich_user_id BIGINT UNSIGNED DEFAULT NULL,
+		quelle VARCHAR(40) NOT NULL DEFAULT '',
 		sortierung INT NOT NULL DEFAULT 0,
 		erstellt_am DATETIME NULL,
 		PRIMARY KEY  (id),
@@ -500,6 +504,17 @@ function vp_projekt_render_neu( $gremium_id ) {
 		<label><?php esc_html_e( 'Verantwortlich', 'vereinsplugin' ); ?><select name="verantwortlich_user_id"><?php echo vp_kreis_personen_optionen( get_current_user_id(), $gremium_id ); // phpcs:ignore ?></select></label>
 		<label class="pp-span-2"><?php esc_html_e( 'Ziel – was soll am Ende erreicht sein?', 'vereinsplugin' ); ?><textarea name="ziel" rows="2"></textarea></label>
 		<input type="hidden" name="status" value="idee">
+		<div class="pp-span-2">
+			<details class="pp-werkzeug pp-baustein-auswahl">
+				<summary class="pp-details-summary"><?php esc_html_e( 'Mit einer Vorlage starten (optional)', 'vereinsplugin' ); ?></summary>
+				<p class="pp-meta"><?php esc_html_e( 'Eine Vorlage füllt Ablauf, Öffentlichkeitsarbeit, Kalkulation und ToDos mit fertigen Checklisten. Alle Fristen richten sich nach dem Beginn oben. Einzelne Bausteine könnt ihr jederzeit später dazunehmen.', 'vereinsplugin' ); ?></p>
+				<?php vp_projekt_vorlagen_auswahl(); ?>
+				<details class="pp-werkzeug">
+					<summary class="pp-details-summary"><?php esc_html_e( 'Oder Bausteine einzeln wählen', 'vereinsplugin' ); ?></summary>
+					<?php vp_projekt_baustein_auswahl( '', array(), true ); ?>
+				</details>
+			</details>
+		</div>
 		<div class="pp-form-actions"><button type="submit" class="pp-btn pp-btn-primary"><?php esc_html_e( 'Projekt anlegen', 'vereinsplugin' ); ?></button></div>
 	</form>
 	<?php
@@ -518,8 +533,10 @@ function vp_render_view_projekt() {
 	$k     = vp_projekt_kennzahlen( $p );
 	$namen = vp_kreis_namen();
 	$arten = vp_projekt_arten();
+	$drin  = vp_projekt_bausteine_von( $p );
 	$tabs  = array(
 		'uebersicht'      => __( 'Übersicht', 'vereinsplugin' ),
+		'bausteine'       => __( 'Bausteine', 'vereinsplugin' ) . ( $drin ? ' (' . count( $drin ) . ')' : '' ),
 		'ablauf'          => __( 'Ablauf', 'vereinsplugin' ),
 		'todos'           => __( 'ToDos', 'vereinsplugin' ) . ( $k['todos_offen'] ? ' (' . $k['todos_offen'] . ')' : '' ),
 		'helfende'        => __( 'Helfende & Schichten', 'vereinsplugin' ),
@@ -548,6 +565,9 @@ function vp_render_view_projekt() {
 	</nav>
 	<?php
 	switch ( $tab ) {
+		case 'bausteine':
+			vp_projekt_tab_bausteine( $p );
+			break;
 		case 'ablauf':
 			vp_projekt_tab_ablauf( $p );
 			break;
@@ -597,6 +617,15 @@ function vp_projekt_tab_uebersicht( $p, $k ) {
 			<div class="pp-kpi"><strong><?php echo (int) $k['anmeldungen']; ?><?php echo $p->teilnehmende_erwartet ? '/' . (int) $p->teilnehmende_erwartet : ''; ?></strong><span><?php esc_html_e( 'Anmeldungen', 'vereinsplugin' ); ?></span></div>
 		<?php endif; ?>
 	</div>
+
+	<?php
+	$drin = vp_projekt_bausteine_von( $p );
+	if ( ! $drin ) : ?>
+		<p class="pp-hint">
+			<?php esc_html_e( 'Noch keine Bausteine: Fertige Checklisten füllen Ablauf, Öffentlichkeitsarbeit, Kalkulation und ToDos – je nachdem, was diese Veranstaltung braucht (Musik & GEMA, Ausschank & Gestattung, Bilder in allen Formaten …).', 'vereinsplugin' ); ?>
+			<a href="<?php echo esc_url( vp_projekt_url( $p->id, 'bausteine' ) ); ?>"><?php esc_html_e( 'Bausteine wählen', 'vereinsplugin' ); ?></a>
+		</p>
+	<?php endif; ?>
 
 	<div class="pp-cards">
 		<div class="pp-card">
@@ -727,6 +756,22 @@ function vp_projekt_loesen_knopf( $p, $feld ) {
 
 /* ---- Punkte (Ablauf, Öffentlichkeitsarbeit, Kalkulation) ---- */
 
+/**
+ * Ausgabe oder Einnahme? Normalerweise sagt das Vorzeichen des Betrags das.
+ * Posten aus einem Baustein haben noch keinen Betrag – bei ihnen steht die
+ * Richtung in `kanal` (in der Kalkulation sonst ungenutzt).
+ */
+function vp_projekt_posten_richtung( $punkt ) {
+	$betrag = isset( $punkt->betrag ) ? $punkt->betrag : null;
+	if ( null !== $betrag && (float) $betrag > 0 ) {
+		return 'einnahme';
+	}
+	if ( null !== $betrag && (float) $betrag < 0 ) {
+		return 'ausgabe';
+	}
+	return 'einnahme' === ( $punkt->kanal ?? '' ) ? 'einnahme' : 'ausgabe';
+}
+
 function vp_projekt_punkt_formular( $p, $bereich, $punkt = null ) {
 	$phase = $punkt->phase ?? ( isset( $_GET['p_phase'] ) ? sanitize_key( wp_unslash( $_GET['p_phase'] ) ) : 'vorbereitung' );
 	vp_kreis_form( 'vp_projekt_punkt_save', 'pp-form pp-form-grid' );
@@ -745,12 +790,13 @@ function vp_projekt_punkt_formular( $p, $bereich, $punkt = null ) {
 				<?php foreach ( vp_projekt_kanaele() as $k => $l ) : ?><option value="<?php echo esc_attr( $k ); ?>" <?php selected( $punkt->kanal ?? '', $k ); ?>><?php echo esc_html( $l ); ?></option><?php endforeach; ?>
 			</select></label>
 			<label><?php esc_html_e( 'Fällig am', 'vereinsplugin' ); ?><input type="datetime-local" name="zeitpunkt" value="<?php echo esc_attr( vp_projekt_dt_out( $punkt->zeitpunkt ?? '' ) ); ?>"></label>
-		<?php else : ?>
+		<?php else :
+			$richtung = vp_projekt_posten_richtung( $punkt ); ?>
 			<label><?php esc_html_e( 'Art', 'vereinsplugin' ); ?><select name="richtung">
-				<option value="ausgabe" <?php selected( isset( $punkt->betrag ) && (float) $punkt->betrag > 0, false ); ?>><?php esc_html_e( 'Ausgabe', 'vereinsplugin' ); ?></option>
-				<option value="einnahme" <?php selected( isset( $punkt->betrag ) && (float) $punkt->betrag > 0, true ); ?>><?php esc_html_e( 'Einnahme', 'vereinsplugin' ); ?></option>
+				<option value="ausgabe" <?php selected( $richtung, 'ausgabe' ); ?>><?php esc_html_e( 'Ausgabe', 'vereinsplugin' ); ?></option>
+				<option value="einnahme" <?php selected( $richtung, 'einnahme' ); ?>><?php esc_html_e( 'Einnahme', 'vereinsplugin' ); ?></option>
 			</select></label>
-			<label><?php esc_html_e( 'Betrag (€)', 'vereinsplugin' ); ?><input type="text" inputmode="decimal" name="betrag" required value="<?php echo isset( $punkt->betrag ) ? esc_attr( number_format( abs( (float) $punkt->betrag ), 2, ',', '' ) ) : ''; ?>"></label>
+			<label><?php esc_html_e( 'Betrag (€)', 'vereinsplugin' ); ?><input type="text" inputmode="decimal" name="betrag" placeholder="<?php esc_attr_e( 'noch offen', 'vereinsplugin' ); ?>" value="<?php echo ( isset( $punkt->betrag ) && null !== $punkt->betrag ) ? esc_attr( number_format( abs( (float) $punkt->betrag ), 2, ',', '' ) ) : ''; ?>"></label>
 		<?php endif; ?>
 		<label class="pp-span-2"><?php echo 'kalkulation' === $bereich ? esc_html__( 'Posten *', 'vereinsplugin' ) : esc_html__( 'Was *', 'vereinsplugin' ); ?><input type="text" name="titel" required value="<?php echo esc_attr( $punkt->titel ?? '' ); ?>"></label>
 		<?php if ( 'kalkulation' !== $bereich ) : ?>
@@ -812,9 +858,11 @@ function vp_projekt_tab_ablauf( $p ) {
 		<summary class="pp-details-summary"><?php echo $edit_punkt ? esc_html__( 'Programmpunkt bearbeiten', 'vereinsplugin' ) : esc_html__( '+ Programmpunkt / Meilenstein', 'vereinsplugin' ); ?></summary>
 		<?php vp_projekt_punkt_formular( $p, 'ablauf', $edit_punkt ); ?>
 	</details>
-	<?php if ( ! $punkte && $p->beginn ) : ?>
+	<?php if ( ! $punkte ) : ?>
 		<?php vp_projekt_verknuepfen_knopf( $p, 'vorschlag_ablauf', __( 'Typischen Ablauf als Vorschlag einfügen', 'vereinsplugin' ) ); ?>
-	<?php endif;
+	<?php endif; ?>
+	<p class="pp-meta"><a href="<?php echo esc_url( vp_projekt_url( $p->id, 'bausteine' ) ); ?>"><?php esc_html_e( 'Bausteine: fertige Checklisten für GEMA, Ausschank, Technik, Genehmigungen …', 'vereinsplugin' ); ?></a></p>
+	<?php
 }
 
 /* ---- ToDos ---- */
@@ -1089,9 +1137,11 @@ function vp_projekt_tab_oeffentlichkeit( $p ) {
 		<summary class="pp-details-summary"><?php echo $edit_punkt ? esc_html__( 'Maßnahme bearbeiten', 'vereinsplugin' ) : esc_html__( '+ Maßnahme', 'vereinsplugin' ); ?></summary>
 		<?php vp_projekt_punkt_formular( $p, 'oeffentlichkeit', $edit_punkt ); ?>
 	</details>
-	<?php if ( ! $punkte && $p->beginn ) : ?>
+	<?php if ( ! $punkte ) : ?>
 		<?php vp_projekt_verknuepfen_knopf( $p, 'vorschlag_pr', __( 'Übliche Checkliste als Vorschlag einfügen', 'vereinsplugin' ) ); ?>
 	<?php endif; ?>
+	<p class="pp-meta"><a href="<?php echo esc_url( vp_projekt_url( $p->id, 'bausteine' ) ); ?>"><?php esc_html_e( 'Bausteine: Texte für alle Kanäle, Bilder in allen Formaten, Pressearbeit', 'vereinsplugin' ); ?></a></p>
+	<?php vp_projekt_bild_formate_tabelle(); ?>
 	<?php if ( current_user_can( 'vp_manage_members' ) && function_exists( 'vp_member_sections' ) ) : ?>
 		<p class="pp-meta"><a href="<?php echo esc_url( vp_kreis_mitgliederbereich_url( array( 'vp_tab' => 'newsletter' ) ) ); ?>"><?php esc_html_e( 'Newsletter an die Mitglieder schreiben', 'vereinsplugin' ); ?></a></p>
 	<?php endif;
@@ -1102,10 +1152,14 @@ function vp_projekt_tab_oeffentlichkeit( $p ) {
 function vp_projekt_tab_finanzen( $p, $k ) {
 	global $wpdb;
 	$posten    = vp_projekt_punkte( $p->id, 'kalkulation' );
+	$edit      = isset( $_GET['p_punkt'] ) ? (int) $_GET['p_punkt'] : 0;
 	$ausgaben  = 0.0;
 	$einnahmen = 0.0;
+	$offen     = 0;
 	foreach ( $posten as $x ) {
-		if ( (float) $x->betrag < 0 ) {
+		if ( null === $x->betrag ) {
+			$offen++;
+		} elseif ( (float) $x->betrag < 0 ) {
 			$ausgaben += abs( (float) $x->betrag );
 		} else {
 			$einnahmen += (float) $x->betrag;
@@ -1115,15 +1169,22 @@ function vp_projekt_tab_finanzen( $p, $k ) {
 	?>
 	<h3><?php esc_html_e( 'Kalkulation', 'vereinsplugin' ); ?></h3>
 	<p class="pp-meta"><?php esc_html_e( 'Womit rechnet ihr? Die Summe der geplanten Ausgaben ist der Vorschlag fürs Budget.', 'vereinsplugin' ); ?></p>
+	<?php if ( $offen ) : ?>
+		<p class="pp-hint"><?php echo esc_html( sprintf( _n( '%d Posten hat noch keinen Betrag – aus einem Baustein übernommen. Schätzt ihn über „bearbeiten“.', '%d Posten haben noch keinen Betrag – aus einem Baustein übernommen. Schätzt sie über „bearbeiten“.', $offen, 'vereinsplugin' ), $offen ) ); ?></p>
+	<?php endif; ?>
 	<table class="pp-table">
 		<thead><tr><th><?php esc_html_e( 'Posten', 'vereinsplugin' ); ?></th><th style="text-align:right"><?php esc_html_e( 'Einnahme', 'vereinsplugin' ); ?></th><th style="text-align:right"><?php esc_html_e( 'Ausgabe', 'vereinsplugin' ); ?></th><th></th></tr></thead>
 		<tbody>
-		<?php foreach ( $posten as $x ) : ?>
+		<?php foreach ( $posten as $x ) :
+			$richtung = vp_projekt_posten_richtung( $x );
+			$leer     = null === $x->betrag ? '<span class="pp-meta">' . esc_html__( 'offen', 'vereinsplugin' ) . '</span>' : '';
+			?>
 			<tr>
 				<td><?php echo esc_html( $x->titel ); ?><?php if ( $x->beschreibung ) : ?><div class="pp-meta"><?php echo esc_html( $x->beschreibung ); ?></div><?php endif; ?></td>
-				<td style="text-align:right"><?php echo (float) $x->betrag > 0 ? esc_html( vp_kreis_eur( $x->betrag ) ) : ''; ?></td>
-				<td style="text-align:right"><?php echo (float) $x->betrag < 0 ? esc_html( vp_kreis_eur( abs( (float) $x->betrag ) ) ) : ''; ?></td>
-				<td>
+				<td style="text-align:right"><?php echo (float) $x->betrag > 0 ? esc_html( vp_kreis_eur( $x->betrag ) ) : ( 'einnahme' === $richtung ? $leer : '' ); // phpcs:ignore ?></td>
+				<td style="text-align:right"><?php echo (float) $x->betrag < 0 ? esc_html( vp_kreis_eur( abs( (float) $x->betrag ) ) ) : ( 'ausgabe' === $richtung ? $leer : '' ); // phpcs:ignore ?></td>
+				<td class="pp-ablauf-aktionen">
+					<a class="pp-meta" href="<?php echo esc_url( vp_projekt_url( $p->id, 'finanzen', array( 'p_punkt' => (int) $x->id ) ) . '#vp-punkt-form' ); ?>"><?php esc_html_e( 'bearbeiten', 'vereinsplugin' ); ?></a>
 					<?php vp_kreis_form( 'vp_projekt_punkt_delete', 'pp-inline' ); ?>
 						<input type="hidden" name="projekt_id" value="<?php echo (int) $p->id; ?>"><input type="hidden" name="punkt_id" value="<?php echo (int) $x->id; ?>">
 						<button type="submit" class="pp-link-danger"><?php esc_html_e( 'löschen', 'vereinsplugin' ); ?></button>
@@ -1138,10 +1199,21 @@ function vp_projekt_tab_finanzen( $p, $k ) {
 		<?php endif; ?>
 		</tbody>
 	</table>
-	<details class="pp-werkzeug" <?php echo $posten ? '' : 'open'; ?>>
-		<summary class="pp-details-summary"><?php esc_html_e( '+ Posten', 'vereinsplugin' ); ?></summary>
-		<?php vp_projekt_punkt_formular( $p, 'kalkulation' ); ?>
+	<?php
+	$edit_punkt = null;
+	foreach ( $posten as $x ) {
+		if ( (int) $x->id === $edit ) {
+			$edit_punkt = $x;
+		}
+	}
+	?>
+	<details class="pp-werkzeug" id="vp-punkt-form" <?php echo ( $posten && ! $edit_punkt ) ? '' : 'open'; ?>>
+		<summary class="pp-details-summary"><?php echo $edit_punkt ? esc_html__( 'Posten bearbeiten', 'vereinsplugin' ) : esc_html__( '+ Posten', 'vereinsplugin' ); ?></summary>
+		<?php vp_projekt_punkt_formular( $p, 'kalkulation', $edit_punkt ); ?>
 	</details>
+	<?php if ( ! $posten ) : ?>
+		<p class="pp-meta"><a href="<?php echo esc_url( vp_projekt_url( $p->id, 'bausteine' ) ); ?>"><?php esc_html_e( 'Kalkulation aus Bausteinen aufbauen (Grundgerüst, Ausschank, GEMA, Technik …)', 'vereinsplugin' ); ?></a></p>
+	<?php endif; ?>
 
 	<h3><?php esc_html_e( 'Budget & tatsächliche Ausgaben', 'vereinsplugin' ); ?></h3>
 	<?php
@@ -1264,16 +1336,38 @@ function vp_projekt_handle_save() {
 		if ( $alt->termin_id && $row['beginn'] ) {
 			$wpdb->update( $wpdb->prefix . 'pp_termine', array( 'titel' => $titel, 'datum' => $row['beginn'], 'ort' => $row['ort'], 'gremium_id' => $row['gremium_id'] ), array( 'id' => (int) $alt->termin_id ) );
 		}
-	} else {
-		$row['erstellt_von'] = get_current_user_id();
-		$row['erstellt_am']  = current_time( 'mysql' );
-		$wpdb->insert( vp_projekt_table(), $row );
-		$id = (int) $wpdb->insert_id;
-		if ( ! $id ) {
-			vp_kreis_fehler( __( 'Projekt konnte nicht gespeichert werden (Datenbankfehler).', 'vereinsplugin' ) );
-		}
+		vp_projekt_zurueck( vp_projekt_get( $id ), 'uebersicht', array( 'k_tab' => false ) );
 	}
-	vp_projekt_zurueck( vp_projekt_get( $id ), 'uebersicht', array( 'k_tab' => false ) );
+
+	$row['erstellt_von'] = get_current_user_id();
+	$row['erstellt_am']  = current_time( 'mysql' );
+	$wpdb->insert( vp_projekt_table(), $row );
+	$id = (int) $wpdb->insert_id;
+	if ( ! $id ) {
+		vp_kreis_fehler( __( 'Projekt konnte nicht gespeichert werden (Datenbankfehler).', 'vereinsplugin' ) );
+	}
+	$neu = vp_projekt_get( $id );
+
+	// Vorlage und/oder einzeln gewählte Bausteine beim Anlegen anwenden.
+	$keys    = vp_projekt_baustein_keys( (array) ( $_POST['bausteine'] ?? array() ) );
+	$vorlage = sanitize_key( $_POST['vorlage'] ?? '' );
+	if ( $vorlage && isset( vp_projekt_vorlagen()[ $vorlage ] ) ) {
+		$keys = array_unique( array_merge( vp_projekt_vorlagen()[ $vorlage ]['bausteine'], $keys ) );
+	}
+	if ( $keys ) {
+		$zahl = vp_projekt_bausteine_anwenden( $neu, $keys );
+		vp_projekt_zurueck( $neu, 'bausteine', array(
+			'k_tab'         => false,
+			'pp_saved'      => false,
+			'vp_bs_neu'     => 1,
+			'vp_bs_ablauf'  => (int) $zahl['ablauf'],
+			'vp_bs_pr'      => (int) $zahl['oeffentlichkeit'],
+			'vp_bs_kalk'    => (int) $zahl['kalkulation'],
+			'vp_bs_todos'   => (int) $zahl['todos'],
+			'vp_bs_doppelt' => (int) $zahl['doppelt'],
+		) );
+	}
+	vp_projekt_zurueck( $neu, 'uebersicht', array( 'k_tab' => false ) );
 }
 
 add_action( 'admin_post_vp_projekt_delete', 'vp_projekt_handle_delete' );
@@ -1323,8 +1417,11 @@ function vp_projekt_handle_punkt_save() {
 		$row['kanal']     = isset( vp_projekt_kanaele()[ $kanal ] ) ? $kanal : 'sonstiges';
 		$row['zeitpunkt'] = vp_projekt_dt_in( $_POST['zeitpunkt'] ?? '' );
 	} else {
-		$betrag        = abs( (float) str_replace( ',', '.', sanitize_text_field( wp_unslash( $_POST['betrag'] ?? '0' ) ) ) );
-		$row['betrag'] = ( 'einnahme' === ( $_POST['richtung'] ?? '' ) ? 1 : -1 ) * $betrag;
+		// Leerer Betrag heißt „noch zu schätzen": betrag NULL, Richtung in `kanal`.
+		$richtung      = 'einnahme' === ( $_POST['richtung'] ?? '' ) ? 'einnahme' : 'ausgabe';
+		$roh           = trim( str_replace( ',', '.', sanitize_text_field( wp_unslash( $_POST['betrag'] ?? '' ) ) ) );
+		$row['kanal']  = $richtung;
+		$row['betrag'] = '' === $roh ? null : ( 'einnahme' === $richtung ? 1 : -1 ) * abs( (float) $roh );
 	}
 	$pid = (int) ( $_POST['punkt_id'] ?? 0 );
 	if ( $pid ) {
@@ -1655,48 +1752,16 @@ function vp_projekt_handle_verknuepfen() {
 			}
 			break;
 
+		// Die beiden alten Vorschlagsknöpfe sind heute nur zwei Bausteine –
+		// eine Definitionsstelle, siehe projekt-bausteine.php.
 		case 'vorschlag_ablauf':
 			$tab = 'ablauf';
-			if ( $p->beginn && ! vp_projekt_punkte( $p->id, 'ablauf' ) ) {
-				$ende = $p->ende ?: gmdate( 'Y-m-d H:i:s', strtotime( $p->beginn . ' +4 hours' ) );
-				$vorschlag = array(
-					array( 'vorbereitung', __( 'Ziel, Rahmen und Verantwortliche klären', 'vereinsplugin' ), vp_projekt_relativ( $p, -56, '18:00' ) ),
-					array( 'vorbereitung', __( 'Kalkulation & Budget, Genehmigungen/Raum anfragen', 'vereinsplugin' ), vp_projekt_relativ( $p, -42, '18:00' ) ),
-					array( 'vorbereitung', __( 'Helfende anfragen, Schichtplan veröffentlichen', 'vereinsplugin' ), vp_projekt_relativ( $p, -28, '18:00' ) ),
-					array( 'vorbereitung', __( 'Öffentlichkeitsarbeit startet', 'vereinsplugin' ), vp_projekt_relativ( $p, -21, '18:00' ) ),
-					array( 'vorbereitung', __( 'Einkauf, Material & Technik bereit', 'vereinsplugin' ), vp_projekt_relativ( $p, -3, '18:00' ) ),
-					array( 'durchfuehrung', __( 'Aufbau', 'vereinsplugin' ), gmdate( 'Y-m-d H:i:s', strtotime( $p->beginn . ' -2 hours' ) ) ),
-					array( 'durchfuehrung', __( 'Briefing der Helfenden', 'vereinsplugin' ), gmdate( 'Y-m-d H:i:s', strtotime( $p->beginn . ' -30 minutes' ) ) ),
-					array( 'durchfuehrung', __( 'Beginn / Einlass', 'vereinsplugin' ), $p->beginn ),
-					array( 'durchfuehrung', __( 'Ende & Abbau', 'vereinsplugin' ), $ende ),
-					array( 'nachbereitung', __( 'Danke an Helfende, Nachbericht & Fotos', 'vereinsplugin' ), vp_projekt_relativ( $p, 3, '18:00' ) ),
-					array( 'nachbereitung', __( 'Belege einreichen & abrechnen', 'vereinsplugin' ), vp_projekt_relativ( $p, 7, '18:00' ) ),
-					array( 'nachbereitung', __( 'Auswertung im Kreis: Was lief gut, was nehmen wir mit?', 'vereinsplugin' ), vp_projekt_relativ( $p, 14, '18:00' ) ),
-				);
-				foreach ( $vorschlag as $i => $v ) {
-					$wpdb->insert( vp_projekt_punkte_table(), array( 'projekt_id' => (int) $p->id, 'bereich' => 'ablauf', 'phase' => $v[0], 'titel' => $v[1], 'zeitpunkt' => $v[2], 'sortierung' => $i, 'erstellt_am' => current_time( 'mysql' ) ) );
-				}
-			}
+			vp_projekt_bausteine_anwenden( $p, array( 'ablauf_basis' ) );
 			break;
 
 		case 'vorschlag_pr':
 			$tab = 'oeffentlichkeit';
-			if ( $p->beginn && ! vp_projekt_punkte( $p->id, 'oeffentlichkeit' ) ) {
-				$vorschlag = array(
-					array( 'website', __( 'Termin auf Website & in Veranstaltungskalender eintragen', 'vereinsplugin' ), -28 ),
-					array( 'plakat', __( 'Plakate & Flyer gestalten, drucken und aushängen', 'vereinsplugin' ), -21 ),
-					array( 'kooperation', __( 'Partner, Schulen und andere Vereine informieren', 'vereinsplugin' ), -21 ),
-					array( 'social', __( 'Ankündigung auf Social Media', 'vereinsplugin' ), -14 ),
-					array( 'presse', __( 'Pressemitteilung an die Lokalpresse', 'vereinsplugin' ), -10 ),
-					array( 'newsletter', __( 'Newsletter an Mitglieder', 'vereinsplugin' ), -7 ),
-					array( 'messenger', __( 'Erinnerung in Messenger-Gruppen und Story', 'vereinsplugin' ), -2 ),
-					array( 'sonstiges', __( 'Fotos machen (Einverständnis beachten)', 'vereinsplugin' ), 0 ),
-					array( 'social', __( 'Nachbericht & Danke-Post', 'vereinsplugin' ), 2 ),
-				);
-				foreach ( $vorschlag as $i => $v ) {
-					$wpdb->insert( vp_projekt_punkte_table(), array( 'projekt_id' => (int) $p->id, 'bereich' => 'oeffentlichkeit', 'kanal' => $v[0], 'titel' => $v[1], 'zeitpunkt' => vp_projekt_relativ( $p, $v[2], '12:00' ), 'sortierung' => $i, 'erstellt_am' => current_time( 'mysql' ) ) );
-				}
-			}
+			vp_projekt_bausteine_anwenden( $p, array( 'pr_basis' ) );
 			break;
 	}
 	vp_projekt_zurueck( $p, $tab );

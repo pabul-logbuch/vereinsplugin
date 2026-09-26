@@ -55,28 +55,15 @@ function vp_render_protokoll_bereich() {
 		return ob_get_clean();
 	}
 
-	// Gleiche Navigationspunkte wie im ProtokollPro-Widget (inkl. der per
-	// Filter ergänzten, z. B. Projekte) – vorher fehlten hier Entscheide,
-	// Ablauf-Vorlagen und Dokumente.
-	$punkte     = pp_front_nav_punkte();
-	$active_key = pp_front_nav_aktiv( $view );
-
 	ob_start();
 	echo '<div class="vp-pp">';
 
-	// Unter-Navigation (Chips)
-	echo '<nav class="vp-pp-subnav">';
-	foreach ( $punkte as $k => $info ) {
-		printf(
-			'<a class="vp-pp-chip%s" href="%s">%s%s</a>',
-			$k === $active_key ? ' is-active' : '',
-			$link( $k ),
-			esc_html( $info[0] ),
-			$info[1] ? ' <span class="vp-pp-badge">' . esc_html( $info[1] ) . '</span>' : ''
-		);
-	}
-	if ( function_exists( 'pp_get_gremien' ) ) {
-		foreach ( (array) pp_get_gremien() as $g ) {
+	// Die Bereichs-Navigation steht in der Seitenleiste des Mitgliederbereichs
+	// (vp_protokoll_nav_gruppen). Hier bleibt nur der Schnellwechsel zwischen Kreisen.
+	$gremien = ( in_array( $view, array( 'kreise', 'kreis' ), true ) && function_exists( 'pp_get_gremien' ) ) ? (array) pp_get_gremien() : array();
+	if ( $gremien ) {
+		echo '<nav class="vp-pp-subnav">';
+		foreach ( $gremien as $g ) {
 			printf(
 				'<a class="vp-pp-chip vp-pp-chip-sub%s" href="%s">%s</a>',
 				( 'kreis' === $view && (int) $id === (int) $g->id ) ? ' is-active' : '',
@@ -84,8 +71,8 @@ function vp_render_protokoll_bereich() {
 				esc_html( $g->name )
 			);
 		}
+		echo '</nav>';
 	}
-	echo '</nav>';
 
 	// Hinweise + Ansicht
 	if ( function_exists( 'pp_render_notices' ) ) {
@@ -95,4 +82,62 @@ function vp_render_protokoll_bereich() {
 
 	echo '</div>';
 	return ob_get_clean();
+}
+
+/* -------------------------------------------------------------------------
+ * Unterpunkte in der Seitenleiste des Mitgliederbereichs
+ * ---------------------------------------------------------------------- */
+
+add_filter( 'vp_member_sections', function ( $sections ) {
+	if ( isset( $sections['protokolle'] ) ) {
+		$sections['protokolle']['children'] = 'vp_protokoll_nav_gruppen';
+	}
+	return $sections;
+} );
+
+/**
+ * Häufig Genutztes direkt sichtbar, Seltenes in „Vorlagen & Mehr" – damit die
+ * Seitenleiste nicht überläuft. Per Filter ergänzte Punkte (Kern/Plugins)
+ * ohne feste Einteilung landen in der Hauptgruppe.
+ */
+function vp_protokoll_nav_gruppen( $base_url, $section_active ) {
+	if ( ! function_exists( 'pp_front_nav_punkte' ) ) {
+		return array();
+	}
+	$punkte = pp_front_nav_punkte();
+	$aktiv  = $section_active ? pp_front_nav_aktiv( pp_front_current_view() ) : '';
+
+	$einteilung = apply_filters( 'vp_protokoll_nav_einteilung', array(
+		'haupt'    => array( '', array( 'dashboard', 'protokolle', 'entscheide', 'kreise', 'projekte', 'aufgaben', 'termine', 'themen' ) ),
+		'vorlagen' => array( __( 'Vorlagen & Mehr', 'vereinsplugin' ), array( 'sets', 'ablaeufe', 'dokumente', 'kalender' ) ),
+	) );
+
+	$item = function ( $k ) use ( $punkte, $base_url, $aktiv ) {
+		return array(
+			'label'        => $punkte[ $k ][0],
+			// „3 Entwürfe" → „3": in der schmalen Leiste reicht die Zahl.
+			'badge'        => preg_replace( '/\D.*$/u', '', (string) $punkte[ $k ][1] ),
+			'url'          => add_query_arg( array( 'vp_tab' => 'protokolle', 'pp_view' => $k ), $base_url ),
+			'aktiv'        => $k === $aktiv,
+			'badge_parent' => 'aufgaben' === $k,
+		);
+	};
+
+	$gruppen  = array();
+	$vergeben = array();
+	foreach ( $einteilung as $gk => $def ) {
+		$gruppen[ $gk ] = array( 'key' => $gk, 'label' => $def[0], 'items' => array() );
+		foreach ( $def[1] as $k ) {
+			if ( isset( $punkte[ $k ] ) ) {
+				$gruppen[ $gk ]['items'][] = $item( $k );
+				$vergeben[]                = $k;
+			}
+		}
+	}
+	foreach ( array_keys( $punkte ) as $k ) {
+		if ( ! in_array( $k, $vergeben, true ) && isset( $gruppen['haupt'] ) ) {
+			$gruppen['haupt']['items'][] = $item( $k );
+		}
+	}
+	return array_values( array_filter( $gruppen, function ( $g ) { return (bool) $g['items']; } ) );
 }

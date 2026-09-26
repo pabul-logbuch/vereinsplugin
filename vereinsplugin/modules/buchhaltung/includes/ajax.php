@@ -27,7 +27,13 @@ add_action('wp_ajax_jb_decide_auslage', function() {
 
     if (!$id) wp_send_json_error('Ungültige ID.');
     $ok = jb_approve_auslage($id, $approve, $notiz);
-    wp_send_json($ok ? ['success' => true] : ['success' => false, 'data' => 'Fehler.']);
+    if (!$ok) wp_send_json(['success' => false, 'data' => 'Fehler.']);
+    // Nach der Genehmigung gleich den GiroCode zum Überweisen mitschicken.
+    $html = '';
+    if ($approve && function_exists('vp_auslage_girocode_html') && ($a = jb_get_auslage($id))) {
+        $html = vp_auslage_girocode_html($a);
+    }
+    wp_send_json(['success' => true, 'data' => ['girocode' => $html]]);
 });
 
 // Als ausgezahlt markieren

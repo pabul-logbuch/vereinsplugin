@@ -2,22 +2,30 @@
 <html lang="de">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:;" />
     <title>Vereinssync</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div id="app">
-      <aside id="nav">
-        <div class="brand">Vereinssync</div>
-        <div id="nav-status" class="nav-status">nicht verbunden</div>
-        <nav id="nav-list"></nav>
-        <div class="nav-foot">
-          <button id="btn-sync" class="primary">Synchronisieren</button>
-          <button id="btn-reconcile" class="ghost">Vollabgleich</button>
-        </div>
-      </aside>
-      <main id="view"></main>
+      <header id="titlebar">
+        <span>Vereinssync</span>
+        <span id="nav-status" class="conn">nicht verbunden</span>
+      </header>
+      <div id="shell">
+        <aside id="nav">
+          <div class="nav-head">
+            <div id="nav-greet" class="greet">Hallo</div>
+            <div id="nav-sync" class="nav-sync">Noch nicht synchronisiert</div>
+          </div>
+          <nav id="nav-list"></nav>
+          <div class="nav-foot">
+            <button id="btn-sync" class="primary">Synchronisieren</button>
+            <button id="btn-reconcile" class="ghost small">Vollabgleich</button>
+          </div>
+        </aside>
+        <main id="view"></main>
+      </div>
     </div>
     <div id="toast" hidden></div>
 
