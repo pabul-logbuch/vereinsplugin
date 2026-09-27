@@ -193,7 +193,25 @@ function pp_handle_generate_event_aufgaben() {
     check_admin_referer('pp_generate_event_aufgaben');
     global $wpdb;
 
-    $termin_id = intval($_POST['termin_id'] ?? 0);
+    $erzeugt = pp_erzeuge_event_aufgaben(intval($_POST['termin_id'] ?? 0));
+    if ($erzeugt !== false) {
+        wp_safe_redirect(admin_url('admin.php?page=pp-aufgaben-termine&pp_event_aufgaben=' . $erzeugt));
+        exit;
+    }
+
+    wp_safe_redirect(admin_url('admin.php?page=pp-aufgaben-termine&pp_error=Termin+ohne+Gremium+oder+Datum'));
+    exit;
+}
+
+/**
+ * Erzeugt für einen Termin die Event-Aufgaben aller Rollen seines Gremiums
+ * (je aktueller Besetzung, Fälligkeit = Termin minus Vorlauf). Doppelte werden
+ * übersprungen. Auch vom Kern-Kalender genutzt.
+ *
+ * @return int|false Anzahl erzeugter Aufgaben; false ohne Gremium oder Datum.
+ */
+function pp_erzeuge_event_aufgaben($termin_id) {
+    global $wpdb;
     $termin = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$wpdb->prefix}pp_termine WHERE id = %d", $termin_id));
 
     if ($termin && $termin->gremium_id && $termin->datum) {
@@ -231,12 +249,9 @@ function pp_handle_generate_event_aufgaben() {
             }
         }
 
-        wp_safe_redirect(admin_url('admin.php?page=pp-aufgaben-termine&pp_event_aufgaben=' . $erzeugt));
-        exit;
+        return $erzeugt;
     }
-
-    wp_safe_redirect(admin_url('admin.php?page=pp-aufgaben-termine&pp_error=Termin+ohne+Gremium+oder+Datum'));
-    exit;
+    return false;
 }
 
 // ─── RENDER-HELPER (eingebettet in die Gremien-Seite) ──────────────────────

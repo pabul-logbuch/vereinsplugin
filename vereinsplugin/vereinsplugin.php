@@ -3,7 +3,7 @@
  * Plugin Name:       Vereinsplugin
  * Plugin URI:        https://github.com/pabul-logbuch/vereinsplugin
  * Description:        Alles-in-einem-Vereinsverwaltung: Wunschliste & Spenden, Sitzungs-/Protokollverwaltung, Buchhaltung & Auslagen, Veranstaltungs-Publisher – mit gemeinsamem Mitgliederbereich. Im WordPress-Dashboard erscheint bewusst nur eine einzige Seite: die Shortcode-Übersicht. Alle Verwaltung läuft über Shortcodes im Frontend.
- * Version:           0.37.0
+ * Version:           0.43.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Verein
@@ -42,7 +42,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_VERSION', '0.37.0' );
+define( 'VP_VERSION', '0.43.0' );
 define( 'VP_FILE', __FILE__ );
 define( 'VP_PATH', plugin_dir_path( __FILE__ ) );
 define( 'VP_URL', plugin_dir_url( __FILE__ ) );
@@ -273,6 +273,9 @@ require_once VP_PATH . 'includes/buchhaltung-extras.php';
 require_once VP_PATH . 'includes/buchhaltung-skr.php';
 require_once VP_PATH . 'includes/auslagen-bank.php';
 require_once VP_PATH . 'includes/nextcloud-sync.php';
+require_once VP_PATH . 'includes/nextcloud-talk.php';
+require_once VP_PATH . 'includes/live-sitzung.php';
+require_once VP_PATH . 'includes/themen-vorschlaege.php';
 require_once VP_PATH . 'includes/newsletter.php';
 require_once VP_PATH . 'includes/protokoll-bereich.php';
 require_once VP_PATH . 'includes/buchungslogik.php';
@@ -284,8 +287,10 @@ require_once VP_PATH . 'includes/formulare.php';
 require_once VP_PATH . 'includes/kreise-verbund.php';
 require_once VP_PATH . 'includes/projekte.php';
 require_once VP_PATH . 'includes/projekt-bausteine.php';
+require_once VP_PATH . 'includes/projekt-kasse.php';
 require_once VP_PATH . 'includes/kalender.php';
 require_once VP_PATH . 'includes/rest-sync-api.php';
+require_once VP_PATH . 'includes/start-uebersicht.php';
 require_once VP_PATH . 'includes/member-area.php';
 require_once VP_PATH . 'includes/pwa.php';
 require_once VP_PATH . 'includes/admin-consolidation.php';

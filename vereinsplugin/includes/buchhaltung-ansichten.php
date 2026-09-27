@@ -246,7 +246,8 @@ function vp_bh_journal() {
 			$fehler = true;
 		} else {
 			$d['quelle'] = 'Manuell';
-			jb_journal_add( $zuordnung( $d ) );
+			$neu_id      = jb_journal_add( $zuordnung( $d ) );
+			do_action( 'vp_bh_buchung_gespeichert', (int) $neu_id );
 			vp_bh_cache_leeren();
 			$msg = __( 'Buchung gespeichert.', 'vereinsplugin' );
 		}
@@ -263,6 +264,7 @@ function vp_bh_journal() {
 				unset( $d['beleg_nr'] );
 			}
 			$wpdb->update( jb_table_journal(), $d, array( 'id' => $eid ) );
+			do_action( 'vp_bh_buchung_gespeichert', $eid );
 			if ( ! empty( $d['ruecklage_id'] ) && function_exists( 'jb_table_ruecklagen' ) ) {
 				$wpdb->update( jb_table_ruecklagen(), array( 'letzte_zahlung' => $d['buchung_datum'] ), array( 'id' => (int) $d['ruecklage_id'] ) );
 			}
@@ -332,6 +334,8 @@ function vp_bh_journal() {
 			$h .= '</select></label>';
 		}
 		$h .= '<label>' . esc_html__( 'Kostenstelle', 'vereinsplugin' ) . '<input type="text" name="kostenstelle" list="vp_ks_liste" value="' . esc_attr( $r['kostenstelle'] ?? '' ) . '"></label>';
+		// z. B. Projekt-Kalkulationsposten (includes/projekt-kasse.php).
+		$h .= (string) apply_filters( 'vp_bh_buchung_extra_felder', '', $r );
 		return $h . '</div>';
 	};
 

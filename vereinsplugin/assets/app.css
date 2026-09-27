@@ -283,6 +283,7 @@ a.vp-kal-ev:hover{background:color-mix(in srgb,var(--kal-farbe) 22%,transparent)
 .vp-kal-ohne-schicht .vp-kal-kat-schicht,
 .vp-kal-ohne-oeffnung .vp-kal-kat-oeffnung,
 .vp-kal-ohne-sonstiges .vp-kal-kat-sonstiges,
+.vp-kal-ohne-aufgabe .vp-kal-kat-aufgabe,
 .vp-kal-ohne-nextcloud .vp-kal-kat-nextcloud{display:none !important}
 
 @media (max-width:700px){
@@ -290,3 +291,77 @@ a.vp-kal-ev:hover{background:color-mix(in srgb,var(--kal-farbe) 22%,transparent)
 	.vp-kal-liste-mobil{display:block}
 	.vp-kal-zeile-zeit{flex-basis:74px}
 }
+
+/* Seitenleisten-Einträge mit Zähler (z. B. Aufgaben) */
+a.vp-nav-item{display:flex;align-items:center;gap:6px}
+.vp-rollenaufgaben.is-mein{border-left:4px solid var(--vp-accent)}
+.vp-start-pp{margin-top:16px}
+.vp-kal-pp-termine td form{display:inline-flex;gap:4px;align-items:center;margin:2px 0}
+.vp-kal-pp-termine select{padding:4px 6px;border:1px solid var(--vp-border);border-radius:6px;background:var(--vp-card);color:var(--vp-ink);font:inherit;font-size:13px}
+
+/* ── Chats & Besprechungen (Nextcloud Talk) ─────────────────────────────── */
+.vp-talk-liste{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin:0 0 10px}
+.vp-talk-raum{display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--vp-border);border-radius:10px;background:var(--vp-card);color:var(--vp-ink);text-decoration:none}
+.vp-talk-raum:hover{border-color:#0082c9}
+.vp-talk-icon{font-size:22px}
+
+/* ── Live-Sitzung: Leiste in allen Bereichen + Anhang im Protokoll ───────── */
+.vp-live-leiste{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:0 0 16px;padding:10px 14px;border-radius:12px;background:#fef2f2;border:1px solid #fecaca;color:#7f1d1d;position:sticky;top:8px;z-index:5}
+.vp-live-leiste small{color:#991b1b;opacity:.85}
+.vp-live-text{flex:1 1 240px;min-width:0}
+.vp-live-knoepfe{display:flex;flex-wrap:wrap;gap:4px}
+.vp-live-knoepfe .vp-btn{margin:0}
+.vp-live-punkt{width:12px;height:12px;border-radius:50%;background:#dc2626;box-shadow:0 0 0 0 rgba(220,38,38,.6);animation:vp-live-puls 1.6s infinite}
+@keyframes vp-live-puls{70%{box-shadow:0 0 0 10px rgba(220,38,38,0)}100%{box-shadow:0 0 0 0 rgba(220,38,38,0)}}
+@media (prefers-color-scheme:dark){.vp-live-leiste{background:#3b1113;border-color:#7f1d1d;color:#fecaca}.vp-live-leiste small{color:#fca5a5}}
+.vp-live-links{margin:6px 0 0;padding-left:16px}
+.vp-live-links li{margin:3px 0}
+.vp-live-links a{color:inherit}
+.vp-live-anhang{margin:24px 0}
+.vp-live-liste{list-style:none;margin:0 0 14px;padding:0}
+.vp-live-liste li{padding:6px 0;border-bottom:1px solid var(--vp-border, #e3e6ea)}
+.vp-live-zeit{font-variant-numeric:tabular-nums;color:var(--vp-muted, #6b7280);margin-right:4px}
+.vp-live-bereich{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;background:rgba(127,127,127,.15);margin-right:4px}
+.vp-live-bericht{border:1px solid var(--vp-border, #e3e6ea);border-radius:10px;padding:10px 12px;margin:0 0 12px;overflow-x:auto}
+.vp-live-bericht h4{margin:0 0 8px}
+.vp-live-bericht h5{margin:10px 0 4px;font-size:13px}
+.vp-live-tab{width:100%;border-collapse:collapse;font-size:13px}
+.vp-live-tab th,.vp-live-tab td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--vp-border, #e3e6ea)}
+.vp-live-tab tfoot th{border-top:2px solid var(--vp-border, #e3e6ea)}
+
+/* ── „Als TOP vorschlagen“ ───────────────────────────────────────────────── */
+.vp-thema-vorschlag{margin:0 0 14px}
+.vp-thema-vorschlag > summary{list-style:none;display:inline-block}
+.vp-thema-vorschlag > summary::-webkit-details-marker{display:none}
+.vp-thema-vorschlag[open] > summary{margin-bottom:8px}
+.vp-thema-anlage{margin:6px 0 0;font-size:13px}
+.vp-thema-anlage .vp-live-bericht{margin:6px 0 0}
+.vp-kal-thema{white-space:nowrap}
+
+/* ── Projekt-Finanzen: Kostenstelle + Ist-Zuordnung ─────────────────────── */
+.vp-projekt-ks{margin:0 0 12px}
+.vp-projekt-ks .pp-inline-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.vp-projekt-ist .vp-ist-offen td{background:rgba(245,158,11,.08)}
+.vp-projekt-ist select{max-width:240px}
+.vp-ist-form{margin:0}
+
+/* ── Startseite: Übersicht über alle Bereiche ───────────────────────────── */
+.vp-start-datum-heute{margin:-8px 0 14px}
+.vp-start-abschnitt{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--vp-muted);margin:6px 0 0}
+a.vp-tile{display:block;color:inherit;text-decoration:none;transition:border-color .15s}
+a.vp-tile:hover{border-color:var(--vp-accent)}
+.vp-tile-alert .vp-tile-num{color:#b45309}
+@media (prefers-color-scheme:dark){.vp-tile-alert{background:#3a2a0a}.vp-tile-alert .vp-tile-num{color:#fbbf24}}
+.vp-start-raster{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;align-items:start;margin-top:8px}
+.vp-start-raster > .vp-card,.vp-start-raster > .pp-card{margin:0;min-width:0}
+.vp-start-raster h3{margin:0 0 8px;font-size:16px}
+.vp-start-liste{margin:0;padding-left:18px}
+.vp-start-liste li{margin:0 0 6px}
+.vp-start-datum{font-variant-numeric:tabular-nums;font-weight:600}
+.vp-start-mehr{margin:10px 0 0;font-size:13px}
+.vp-start-mehr a{color:inherit}
+.vp-start-tab{width:100%;border-collapse:collapse;font-size:14px}
+.vp-start-tab td{padding:3px 0;border-bottom:1px solid var(--vp-border)}
+.vp-start-tab td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.vp-start-warn{margin:10px 0 4px;color:#b91c1c;font-size:13px;font-weight:600}
+.vp-start-chips{display:flex;flex-wrap:wrap;gap:4px}
