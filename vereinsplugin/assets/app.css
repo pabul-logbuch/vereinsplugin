@@ -232,3 +232,61 @@ details.vp-card > summary{cursor:pointer}
 .vp-nav-subfold > .vp-nav-children{margin-left:6px}
 .vp-nav-badge{margin-left:auto;background:rgba(127,127,127,.2);border-radius:999px;padding:0 7px;font-size:11px;line-height:18px}
 .vp-nav-item.is-active .vp-nav-badge{background:rgba(255,255,255,.25)}
+
+/* ── Kalender ────────────────────────────────────────────────────────────── */
+.vp-kal-kopf{display:flex;align-items:center;gap:6px;margin:0 0 10px}
+.vp-kal-kopf .vp-btn{margin:0}
+.vp-kal-monat{font-size:18px;min-width:150px;text-align:center}
+.vp-kal-filter{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+.vp-kal-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;cursor:pointer;border:1px solid var(--vp-border);background:var(--vp-card);color:var(--vp-ink);margin:0}
+.vp-kal-chip input{accent-color:var(--kal-farbe);margin:0;width:auto}
+.vp-kal-punkt{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--kal-farbe);vertical-align:middle}
+
+.vp-kal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border:1px solid var(--vp-border);border-radius:12px;overflow:hidden;background:var(--vp-border);gap:1px}
+.vp-kal-wt{background:var(--vp-card);padding:6px 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--vp-muted);text-align:center}
+.vp-kal-tag{background:var(--vp-card);min-height:96px;padding:4px 4px 6px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.vp-kal-tag.is-fremd{background:var(--vp-bg)}
+.vp-kal-tag.is-fremd .vp-kal-nr{opacity:.45}
+.vp-kal-nr{font-size:12px;font-weight:600;padding:2px 4px;align-self:flex-end}
+.vp-kal-tag.is-heute .vp-kal-nr{background:var(--vp-accent);color:var(--vp-accent-fg);border-radius:999px;min-width:22px;text-align:center}
+.vp-kal-ev{display:block;font-size:12px;line-height:1.3;padding:2px 5px;border-radius:5px;border-left:3px solid var(--kal-farbe);background:color-mix(in srgb,var(--kal-farbe) 12%,transparent);color:var(--vp-ink);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+a.vp-kal-ev:hover{background:color-mix(in srgb,var(--kal-farbe) 22%,transparent)}
+.vp-kal-ev.is-ganztags{background:var(--kal-farbe);color:#fff;border-left-color:transparent}
+.vp-kal-ev.is-mein{font-weight:700;box-shadow:inset 0 0 0 1px var(--kal-farbe)}
+.vp-kal-zeit{font-variant-numeric:tabular-nums;opacity:.8}
+.vp-kal-tag.is-vergangen .vp-kal-ev{opacity:.6}
+
+.vp-kal-liste-mobil{display:none}
+.vp-kal-listtag{margin:0 0 14px}
+.vp-kal-listtag h3{font-size:14px;margin:0 0 6px;color:var(--vp-muted);font-weight:600}
+.vp-kal-listtag.is-heute h3{color:var(--vp-ink)}
+.vp-kal-listtag.is-heute h3::after{content:" · heute";color:var(--vp-accent)}
+.vp-kal-listtag.is-vergangen{opacity:.6}
+.vp-kal-zeile{display:flex;gap:12px;padding:8px 10px;margin:0 0 6px;background:var(--vp-card);border:1px solid var(--vp-border);border-left:4px solid var(--kal-farbe);border-radius:9px}
+.vp-kal-zeile.is-mein{box-shadow:inset 0 0 0 1px var(--kal-farbe)}
+.vp-kal-zeile-zeit{flex:0 0 92px;font-size:13px;font-variant-numeric:tabular-nums;color:var(--vp-muted)}
+.vp-kal-zeile-text{flex:1;min-width:0}
+.vp-kal-zeile-text a{color:inherit}
+.vp-kal-zeile-meta{font-size:12px;color:var(--vp-muted)}
+.vp-kal-zeile-info{font-size:13px;margin-top:4px}
+.vp-kal-start-datum{font-size:12px;color:var(--vp-muted);margin:8px 0 2px}
+
+.vp-kal-edit td{padding:4px 6px}
+.vp-kal-edit input,.vp-kal-edit select{width:100%;min-width:80px;box-sizing:border-box;padding:6px 8px;border:1px solid var(--vp-border);border-radius:7px;background:var(--vp-card);color:var(--vp-ink);font:inherit}
+.vp-kal-nc-vorschlaege{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 12px}
+.vp-kal-nc-vorschlag{margin:0}
+
+/* Filter: ausgeblendete Kategorien */
+.vp-kal-ohne-veranstaltung .vp-kal-kat-veranstaltung,
+.vp-kal-ohne-sitzung .vp-kal-kat-sitzung,
+.vp-kal-ohne-termin .vp-kal-kat-termin,
+.vp-kal-ohne-schicht .vp-kal-kat-schicht,
+.vp-kal-ohne-oeffnung .vp-kal-kat-oeffnung,
+.vp-kal-ohne-sonstiges .vp-kal-kat-sonstiges,
+.vp-kal-ohne-nextcloud .vp-kal-kat-nextcloud{display:none !important}
+
+@media (max-width:700px){
+	.vp-kal-grid{display:none}
+	.vp-kal-liste-mobil{display:block}
+	.vp-kal-zeile-zeit{flex-basis:74px}
+}
