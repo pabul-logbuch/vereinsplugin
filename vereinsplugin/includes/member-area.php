@@ -424,6 +424,9 @@ function vp_shortcode_member_area( $atts ) {
 						. '</div>';
 				}
 
+				// z. B. Leiste „Live-Sitzung läuft“ (includes/live-sitzung.php).
+				do_action( 'vp_member_area_vor_inhalt', $active );
+
 				$s = $sections[ $active ];
 				if ( ! empty( $s['render'] ) && is_callable( $s['render'] ) ) {
 					echo call_user_func( $s['render'] ); // phpcs:ignore WordPress.Security.EscapeOutput

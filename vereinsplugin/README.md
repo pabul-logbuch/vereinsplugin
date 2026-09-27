@@ -134,6 +134,30 @@ pflegt der Vorstand unter **Kalender → Verwalten**.
 
 Weitere Quellen können sich über den Filter `vp_kalender_termine` anhängen.
 
+## Live-Sitzung: weiterarbeiten und alles dokumentieren
+
+Wer eine Sitzung **live protokolliert**, kann nebenbei überall weiterarbeiten:
+
+- **Live-Leiste**: Solange die Sitzung läuft, steht oben in jedem Bereich des
+  Mitgliederbereichs eine rote Leiste mit „Zum Protokoll“, „🎥 Online“ (Nextcloud
+  Talk) und „Live verlassen“.
+- **Automatische Dokumentation**: Was Teilnehmende währenddessen ändern – Kasse
+  und Budgets (auch Kreiskassen), Wunschliste, Kreise (bearbeiten, Unterkreise,
+  Mitglieder, Rollen), Schichtpläne, Aufgaben, Kalender, Projekte,
+  Veranstaltungen –, erscheint im Protokoll unter **„Während der Sitzung
+  erledigt“** (Uhrzeit, Bereich, was, wer). Einzelne Einträge lassen sich bis
+  zum Abschluss wieder entfernen.
+- **In der Live-Seitenleiste**:
+  - *Online-Teilnahme*: Talk-Link bzw. Raum anlegen (Kreis-Chat oder eigener
+    Raum mit Gast-Link).
+  - *Weiterarbeiten an …*: Kassenbericht, Budgets, Kreiskasse und Wunschliste des
+    Kreises, Kreis bearbeiten, Unterkreis anlegen, Schichtpläne, Aufgaben,
+    Kalender, Projekte – öffnet in einem neuen Tab, das Protokoll bleibt offen.
+  - *Bericht einfügen*: Kassenbericht des Vereins, Kreiskasse & Budgets eines
+    Kreises oder die Wunschliste (alle bzw. eines Kreises) als Stand zum
+    Zeitpunkt der Sitzung – optional einem TOP zugeordnet.
+- Mit dem **Abschluss** des Protokolls endet die Live-Sitzung für alle.
+
 ## Nextcloud Talk: Kreis-Chats & Online-Besprechungen
 
 Voraussetzung: In Nextcloud ist die App **Talk** installiert und unter „Verein →

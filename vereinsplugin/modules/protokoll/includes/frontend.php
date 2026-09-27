@@ -3023,6 +3023,8 @@ function pp_render_view_protokoll_detail() {
         <p class="pp-empty">Keine. Aufgaben aus beschlossenen TOPs entstehen erst beim Protokollabschluss.</p>
     <?php endif; ?>
 
+    <?php do_action('pp_protokoll_anhang', $p, 'detail'); ?>
+
     <h3 id="kommentare">Kommentare</h3>    <?php if ($kommentare) : ?>
         <ul class="pp-kommentare">
             <?php foreach ($kommentare as $k) : ?>
@@ -3191,6 +3193,8 @@ function pp_render_live_modus() {
                 </form>
             </details>
 
+            <?php do_action('pp_live_werkzeuge', $p); // Kern: Weiterarbeiten, Berichte einfügen, Online-Teilnahme ?>
+
             <a class="pp-btn pp-btn-small pp-live-exit" href="<?php echo esc_url(pp_front_url(['pp_view' => 'protokoll', 'id' => $p->id])); ?>">Live-Modus verlassen</a>
         </div>
     </aside>
@@ -3216,6 +3220,8 @@ function pp_render_live_modus() {
 
         <?php foreach ($tops as $t) : pp_render_live_top($t, $p); endforeach; ?>
         <?php if (empty($tops)) : ?><p class="pp-empty">Noch keine TOPs — links in der Seitenleiste ergänzen.</p><?php endif; ?>
+
+        <?php do_action('pp_protokoll_anhang', $p, 'live'); ?>
 
         <?php if ($p->status !== 'abgeschlossen') : ?>
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-abschluss"
@@ -3544,7 +3550,11 @@ function pp_render_view_kreise() {
 
     <h3 id="pp-neuer-kreis">Neuen Kreis einrichten</h3>
     <p class="pp-meta">Beschluss des Leitungskreises — wird der nächsten Vollversammlung zur Bestätigung vorgelegt.</p>
-    <?php pp_render_kreis_formular(null, $gremien); ?>
+    <?php
+    // ?parent=<id>: Unterkreis anlegen (übergeordneter Kreis vorausgewählt).
+    $vorgabe = !empty($_GET['parent']) ? (object) ['id' => 0, 'parent_gremium_id' => intval($_GET['parent'])] : null;
+    pp_render_kreis_formular($vorgabe, $gremien);
+    ?>
     <?php
 }
 
@@ -3598,7 +3608,7 @@ function pp_render_kreis_formular($kreis, $alle_gremien) {
         </label>
 
         <div class="pp-form-actions">
-            <button type="submit" class="pp-btn pp-btn-primary"><?php echo $kreis ? 'Änderungen speichern' : 'Kreis einrichten'; ?></button>
+            <button type="submit" class="pp-btn pp-btn-primary"><?php echo !empty($kreis->id) ? 'Änderungen speichern' : 'Kreis einrichten'; ?></button>
             <span class="pp-meta">Wird als Leitungskreis-Beschluss protokolliert.</span>
         </div>
     </form>

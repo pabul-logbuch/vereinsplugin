@@ -304,3 +304,27 @@ a.vp-nav-item{display:flex;align-items:center;gap:6px}
 .vp-talk-raum{display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--vp-border);border-radius:10px;background:var(--vp-card);color:var(--vp-ink);text-decoration:none}
 .vp-talk-raum:hover{border-color:#0082c9}
 .vp-talk-icon{font-size:22px}
+
+/* ── Live-Sitzung: Leiste in allen Bereichen + Anhang im Protokoll ───────── */
+.vp-live-leiste{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:0 0 16px;padding:10px 14px;border-radius:12px;background:#fef2f2;border:1px solid #fecaca;color:#7f1d1d;position:sticky;top:8px;z-index:5}
+.vp-live-leiste small{color:#991b1b;opacity:.85}
+.vp-live-text{flex:1 1 240px;min-width:0}
+.vp-live-knoepfe{display:flex;flex-wrap:wrap;gap:4px}
+.vp-live-knoepfe .vp-btn{margin:0}
+.vp-live-punkt{width:12px;height:12px;border-radius:50%;background:#dc2626;box-shadow:0 0 0 0 rgba(220,38,38,.6);animation:vp-live-puls 1.6s infinite}
+@keyframes vp-live-puls{70%{box-shadow:0 0 0 10px rgba(220,38,38,0)}100%{box-shadow:0 0 0 0 rgba(220,38,38,0)}}
+@media (prefers-color-scheme:dark){.vp-live-leiste{background:#3b1113;border-color:#7f1d1d;color:#fecaca}.vp-live-leiste small{color:#fca5a5}}
+.vp-live-links{margin:6px 0 0;padding-left:16px}
+.vp-live-links li{margin:3px 0}
+.vp-live-links a{color:inherit}
+.vp-live-anhang{margin:24px 0}
+.vp-live-liste{list-style:none;margin:0 0 14px;padding:0}
+.vp-live-liste li{padding:6px 0;border-bottom:1px solid var(--vp-border, #e3e6ea)}
+.vp-live-zeit{font-variant-numeric:tabular-nums;color:var(--vp-muted, #6b7280);margin-right:4px}
+.vp-live-bereich{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;background:rgba(127,127,127,.15);margin-right:4px}
+.vp-live-bericht{border:1px solid var(--vp-border, #e3e6ea);border-radius:10px;padding:10px 12px;margin:0 0 12px;overflow-x:auto}
+.vp-live-bericht h4{margin:0 0 8px}
+.vp-live-bericht h5{margin:10px 0 4px;font-size:13px}
+.vp-live-tab{width:100%;border-collapse:collapse;font-size:13px}
+.vp-live-tab th,.vp-live-tab td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--vp-border, #e3e6ea)}
+.vp-live-tab tfoot th{border-top:2px solid var(--vp-border, #e3e6ea)}
