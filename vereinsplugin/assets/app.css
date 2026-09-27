@@ -344,3 +344,24 @@ a.vp-nav-item{display:flex;align-items:center;gap:6px}
 .vp-projekt-ist .vp-ist-offen td{background:rgba(245,158,11,.08)}
 .vp-projekt-ist select{max-width:240px}
 .vp-ist-form{margin:0}
+
+/* ── Startseite: Übersicht über alle Bereiche ───────────────────────────── */
+.vp-start-datum-heute{margin:-8px 0 14px}
+.vp-start-abschnitt{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--vp-muted);margin:6px 0 0}
+a.vp-tile{display:block;color:inherit;text-decoration:none;transition:border-color .15s}
+a.vp-tile:hover{border-color:var(--vp-accent)}
+.vp-tile-alert .vp-tile-num{color:#b45309}
+@media (prefers-color-scheme:dark){.vp-tile-alert{background:#3a2a0a}.vp-tile-alert .vp-tile-num{color:#fbbf24}}
+.vp-start-raster{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;align-items:start;margin-top:8px}
+.vp-start-raster > .vp-card,.vp-start-raster > .pp-card{margin:0;min-width:0}
+.vp-start-raster h3{margin:0 0 8px;font-size:16px}
+.vp-start-liste{margin:0;padding-left:18px}
+.vp-start-liste li{margin:0 0 6px}
+.vp-start-datum{font-variant-numeric:tabular-nums;font-weight:600}
+.vp-start-mehr{margin:10px 0 0;font-size:13px}
+.vp-start-mehr a{color:inherit}
+.vp-start-tab{width:100%;border-collapse:collapse;font-size:14px}
+.vp-start-tab td{padding:3px 0;border-bottom:1px solid var(--vp-border)}
+.vp-start-tab td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.vp-start-warn{margin:10px 0 4px;color:#b91c1c;font-size:13px;font-weight:600}
+.vp-start-chips{display:flex;flex-wrap:wrap;gap:4px}

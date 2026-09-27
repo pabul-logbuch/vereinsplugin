@@ -380,7 +380,8 @@ function vp_render_rollenaufgaben() {
  * Start: die frühere ProtokollPro-Übersicht
  * ---------------------------------------------------------------------- */
 
-function vp_start_pp_karten() {
+/** @param bool $huelle false = nur die Karten (für das Raster der Startseite). */
+function vp_start_pp_karten( $huelle = true ) {
 	if ( ! function_exists( 'pp_get_meine_aufgaben' ) || ( ! current_user_can( 'pp_manage' ) && ! current_user_can( 'manage_options' ) ) ) {
 		return '';
 	}
@@ -394,7 +395,9 @@ function vp_start_pp_karten() {
 	};
 
 	ob_start();
-	echo '<div class="pp-cards vp-start-pp">';
+	if ( $huelle ) {
+		echo '<div class="pp-cards vp-start-pp">';
+	}
 
 	echo '<div class="pp-card"><h3>' . esc_html__( 'Geplante Sitzungen', 'vereinsplugin' ) . '</h3>';
 	if ( $sitzungen ) {
@@ -454,6 +457,8 @@ function vp_start_pp_karten() {
 	// Weitere Karten (z. B. „Meine Projekte“). Deren Links nutzen pp_front_url().
 	do_action( 'pp_dashboard_cards' );
 
-	echo '</div>';
+	if ( $huelle ) {
+		echo '</div>';
+	}
 	return ob_get_clean();
 }

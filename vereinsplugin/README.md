@@ -77,8 +77,14 @@ wieder einblenden“** reaktivieren.
 
 ## Seitenleiste im Mitgliederbereich
 
-- **Start** – Nächste Termine, geplante Sitzungen, meine Aufgaben, meine Kreise
-  und Projekte (die frühere „Übersicht“ aus Sitzungen & Protokolle).
+- **Start** – das Nötigste aus allen Bereichen. Oben „Auf einen Blick“:
+  offene/überfällige Aufgaben, eigene Auslagen, Auslagen zu prüfen,
+  Mitgliedsanträge, neue Themen, freie Schichtplätze, Kassenstand – rot, wenn
+  etwas ansteht; jede Kachel führt in den Bereich. Darunter Karten: nächste
+  Termine, geplante Sitzungen, meine Aufgaben, meine Kreise, meine Projekte,
+  meine Schichten, Wunschliste (vorne), Kasse (Konten + Projekte über der
+  Kalkulation), Kreis-Chats. Jede Person sieht nur, was sie auch öffnen darf.
+  Erweiterbar über die Filter `vp_start_kacheln` / `vp_start_karten`.
 - **Kalender** – siehe unten.
 - **Aufgaben** – offene Aufgaben (mit Zähler), **Rollenaufgaben** (was zu jeder
   Rolle regelmäßig bzw. vor Veranstaltungen gehört, eigene Rollen zuerst) und
