@@ -320,9 +320,13 @@ function vp_shortcode_member_area( $atts ) {
 	}
 
 	$active = isset( $_GET['vp_tab'] ) ? sanitize_key( wp_unslash( $_GET['vp_tab'] ) ) : $atts['start'];
-	// ProtokollPro-Unterlinks setzen nur ?pp_view – dann trotzdem im Protokoll-Tab bleiben.
-	if ( isset( $_GET['pp_view'] ) && isset( $sections['protokolle'] ) ) {
-		$active = 'protokolle';
+	// ProtokollPro-Links setzen nur ?pp_view – die Ansicht bestimmt den Bereich
+	// (Aufgaben, Sitzungen & Protokolle, Kreise …).
+	if ( isset( $_GET['pp_view'] ) && function_exists( 'vp_pp_tab_fuer_view' ) ) {
+		$pp_tab = vp_pp_tab_fuer_view( sanitize_key( wp_unslash( $_GET['pp_view'] ) ) );
+		if ( isset( $sections[ $pp_tab ] ) ) {
+			$active = $pp_tab;
+		}
 	}
 	if ( ! isset( $sections[ $active ] ) ) {
 		$active = array_key_first( $sections );
@@ -387,13 +391,15 @@ function vp_shortcode_member_area( $atts ) {
 							vp_render_nav_children( $key, $s, $base_url, $key === $active );
 							continue;
 						}
-						$url = add_query_arg( 'vp_tab', $key, $base_url );
+						$url   = add_query_arg( 'vp_tab', $key, $base_url );
+						$badge = ( ! empty( $s['badge'] ) && is_callable( $s['badge'] ) ) ? (string) call_user_func( $s['badge'] ) : '';
 						printf(
-							'<a class="vp-nav-item%s" href="%s" data-vp-tab="%s">%s</a>',
+							'<a class="vp-nav-item%s" href="%s" data-vp-tab="%s"><span class="vp-nav-label">%s</span>%s</a>',
 							$key === $active ? ' is-active' : '',
 							esc_url( $url ),
 							esc_attr( $key ),
-							esc_html( $s['label'] )
+							esc_html( $s['label'] ),
+							'' !== $badge ? '<span class="vp-nav-badge">' . esc_html( $badge ) . '</span>' : ''
 						);
 					}
 					if ( $g_label ) {
@@ -486,6 +492,11 @@ function vp_render_dashboard_section() {
 
 	if ( function_exists( 'vp_kal_naechste_termine_html' ) ) {
 		echo vp_kal_naechste_termine_html(); // phpcs:ignore WordPress.Security.EscapeOutput
+	}
+
+	// Frühere „Übersicht“ aus Sitzungen & Protokolle.
+	if ( function_exists( 'vp_start_pp_karten' ) ) {
+		echo vp_start_pp_karten(); // phpcs:ignore WordPress.Security.EscapeOutput
 	}
 
 	echo '<p class="vp-muted">' . esc_html__( 'Wähle links einen Bereich.', 'vereinsplugin' ) . '</p>';

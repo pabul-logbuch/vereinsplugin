@@ -75,6 +75,19 @@ wieder einblenden“** reaktivieren.
   Passwort-Link verschicken. Ein erneuter Import erkennt die Personen über die
   Mitglieds-Nr. wieder.
 
+## Seitenleiste im Mitgliederbereich
+
+- **Start** – Nächste Termine, geplante Sitzungen, meine Aufgaben, meine Kreise
+  und Projekte (die frühere „Übersicht“ aus Sitzungen & Protokolle).
+- **Kalender** – siehe unten.
+- **Aufgaben** – offene Aufgaben (mit Zähler), **Rollenaufgaben** (was zu jeder
+  Rolle regelmäßig bzw. vor Veranstaltungen gehört, eigene Rollen zuerst) und
+  **Aufgaben-Sets**.
+- **Sitzungen & Protokolle** – nur noch: Geplante Sitzungen, Protokolle,
+  Entscheide, Themenspeicher.
+- **Kreise & Rollen**, **Projekte & Veranstaltungen**, **Dokumente & Vorlagen**
+  (Dokumente + Ablauf-Vorlagen) – eigene Einträge in der Hauptleiste.
+
 ## Kalender
 
 Im Mitgliederbereich gibt es in der Seitenleiste den Punkt **Kalender**
@@ -90,6 +103,15 @@ bleiben dabei in ihren Modulen, es wird nichts doppelt gepflegt:
 - **Öffnungszeiten** (wöchentlich wiederkehrend) mit **Schließtagen/Ferien**,
 - **Weitere Termine**, frei eingetragen (für alle oder nur den Vorstand),
 - **Nextcloud-Kalender** (siehe unten).
+
+- **Meine Aufgaben-Fristen** (offene Aufgaben mit Fälligkeitsdatum).
+
+Kreis-Termine gehören ebenfalls in den Kalender (der frühere Reiter „Termine“
+unter Sitzungen & Protokolle ist entfallen): Unter **Verwalten** beim Termin
+einen Kreis auswählen; darunter stehen alle anstehenden Kreis-Termine und
+geplanten Sitzungen mit **Aufgaben-Set anwenden** und **Rollenaufgaben
+erzeugen**. Der persönliche Abo-Link ersetzt den alten „Kalender-Sync“ (alte
+Links funktionieren weiter).
 
 Ansichten: Monat (auf dem Handy automatisch als Liste), Liste; Kategorien
 lassen sich per Filter ein-/ausblenden. Auf der Startseite erscheinen die

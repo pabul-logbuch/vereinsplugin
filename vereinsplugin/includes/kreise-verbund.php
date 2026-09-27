@@ -1085,7 +1085,7 @@ function vp_kreis_render_sitzungen( $kreis ) {
 			<?php else : ?>
 				<p class="pp-empty"><?php esc_html_e( 'Noch keine Sitzungen.', 'vereinsplugin' ); ?></p>
 			<?php endif; ?>
-			<p><a class="pp-btn pp-btn-small" href="<?php echo esc_url( pp_front_url( array( 'pp_view' => 'protokolle' ) ) ); ?>"><?php esc_html_e( 'Sitzung planen', 'vereinsplugin' ); ?></a></p>
+			<p><a class="pp-btn pp-btn-small" href="<?php echo esc_url( pp_front_url( array( 'pp_view' => 'sitzungen' ), 'pp-neues-protokoll' ) ); ?>"><?php esc_html_e( 'Sitzung planen', 'vereinsplugin' ); ?></a></p>
 		</div>
 
 		<div class="pp-card">

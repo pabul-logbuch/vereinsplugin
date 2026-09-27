@@ -29,7 +29,7 @@ function pp_front_url($args = [], $anchor = '') {
 
 function pp_front_current_view() {
     $view = sanitize_key($_GET['pp_view'] ?? 'dashboard');
-    $erlaubt = ['dashboard', 'protokolle', 'protokoll', 'live', 'themen', 'aufgaben', 'termine', 'kalender', 'kreise', 'kreis', 'sets', 'entscheide', 'ablaeufe', 'dokumente', 'dokument'];
+    $erlaubt = ['dashboard', 'protokolle', 'sitzungen', 'protokoll', 'live', 'themen', 'aufgaben', 'termine', 'kalender', 'kreise', 'kreis', 'sets', 'entscheide', 'ablaeufe', 'dokumente', 'dokument'];
     // Der Kern hängt hier weitere Ansichten an (z. B. Projekte).
     $erlaubt = (array) apply_filters('pp_front_views', $erlaubt);
     return in_array($view, $erlaubt, true) ? $view : 'dashboard';
@@ -42,7 +42,10 @@ function pp_front_current_view() {
  */
 function pp_render_view_switch($view) {
     switch ($view) {
-        case 'protokolle': pp_render_view_protokolle(); break;
+        // Der Kern-Mitgliederbereich trennt „Geplante Sitzungen“ und das
+        // Protokoll-Archiv; der eigene Shortcode zeigt beides zusammen.
+        case 'protokolle': pp_render_view_protokolle(apply_filters('pp_protokolle_ansicht', 'alle')); break;
+        case 'sitzungen':  pp_render_view_protokolle('sitzungen'); break;
         case 'protokoll':  pp_render_view_protokoll_detail(); break;
         case 'entscheide': pp_render_view_entscheide(); break;
         case 'ablaeufe':   pp_render_view_ablaeufe(); break;
@@ -1928,18 +1931,26 @@ function pp_render_view_dashboard() {
 
 // ─── ANSICHT: PROTOKOLLE ───────────────────────────────────────────────────
 
-function pp_render_view_protokolle() {
+/**
+ * @param string $teil 'alle' (Sitzungen + Archiv), 'sitzungen' (nur geplante
+ *                     Sitzungen + Anlegen) oder 'archiv' (nur Protokoll-Liste).
+ */
+function pp_render_view_protokolle($teil = 'alle') {
     $gremium_id = intval($_GET['gremium'] ?? 0);
     $gremien    = pp_get_gremien();
-    $sitzungen  = pp_get_geplante_sitzungen();
-    $alle       = pp_get_protokolle_liste($gremium_id);
+    $sitzungen  = 'archiv' === $teil ? [] : pp_get_geplante_sitzungen();
+    $alle       = 'sitzungen' === $teil ? [] : pp_get_protokolle_liste($gremium_id);
+    $ziel_view  = 'sitzungen' === $teil ? 'sitzungen' : 'protokolle';
+    $g_name     = '';
+    if ($gremium_id) { $g = pp_get_gremium($gremium_id); $g_name = $g ? ' — ' . $g->name : ''; }
     ?>
     <div class="pp-page-head">
-        <h2>Protokolle<?php if ($gremium_id) { $g = pp_get_gremium($gremium_id); echo $g ? ' — ' . esc_html($g->name) : ''; } ?></h2>
-        <a class="pp-btn" href="#pp-neues-protokoll">Neues Protokoll</a>
+        <h2><?php echo esc_html(('sitzungen' === $teil ? 'Geplante Sitzungen' : 'Protokolle') . $g_name); ?></h2>
+        <a class="pp-btn" href="<?php echo 'archiv' === $teil ? esc_url(pp_front_url(['pp_view' => 'sitzungen'], 'pp-neues-protokoll')) : '#pp-neues-protokoll'; ?>"><?php echo 'alle' === $teil ? 'Neues Protokoll' : 'Neue Sitzung planen'; ?></a>
     </div>
 
-    <h3>Geplante Sitzungen &amp; Tagesordnung</h3>
+    <?php if ('archiv' !== $teil) : ?>
+    <?php if ('alle' === $teil) : ?><h3>Geplante Sitzungen &amp; Tagesordnung</h3><?php endif; ?>
     <?php if (empty($sitzungen)) : ?>
         <p class="pp-empty">Keine geplanten Sitzungen (Protokolle im Entwurf).</p>
     <?php endif; ?>
@@ -1992,7 +2003,7 @@ function pp_render_view_protokolle() {
                                 <input type="hidden" name="action" value="pp_front_delete_top">
                                 <input type="hidden" name="id" value="<?php echo esc_attr($t->id); ?>">
                                 <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($s->id); ?>">
-                                <input type="hidden" name="ziel_view" value="protokolle">
+                                <input type="hidden" name="ziel_view" value="<?php echo esc_attr($ziel_view); ?>">
                                 <?php pp_front_return_field(); ?>
                                 <button type="submit" class="pp-link-danger" onclick="return confirm('TOP entfernen?')">entfernen</button>
                             </form>
@@ -2007,7 +2018,7 @@ function pp_render_view_protokolle() {
                 <?php wp_nonce_field('pp_front_add_top'); ?>
                 <input type="hidden" name="action" value="pp_front_add_top">
                 <input type="hidden" name="protokoll_id" value="<?php echo esc_attr($s->id); ?>">
-                <input type="hidden" name="ziel_view" value="protokolle">
+                <input type="hidden" name="ziel_view" value="<?php echo esc_attr($ziel_view); ?>">
                 <?php pp_front_return_field(); ?>
                 <input type="text" name="titel" placeholder="Neuer TOP…" required>
                 <select name="thema_id">
@@ -2021,8 +2032,10 @@ function pp_render_view_protokolle() {
             </form>
         </div>
     <?php endforeach; ?>
+    <?php endif; ?>
 
-    <h3>Alle Protokolle</h3>
+    <?php if ('sitzungen' !== $teil) : ?>
+    <?php if ('alle' === $teil) : ?><h3>Alle Protokolle</h3><?php endif; ?>
     <table class="pp-table">
         <thead><tr><th>Titel</th><th>Gremium</th><th>Datum</th><th>Status</th></tr></thead>
         <tbody>
@@ -2037,8 +2050,10 @@ function pp_render_view_protokolle() {
         <?php if (empty($alle)) : ?><tr><td colspan="4" class="pp-empty">Noch keine Protokolle.</td></tr><?php endif; ?>
         </tbody>
     </table>
+    <?php endif; ?>
 
-    <h3 id="pp-neues-protokoll">Neues Protokoll anlegen</h3>
+    <?php if ('archiv' !== $teil) : ?>
+    <h3 id="pp-neues-protokoll"><?php echo 'sitzungen' === $teil ? 'Neue Sitzung planen' : 'Neues Protokoll anlegen'; ?></h3>
     <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="pp-form pp-form-grid">
         <?php wp_nonce_field('pp_front_save_protokoll'); ?>
         <input type="hidden" name="action" value="pp_front_save_protokoll">
@@ -2061,7 +2076,7 @@ function pp_render_view_protokolle() {
             <span class="pp-meta">Mit Datum wird automatisch ein Termin erzeugt.</span>
         </div>
     </form>
-    <?php
+    <?php endif;
 }
 
 // ─── ANSICHT: EINZELNES PROTOKOLL ──────────────────────────────────────────

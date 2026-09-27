@@ -283,6 +283,7 @@ a.vp-kal-ev:hover{background:color-mix(in srgb,var(--kal-farbe) 22%,transparent)
 .vp-kal-ohne-schicht .vp-kal-kat-schicht,
 .vp-kal-ohne-oeffnung .vp-kal-kat-oeffnung,
 .vp-kal-ohne-sonstiges .vp-kal-kat-sonstiges,
+.vp-kal-ohne-aufgabe .vp-kal-kat-aufgabe,
 .vp-kal-ohne-nextcloud .vp-kal-kat-nextcloud{display:none !important}
 
 @media (max-width:700px){
@@ -290,3 +291,10 @@ a.vp-kal-ev:hover{background:color-mix(in srgb,var(--kal-farbe) 22%,transparent)
 	.vp-kal-liste-mobil{display:block}
 	.vp-kal-zeile-zeit{flex-basis:74px}
 }
+
+/* Seitenleisten-Einträge mit Zähler (z. B. Aufgaben) */
+a.vp-nav-item{display:flex;align-items:center;gap:6px}
+.vp-rollenaufgaben.is-mein{border-left:4px solid var(--vp-accent)}
+.vp-start-pp{margin-top:16px}
+.vp-kal-pp-termine td form{display:inline-flex;gap:4px;align-items:center;margin:2px 0}
+.vp-kal-pp-termine select{padding:4px 6px;border:1px solid var(--vp-border);border-radius:6px;background:var(--vp-card);color:var(--vp-ink);font:inherit;font-size:13px}
