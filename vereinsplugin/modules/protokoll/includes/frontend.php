@@ -2930,6 +2930,7 @@ function pp_render_view_protokoll_detail() {
 
                         <?php pp_render_top_schritte($t, $p, $p->status !== 'abgeschlossen' && pp_can_manage(), 'protokoll'); ?>
                         <?php pp_render_top_unterlagen($t, $p, $p->status !== 'abgeschlossen' && pp_can_manage(), 'protokoll'); ?>
+                        <?php do_action('pp_top_extra', $t, $p); // Kern: Anlagen aus dem Themenspeicher ?>
                         <?php pp_render_top_abstimmung($t, $p, $p->status !== 'abgeschlossen' && pp_can_manage(), 'protokoll'); ?>
 
                         <?php if ($p->status !== 'abgeschlossen') : ?>
@@ -3442,6 +3443,7 @@ function pp_render_live_top($t, $p) {
 
         <?php pp_render_top_schritte($t, $p, true, 'live'); ?>
         <?php pp_render_top_unterlagen($t, $p, true, 'live'); ?>
+        <?php do_action('pp_top_extra', $t, $p); ?>
         <?php pp_render_top_abstimmung($t, $p, true, 'live'); ?>
 
         <?php if ($t->konsent_status === 'einwand_offen') :
@@ -4059,6 +4061,7 @@ function pp_render_view_themen() {
                         <li><strong><?php echo esc_html($th->titel); ?></strong>
                             <?php if ($th->beschreibung) echo ' – ' . esc_html($th->beschreibung); ?>
                             <span class="pp-meta"><?php echo esc_html($th->status); ?><?php echo $th->svo_teil ? ' · SVO Teil ' . esc_html($th->svo_teil) : ''; ?></span>
+                            <?php do_action('pp_thema_extra', $th); // Kern: Herkunft + angehängte Berichte ?>
                         </li>
                     <?php endforeach; ?>
                 </ul>
@@ -4074,7 +4077,8 @@ function pp_render_view_themen() {
                 <?php foreach ($ohne as $th) : ?>
                     <li><strong><?php echo esc_html($th->titel); ?></strong>
                         <?php if ($th->beschreibung) echo ' – ' . esc_html($th->beschreibung); ?>
-                        <span class="pp-meta"><?php echo esc_html($th->status); ?></span></li>
+                        <span class="pp-meta"><?php echo esc_html($th->status); ?></span>
+                        <?php do_action('pp_thema_extra', $th); ?></li>
                 <?php endforeach; ?>
             </ul>
         <?php else : ?><p class="pp-empty">Keine.</p><?php endif; ?>

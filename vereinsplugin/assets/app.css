@@ -328,3 +328,12 @@ a.vp-nav-item{display:flex;align-items:center;gap:6px}
 .vp-live-tab{width:100%;border-collapse:collapse;font-size:13px}
 .vp-live-tab th,.vp-live-tab td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--vp-border, #e3e6ea)}
 .vp-live-tab tfoot th{border-top:2px solid var(--vp-border, #e3e6ea)}
+
+/* ── „Als TOP vorschlagen“ ───────────────────────────────────────────────── */
+.vp-thema-vorschlag{margin:0 0 14px}
+.vp-thema-vorschlag > summary{list-style:none;display:inline-block}
+.vp-thema-vorschlag > summary::-webkit-details-marker{display:none}
+.vp-thema-vorschlag[open] > summary{margin-bottom:8px}
+.vp-thema-anlage{margin:6px 0 0;font-size:13px}
+.vp-thema-anlage .vp-live-bericht{margin:6px 0 0}
+.vp-kal-thema{white-space:nowrap}

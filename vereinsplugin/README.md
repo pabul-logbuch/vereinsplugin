@@ -134,6 +134,22 @@ pflegt der Vorstand unter **Kalender → Verwalten**.
 
 Weitere Quellen können sich über den Filter `vp_kalender_termine` anhängen.
 
+## „Als TOP vorschlagen“ (Themenspeicher)
+
+In Kasse/Budgets, Kreiskassen, Wunschliste, Kreisen (inkl. neuer Kreis /
+Unterkreis), Schichtplänen, Aufgaben, Kalender, Projekten und Veranstaltungen
+steht oben der Knopf **„📌 Als TOP vorschlagen“**; im Kalender zusätzlich an
+jedem Termin („📌 als TOP“) und bei den Kreis-Terminen.
+
+- Titel und Kreis sind aus dem, was gerade offen ist, vorausgefüllt (z. B.
+  „Kreiskasse & Budgets: AG Fest“ mit Kreis „AG Fest“).
+- Ein Link zurück zur Quelle wird mitgespeichert; bei Kasse, Kreiskasse und
+  Wunschliste auf Wunsch auch der **aktuelle Stand als Anlage**.
+- Das Thema landet im **Themenspeicher** des Kreises. Wird es bei der
+  Sitzungsplanung als TOP übernommen, stehen Quelle und Anlage direkt beim TOP
+  (Live- und Detailansicht).
+- Vorschlagen darf jedes Mitglied; übernommen wird bei der Sitzungsplanung.
+
 ## Live-Sitzung: weiterarbeiten und alles dokumentieren
 
 Wer eine Sitzung **live protokolliert**, kann nebenbei überall weiterarbeiten:

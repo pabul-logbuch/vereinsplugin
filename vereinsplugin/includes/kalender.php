@@ -1255,7 +1255,13 @@ function vp_kal_render_zeile( $t, $kats ) {
 		$t['url'] ? '<a href="' . esc_url( $t['url'] ) . '">' . esc_html( $t['titel'] ) . '</a>' : esc_html( $t['titel'] )
 	);
 	$meta = array_filter( array( $kat, $t['ort'] ? '📍 ' . $t['ort'] : '' ) );
-	$html .= '<div class="vp-kal-zeile-meta">' . esc_html( implode( ' · ', $meta ) ) . '</div>';
+	$html .= '<div class="vp-kal-zeile-meta">' . esc_html( implode( ' · ', $meta ) );
+	// Termin als TOP vorschlagen (Themenspeicher).
+	if ( function_exists( 'vp_thema_link' ) && vp_thema_verfuegbar() && vp_thema_darf() && 'oeffnung' !== $t['kat'] ) {
+		$wann  = wp_date( 'd.m.Y', strtotime( substr( $t['start'], 0, 10 ) . ' 12:00' ) ) . ( vp_kal_zeit_text( $t, false ) ? ' ' . vp_kal_zeit_text( $t, false ) : '' );
+		$html .= ' · <a class="vp-kal-thema" href="' . esc_url( vp_thema_link( sprintf( /* translators: 1: Termin, 2: Datum */ __( 'Termin „%1$s“ (%2$s): ', 'vereinsplugin' ), $t['titel'], $wann ), trim( $t['ort'] . "\n" . $t['info'] ), 0, vp_kal_url( array( 'vp_kal' => 'liste', 'vp_kal_m' => substr( $t['start'], 0, 7 ) ) ) ) ) . '" title="' . esc_attr__( 'Als TOP vorschlagen', 'vereinsplugin' ) . '">📌 ' . esc_html__( 'als TOP', 'vereinsplugin' ) . '</a>';
+	}
+	$html .= '</div>';
 	if ( $t['info'] ) {
 		$html .= '<div class="vp-kal-zeile-info">' . nl2br( esc_html( $t['info'] ) ) . '</div>';
 	}
@@ -1511,6 +1517,9 @@ function vp_kal_render_pp_termine( $nonce ) {
 		echo '<form method="post">' . $nonce; // phpcs:ignore WordPress.Security.EscapeOutput
 		if ( $t->gremium_id ) {
 			echo '<button class="vp-btn" name="vp_kal_pp_rollen" value="' . (int) $t->id . '">' . esc_html__( 'Rollenaufgaben erzeugen', 'vereinsplugin' ) . '</button>';
+		}
+		if ( function_exists( 'vp_thema_link' ) && vp_thema_verfuegbar() ) {
+			echo '<a class="vp-btn" href="' . esc_url( vp_thema_link( sprintf( /* translators: 1: Termin, 2: Datum */ __( 'Termin „%1$s“ (%2$s): ', 'vereinsplugin' ), $t->titel, mysql2date( 'd.m.Y', $t->datum ) ), (string) $t->ort, (int) $t->gremium_id, $zurueck ) ) . '">📌 ' . esc_html__( 'als TOP', 'vereinsplugin' ) . '</a>';
 		}
 		if ( empty( $t->quelle_protokoll_id ) && empty( $t->quelle_top_id ) ) {
 			echo '<button class="vp-btn vp-btn-danger" name="vp_kal_pp_loeschen" value="' . (int) $t->id . '" onclick="return confirm(\'' . esc_js( __( 'Kreis-Termin löschen?', 'vereinsplugin' ) ) . '\')">' . esc_html__( 'Löschen', 'vereinsplugin' ) . '</button>';
