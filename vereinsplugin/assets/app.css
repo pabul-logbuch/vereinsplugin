@@ -298,3 +298,9 @@ a.vp-nav-item{display:flex;align-items:center;gap:6px}
 .vp-start-pp{margin-top:16px}
 .vp-kal-pp-termine td form{display:inline-flex;gap:4px;align-items:center;margin:2px 0}
 .vp-kal-pp-termine select{padding:4px 6px;border:1px solid var(--vp-border);border-radius:6px;background:var(--vp-card);color:var(--vp-ink);font:inherit;font-size:13px}
+
+/* ── Chats & Besprechungen (Nextcloud Talk) ─────────────────────────────── */
+.vp-talk-liste{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin:0 0 10px}
+.vp-talk-raum{display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--vp-border);border-radius:10px;background:var(--vp-card);color:var(--vp-ink);text-decoration:none}
+.vp-talk-raum:hover{border-color:#0082c9}
+.vp-talk-icon{font-size:22px}

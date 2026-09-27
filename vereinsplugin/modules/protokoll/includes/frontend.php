@@ -1982,6 +1982,7 @@ function pp_render_view_protokolle($teil = 'alle') {
                         <?php pp_front_return_field(); ?>
                         <button type="submit" class="pp-btn pp-btn-small pp-btn-primary">Live protokollieren</button>
                     </form>
+                    <?php do_action('pp_sitzung_aktionen', $s); // z. B. Online-Besprechung (Nextcloud Talk) ?>
                 </div>
             </div>
 

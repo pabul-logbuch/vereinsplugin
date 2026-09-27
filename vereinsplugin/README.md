@@ -134,6 +134,27 @@ pflegt der Vorstand unter **Kalender → Verwalten**.
 
 Weitere Quellen können sich über den Filter `vp_kalender_termine` anhängen.
 
+## Nextcloud Talk: Kreis-Chats & Online-Besprechungen
+
+Voraussetzung: In Nextcloud ist die App **Talk** installiert und unter „Verein →
+Einstellungen“ der Nextcloud-Zugang eingetragen (derselbe wie für den
+Benutzer-Sync). Dieses Konto legt die Unterhaltungen an und ist darin Moderator:in.
+
+- **Chats & Besprechungen** (Seitenleiste, unter Kalender): die eigenen
+  Kreis-Chats und die nächsten Online-Besprechungen, jeweils mit Link, der
+  Nextcloud Talk (Browser oder Talk-App) öffnet. Eingebettet wird Talk nicht,
+  weil Nextcloud das Einbetten in fremde Seiten standardmäßig blockiert.
+- **Kreis-Chats**: Der Vorstand hakt dort die Kreise an; je Kreis entsteht eine
+  Talk-Unterhaltung, deren Teilnehmende mit den Kreismitgliedern abgeglichen
+  werden (neu rein, ausgetreten raus; auf Wunsch stündlich). Die
+  Mitgliederversammlung umfasst alle Mitglieder.
+- **Sitzungen**: In „Geplante Sitzungen“ gibt es „🎥 Online (Talk)“ – die
+  Besprechung läuft im Kreis-Chat. Alternativ „Eigener Raum mit Gast-Link“ für
+  Sitzungen mit Externen. Der Link steht auch im Kalender und im Abo.
+- **Benutzer**: Die Zuordnung WordPress → Nextcloud übernimmt der bestehende
+  **Nextcloud-Sync** (legt fehlende Konten auf beiden Seiten an, abgeglichen
+  über die E-Mail-Adresse).
+
 ## Updates über GitHub
 
 Das Plugin bringt einen Update-Checker mit (`vendor/plugin-update-checker/`,
