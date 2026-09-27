@@ -1150,9 +1150,10 @@ function vp_projekt_tab_oeffentlichkeit( $p ) {
 /* ---- Finanzen ---- */
 
 function vp_projekt_tab_finanzen( $p, $k ) {
-	global $wpdb;
 	$posten    = vp_projekt_punkte( $p->id, 'kalkulation' );
 	$edit      = isset( $_GET['p_punkt'] ) ? (int) $_GET['p_punkt'] : 0;
+	$kasse     = function_exists( 'vp_kreis_kasse_verfuegbar' ) && vp_kreis_kasse_verfuegbar() && function_exists( 'vp_projekt_soll_ist' );
+	$si        = $kasse ? vp_projekt_soll_ist( $p, $posten ) : null;
 	$ausgaben  = 0.0;
 	$einnahmen = 0.0;
 	$offen     = 0;
@@ -1166,23 +1167,40 @@ function vp_projekt_tab_finanzen( $p, $k ) {
 		}
 	}
 	$ergebnis = $einnahmen - $ausgaben;
+	$spalten  = $kasse ? 6 : 4;
 	?>
+	<?php if ( $kasse ) { vp_projekt_ks_formular( $p ); } ?>
+
 	<h3><?php esc_html_e( 'Kalkulation', 'vereinsplugin' ); ?></h3>
-	<p class="pp-meta"><?php esc_html_e( 'Womit rechnet ihr? Die Summe der geplanten Ausgaben ist der Vorschlag fürs Budget.', 'vereinsplugin' ); ?></p>
+	<p class="pp-meta"><?php echo $kasse
+		? esc_html__( 'Plan gegen Ist: Was tatsächlich gebucht wurde (unten), ordnet ihr den Posten zu – dann seht ihr je Posten, ob ihr im Rahmen liegt.', 'vereinsplugin' )
+		: esc_html__( 'Womit rechnet ihr? Die Summe der geplanten Ausgaben ist der Vorschlag fürs Budget.', 'vereinsplugin' ); ?></p>
 	<?php if ( $offen ) : ?>
 		<p class="pp-hint"><?php echo esc_html( sprintf( _n( '%d Posten hat noch keinen Betrag – aus einem Baustein übernommen. Schätzt ihn über „bearbeiten“.', '%d Posten haben noch keinen Betrag – aus einem Baustein übernommen. Schätzt sie über „bearbeiten“.', $offen, 'vereinsplugin' ), $offen ) ); ?></p>
 	<?php endif; ?>
 	<table class="pp-table">
-		<thead><tr><th><?php esc_html_e( 'Posten', 'vereinsplugin' ); ?></th><th style="text-align:right"><?php esc_html_e( 'Einnahme', 'vereinsplugin' ); ?></th><th style="text-align:right"><?php esc_html_e( 'Ausgabe', 'vereinsplugin' ); ?></th><th></th></tr></thead>
+		<thead><tr>
+			<th><?php esc_html_e( 'Posten', 'vereinsplugin' ); ?></th>
+			<th style="text-align:right"><?php esc_html_e( 'Plan Einnahme', 'vereinsplugin' ); ?></th>
+			<th style="text-align:right"><?php esc_html_e( 'Plan Ausgabe', 'vereinsplugin' ); ?></th>
+			<?php if ( $kasse ) : ?><th style="text-align:right"><?php esc_html_e( 'Ist', 'vereinsplugin' ); ?></th><th style="text-align:right"><?php esc_html_e( 'Abweichung', 'vereinsplugin' ); ?></th><?php endif; ?>
+			<th></th>
+		</tr></thead>
 		<tbody>
 		<?php foreach ( $posten as $x ) :
 			$richtung = vp_projekt_posten_richtung( $x );
 			$leer     = null === $x->betrag ? '<span class="pp-meta">' . esc_html__( 'offen', 'vereinsplugin' ) . '</span>' : '';
+			$ist      = $kasse ? ( $si['je_posten'][ (int) $x->id ] ?? 0.0 ) : 0.0;
+			$abw      = $ist - (float) $x->betrag;
 			?>
 			<tr>
 				<td><?php echo esc_html( $x->titel ); ?><?php if ( $x->beschreibung ) : ?><div class="pp-meta"><?php echo esc_html( $x->beschreibung ); ?></div><?php endif; ?></td>
 				<td style="text-align:right"><?php echo (float) $x->betrag > 0 ? esc_html( vp_kreis_eur( $x->betrag ) ) : ( 'einnahme' === $richtung ? $leer : '' ); // phpcs:ignore ?></td>
 				<td style="text-align:right"><?php echo (float) $x->betrag < 0 ? esc_html( vp_kreis_eur( abs( (float) $x->betrag ) ) ) : ( 'ausgabe' === $richtung ? $leer : '' ); // phpcs:ignore ?></td>
+				<?php if ( $kasse ) : ?>
+					<td style="text-align:right"><?php echo $ist ? esc_html( vp_kreis_eur( $ist ) ) : '<span class="pp-meta">–</span>'; // phpcs:ignore ?></td>
+					<td style="text-align:right;<?php echo $abw < 0 ? 'color:#b91c1c' : 'color:#15803d'; ?>"><?php echo ( $ist && null !== $x->betrag ) ? esc_html( vp_kreis_eur( $abw ) ) : ''; ?></td>
+				<?php endif; ?>
 				<td class="pp-ablauf-aktionen">
 					<a class="pp-meta" href="<?php echo esc_url( vp_projekt_url( $p->id, 'finanzen', array( 'p_punkt' => (int) $x->id ) ) . '#vp-punkt-form' ); ?>"><?php esc_html_e( 'bearbeiten', 'vereinsplugin' ); ?></a>
 					<?php vp_kreis_form( 'vp_projekt_punkt_delete', 'pp-inline' ); ?>
@@ -1193,9 +1211,19 @@ function vp_projekt_tab_finanzen( $p, $k ) {
 			</tr>
 		<?php endforeach; ?>
 		<?php if ( $posten ) : ?>
-			<tr class="pp-summenzeile"><td><strong><?php esc_html_e( 'Summe', 'vereinsplugin' ); ?></strong></td><td style="text-align:right"><strong><?php echo esc_html( vp_kreis_eur( $einnahmen ) ); ?></strong></td><td style="text-align:right"><strong><?php echo esc_html( vp_kreis_eur( $ausgaben ) ); ?></strong></td><td style="<?php echo $ergebnis < 0 ? 'color:#b91c1c' : 'color:#15803d'; ?>"><strong><?php echo esc_html( vp_kreis_eur( $ergebnis ) ); ?></strong></td></tr>
+			<tr class="pp-summenzeile">
+				<td><strong><?php esc_html_e( 'Summe', 'vereinsplugin' ); ?></strong><div class="pp-meta"><?php echo esc_html( sprintf( __( 'Ergebnis Plan: %s', 'vereinsplugin' ), vp_kreis_eur( $ergebnis ) ) ); ?></div></td>
+				<td style="text-align:right"><strong><?php echo esc_html( vp_kreis_eur( $einnahmen ) ); ?></strong></td>
+				<td style="text-align:right"><strong><?php echo esc_html( vp_kreis_eur( $ausgaben ) ); ?></strong></td>
+				<?php if ( $kasse ) :
+					$ist_erg = $si['ist_ein'] - $si['ist_aus']; ?>
+					<td style="text-align:right"><strong><?php echo esc_html( vp_kreis_eur( $ist_erg ) ); ?></strong></td>
+					<td style="text-align:right;<?php echo ( $ist_erg - $ergebnis ) < 0 ? 'color:#b91c1c' : 'color:#15803d'; ?>"><strong><?php echo esc_html( vp_kreis_eur( $ist_erg - $ergebnis ) ); ?></strong></td>
+				<?php endif; ?>
+				<td></td>
+			</tr>
 		<?php else : ?>
-			<tr><td colspan="4" class="pp-empty"><?php esc_html_e( 'Noch keine Posten.', 'vereinsplugin' ); ?></td></tr>
+			<tr><td colspan="<?php echo (int) $spalten; ?>" class="pp-empty"><?php esc_html_e( 'Noch keine Posten.', 'vereinsplugin' ); ?></td></tr>
 		<?php endif; ?>
 		</tbody>
 	</table>
@@ -1215,16 +1243,33 @@ function vp_projekt_tab_finanzen( $p, $k ) {
 		<p class="pp-meta"><a href="<?php echo esc_url( vp_projekt_url( $p->id, 'bausteine' ) ); ?>"><?php esc_html_e( 'Kalkulation aus Bausteinen aufbauen (Grundgerüst, Ausschank, GEMA, Technik …)', 'vereinsplugin' ); ?></a></p>
 	<?php endif; ?>
 
-	<h3><?php esc_html_e( 'Budget & tatsächliche Ausgaben', 'vereinsplugin' ); ?></h3>
 	<?php
-	if ( ! function_exists( 'vp_kreis_kasse_verfuegbar' ) || ! vp_kreis_kasse_verfuegbar() ) {
-		echo '<p class="pp-empty">' . esc_html__( 'Das Buchhaltungs-Modul ist nicht aktiv.', 'vereinsplugin' ) . '</p>';
+	if ( ! $kasse ) {
+		echo '<h3>' . esc_html__( 'Budget & tatsächliche Ausgaben', 'vereinsplugin' ) . '</h3><p class="pp-empty">' . esc_html__( 'Das Buchhaltungs-Modul ist nicht aktiv.', 'vereinsplugin' ) . '</p>';
 		return;
 	}
+	?>
+	<h3><?php esc_html_e( 'Tatsächliche Einnahmen & Ausgaben', 'vereinsplugin' ); ?></h3>
+	<?php if ( $si['ohne_posten'] ) : ?>
+		<p class="pp-hint"><?php echo esc_html( sprintf( _n( '%d Buchung ist noch keinem Posten zugeordnet – rechts einen Posten wählen oder „als neuen Posten übernehmen“.', '%d Buchungen sind noch keinem Posten zugeordnet – rechts einen Posten wählen oder „als neuen Posten übernehmen“.', $si['ohne_posten'], 'vereinsplugin' ), $si['ohne_posten'] ) ); ?></p>
+	<?php endif; ?>
+	<?php vp_projekt_ist_tabelle( $p, $posten, $si['ist'] ); ?>
+	<p class="pp-meta">
+		<?php if ( current_user_can( 'jb_submit_auslagen' ) && $p->budget_id ) : ?>
+			<a class="pp-btn pp-btn-small" href="<?php echo esc_url( vp_kreis_mitgliederbereich_url( array( 'vp_tab' => 'auslage', 'jb_budget' => (int) $p->budget_id ) ) ); ?>"><?php esc_html_e( 'Auslage für dieses Projekt einreichen', 'vereinsplugin' ); ?></a>
+		<?php endif; ?>
+		<?php if ( current_user_can( 'jb_view_journal' ) ) : ?>
+			<a class="pp-btn pp-btn-small" href="<?php echo esc_url( vp_kreis_mitgliederbereich_url( array( 'vp_tab' => 'buchhaltung' ) ) ); ?>"><?php esc_html_e( 'In der Kasse buchen', 'vereinsplugin' ); ?></a>
+		<?php endif; ?>
+		<?php if ( $p->gremium_id ) : ?><a class="pp-btn pp-btn-small" href="<?php echo esc_url( vp_kreis_url( $p->gremium_id, 'kasse' ) ); ?>"><?php esc_html_e( 'Zur Kreiskasse', 'vereinsplugin' ); ?></a><?php endif; ?>
+	</p>
+
+	<h3><?php esc_html_e( 'Budget', 'vereinsplugin' ); ?></h3>
+	<?php
 	$b = $k['budget'];
 	if ( ! $b ) {
 		if ( ! $p->gremium_id ) {
-			echo '<p class="pp-hint">' . esc_html__( 'Budgets hängen an einem Kreis – bitte dem Projekt zuerst einen Kreis zuordnen.', 'vereinsplugin' ) . '</p>';
+			echo '<p class="pp-hint">' . esc_html__( 'Budgets hängen an einem Kreis – bitte dem Projekt zuerst einen Kreis zuordnen. Buchungen mit der Kostenstelle zählen trotzdem schon als Ist.', 'vereinsplugin' ) . '</p>';
 			return;
 		}
 		if ( ! vp_projekt_darf_budget( $p ) ) {
@@ -1247,34 +1292,11 @@ function vp_projekt_tab_finanzen( $p, $k ) {
 	?>
 	<div class="pp-kpis">
 		<div class="pp-kpi"><strong><?php echo esc_html( vp_kreis_eur( $b->betrag ) ); ?></strong><span><?php esc_html_e( 'Budget', 'vereinsplugin' ); ?></span></div>
-		<div class="pp-kpi"><strong><?php echo esc_html( vp_kreis_eur( $b->verbraucht ) ); ?></strong><span><?php esc_html_e( 'ausgegeben', 'vereinsplugin' ); ?></span></div>
-		<div class="pp-kpi<?php echo (float) $b->rest < 0 ? ' is-neg' : ''; ?>"><strong><?php echo esc_html( vp_kreis_eur( $b->rest ) ); ?></strong><span><?php esc_html_e( 'übrig', 'vereinsplugin' ); ?></span></div>
-		<?php if ( $posten ) : ?><div class="pp-kpi"><strong><?php echo esc_html( vp_kreis_eur( $ausgaben ) ); ?></strong><span><?php esc_html_e( 'kalkuliert', 'vereinsplugin' ); ?></span></div><?php endif; ?>
+		<div class="pp-kpi"><strong><?php echo esc_html( vp_kreis_eur( $ausgaben ) ); ?></strong><span><?php esc_html_e( 'kalkuliert', 'vereinsplugin' ); ?></span></div>
+		<div class="pp-kpi"><strong><?php echo esc_html( vp_kreis_eur( $si['ist_aus'] ) ); ?></strong><span><?php esc_html_e( 'tatsächlich ausgegeben', 'vereinsplugin' ); ?></span></div>
+		<div class="pp-kpi<?php echo ( (float) $b->betrag - $si['ist_aus'] ) < 0 ? ' is-neg' : ''; ?>"><strong><?php echo esc_html( vp_kreis_eur( (float) $b->betrag - $si['ist_aus'] ) ); ?></strong><span><?php esc_html_e( 'übrig', 'vereinsplugin' ); ?></span></div>
 	</div>
-	<p>
-		<strong><?php echo esc_html( $b->zweck ); ?></strong>
-		<?php if ( current_user_can( 'jb_submit_auslagen' ) && function_exists( 'vp_member_sections' ) ) : ?>
-			<a class="pp-btn pp-btn-small" href="<?php echo esc_url( vp_kreis_mitgliederbereich_url( array( 'vp_tab' => 'auslage', 'jb_budget' => (int) $b->id ) ) ); ?>"><?php esc_html_e( 'Auslage für dieses Projekt einreichen', 'vereinsplugin' ); ?></a>
-		<?php endif; ?>
-		<?php if ( $p->gremium_id ) : ?><a class="pp-btn pp-btn-small" href="<?php echo esc_url( vp_kreis_url( $p->gremium_id, 'kasse' ) ); ?>"><?php esc_html_e( 'Zur Kreiskasse', 'vereinsplugin' ); ?></a><?php endif; ?>
-		<?php vp_projekt_loesen_knopf( $p, 'budget_id' ); ?>
-	</p>
-	<?php
-	$auslagen  = function_exists( 'jb_table_auslagen' ) ? $wpdb->get_results( $wpdb->prepare( 'SELECT a.*, u.display_name AS user_name FROM ' . jb_table_auslagen() . " a LEFT JOIN {$wpdb->users} u ON u.ID = a.user_id WHERE a.budget_id = %d ORDER BY a.ausgabe_datum DESC", $b->id ) ) : array();
-	$buchungen = function_exists( 'jb_table_journal' ) ? $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM ' . jb_table_journal() . ' WHERE budget_id = %d ORDER BY buchung_datum DESC', $b->id ) ) : array();
-	?>
-	<table class="pp-table">
-		<thead><tr><th><?php esc_html_e( 'Datum', 'vereinsplugin' ); ?></th><th><?php esc_html_e( 'Was', 'vereinsplugin' ); ?></th><th><?php esc_html_e( 'Art', 'vereinsplugin' ); ?></th><th style="text-align:right"><?php esc_html_e( 'Betrag', 'vereinsplugin' ); ?></th></tr></thead>
-		<tbody>
-		<?php foreach ( $auslagen as $a ) : ?>
-			<tr><td><?php echo esc_html( mysql2date( 'd.m.Y', $a->ausgabe_datum ) ); ?></td><td><?php echo esc_html( $a->beschreibung ); ?><div class="pp-meta"><?php echo esc_html( $a->user_name ); ?></div></td><td><span class="pp-badge pp-status-<?php echo esc_attr( $a->status ); ?>"><?php echo esc_html( sprintf( __( 'Auslage · %s', 'vereinsplugin' ), $a->status ) ); ?></span></td><td style="text-align:right;color:#b91c1c"><?php echo esc_html( vp_kreis_eur( -abs( (float) $a->betrag ) ) ); ?></td></tr>
-		<?php endforeach; ?>
-		<?php foreach ( $buchungen as $r ) : ?>
-			<tr><td><?php echo esc_html( mysql2date( 'd.m.Y', $r->buchung_datum ) ); ?></td><td><?php echo esc_html( $r->beschreibung ); ?></td><td><span class="pp-badge"><?php esc_html_e( 'Buchung', 'vereinsplugin' ); ?></span></td><td style="text-align:right;<?php echo (float) $r->betrag < 0 ? 'color:#b91c1c' : 'color:#15803d'; ?>"><?php echo esc_html( vp_kreis_eur( $r->betrag ) ); ?></td></tr>
-		<?php endforeach; ?>
-		<?php if ( ! $auslagen && ! $buchungen ) : ?><tr><td colspan="4" class="pp-empty"><?php esc_html_e( 'Noch keine Ausgaben auf diesem Budget.', 'vereinsplugin' ); ?></td></tr><?php endif; ?>
-		</tbody>
-	</table>
+	<p><strong><?php echo esc_html( $b->zweck ); ?></strong><?php echo ! empty( $b->kostenstelle ) ? ' <span class="pp-meta">· ' . esc_html( $b->kostenstelle ) . '</span>' : ''; ?> <?php vp_projekt_loesen_knopf( $p, 'budget_id' ); ?></p>
 	<?php
 }
 
@@ -1419,9 +1441,10 @@ function vp_projekt_handle_punkt_save() {
 	} else {
 		// Leerer Betrag heißt „noch zu schätzen": betrag NULL, Richtung in `kanal`.
 		$richtung      = 'einnahme' === ( $_POST['richtung'] ?? '' ) ? 'einnahme' : 'ausgabe';
-		$roh           = trim( str_replace( ',', '.', sanitize_text_field( wp_unslash( $_POST['betrag'] ?? '' ) ) ) );
+		$roh           = trim( sanitize_text_field( wp_unslash( $_POST['betrag'] ?? '' ) ) );
+		$wert          = function_exists( 'vp_projekt_betrag_parsen' ) ? vp_projekt_betrag_parsen( $roh ) : (float) str_replace( ',', '.', $roh );
 		$row['kanal']  = $richtung;
-		$row['betrag'] = '' === $roh ? null : ( 'einnahme' === $richtung ? 1 : -1 ) * abs( (float) $roh );
+		$row['betrag'] = '' === $roh ? null : ( 'einnahme' === $richtung ? 1 : -1 ) * abs( $wert );
 	}
 	$pid = (int) ( $_POST['punkt_id'] ?? 0 );
 	if ( $pid ) {
@@ -1698,11 +1721,15 @@ function vp_projekt_handle_verknuepfen() {
 			$bid = vp_kreis_budget_speichern( array(
 				'zweck'                  => $p->titel,
 				'beschreibung'           => sprintf( __( 'Projekt: %s', 'vereinsplugin' ), $p->titel ),
-				'betrag'                 => wp_unslash( $_POST['betrag'] ?? '0' ),
+				'betrag'                 => function_exists( 'vp_projekt_betrag_parsen' ) ? vp_projekt_betrag_parsen( wp_unslash( $_POST['betrag'] ?? '0' ) ) : wp_unslash( $_POST['betrag'] ?? '0' ),
 				'jahr'                   => $p->beginn ? (int) mysql2date( 'Y', $p->beginn ) : (int) current_time( 'Y' ),
 				'gremium_id'             => (int) $p->gremium_id,
 				'verantwortlich_user_id' => (int) $p->verantwortlich_user_id,
+				'kostenstelle'           => function_exists( 'vp_projekt_ks' ) ? ( vp_projekt_ks( $p ) ?: vp_projekt_ks_vorschlag( $p ) ) : '',
 			) );
+			if ( $bid && function_exists( 'vp_projekt_ks' ) && ! vp_projekt_ks( $p ) ) {
+				$wpdb->update( vp_projekt_table(), array( 'kostenstelle' => vp_projekt_ks_vorschlag( $p ) ), array( 'id' => (int) $p->id ) );
+			}
 			if ( $bid ) {
 				$set( 'budget_id', $bid );
 			}

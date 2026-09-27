@@ -47,7 +47,7 @@ function jb_kostenstellen(): array {
     }
     $ks = array_values(array_unique(array_filter(array_map('strval', $ks))));
     sort($ks);
-    return $ks;
+    return (array) apply_filters('jb_kostenstellen', $ks); // Kern: + Kostenstellen der Projekte
 }
 
 function jb_budget_save(array $data): int|false {

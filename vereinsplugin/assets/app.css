@@ -337,3 +337,10 @@ a.vp-nav-item{display:flex;align-items:center;gap:6px}
 .vp-thema-anlage{margin:6px 0 0;font-size:13px}
 .vp-thema-anlage .vp-live-bericht{margin:6px 0 0}
 .vp-kal-thema{white-space:nowrap}
+
+/* ── Projekt-Finanzen: Kostenstelle + Ist-Zuordnung ─────────────────────── */
+.vp-projekt-ks{margin:0 0 12px}
+.vp-projekt-ks .pp-inline-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.vp-projekt-ist .vp-ist-offen td{background:rgba(245,158,11,.08)}
+.vp-projekt-ist select{max-width:240px}
+.vp-ist-form{margin:0}

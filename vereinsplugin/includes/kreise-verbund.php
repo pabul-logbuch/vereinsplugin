@@ -935,6 +935,10 @@ function vp_kreis_render_kasse( $kreis ) {
 		</tbody>
 	</table>
 	<?php
+	// Projekte des Kreises: Kalkulation gegen Ist.
+	if ( function_exists( 'vp_projekt_kassen_uebersicht' ) ) {
+		echo vp_projekt_kassen_uebersicht( $gid ); // phpcs:ignore WordPress.Security.EscapeOutput
+	}
 }
 
 add_action( 'admin_post_vp_kreis_budget_save', 'vp_kreis_handle_budget_save' );

@@ -134,6 +134,28 @@ pflegt der Vorstand unter **Kalender → Verwalten**.
 
 Weitere Quellen können sich über den Filter `vp_kalender_termine` anhängen.
 
+## Projekte: Kalkulation ↔ Kasse, Kostenstellen, Zeitplan ab heute
+
+- **Kostenstelle je Projekt** (Reiter Finanzen; Vorschlag aus dem Titel, z. B.
+  `SOMMERFEST27`). Ein Projektbudget übernimmt sie, in der Buchhaltung steht sie
+  in der Kostenstellen-Auswahl.
+- **Ist** = Buchungen mit dieser Kostenstelle oder auf dem Projektbudget +
+  Auslagen auf dem Projektbudget (ohne Doppelzählung der Auslagen-Buchung).
+  Funktioniert auch ohne eigenes Budget.
+- **Plan/Ist je Posten**: Die Kalkulation zeigt Plan, Ist und Abweichung. Jede
+  tatsächliche Buchung lässt sich einem Posten zuordnen oder mit
+  „+ als neuen Posten übernehmen“ in die Kalkulation übertragen.
+- **In der Kasse**: Beim Buchen im Journal kann direkt ein
+  Projekt-Kalkulationsposten gewählt werden (die Kostenstelle wird ergänzt).
+  „Budgets & Kostenstellen“ und die Kreiskasse zeigen je Projekt Plan, Ist und
+  Abweichung.
+- **Beträge** wie „1.234,56“ werden jetzt richtig gelesen.
+- **Bausteine: Zeitplan ab heute** – die Fristen verteilen sich auf die Zeit
+  von heute bis zur Veranstaltung: spontan in 2 Wochen wird enger, in 12
+  Monaten großzügiger; die letzten Handgriffe (bis 14 Tage vorher) bleiben.
+  Für bestehende Projekte oder nach einer Datumsänderung: „Zeitplan ab heute
+  neu verteilen“ im Reiter Bausteine (nur offene Baustein-Einträge).
+
 ## „Als TOP vorschlagen“ (Themenspeicher)
 
 In Kasse/Budgets, Kreiskassen, Wunschliste, Kreisen (inkl. neuer Kreis /
