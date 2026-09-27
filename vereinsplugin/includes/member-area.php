@@ -117,6 +117,12 @@ function vp_member_sections() {
 			'cap'    => 'read',
 			'render' => 'vp_render_dashboard_section',
 		),
+		'kalender' => array(
+			'label'  => __( 'Kalender', 'vereinsplugin' ),
+			'group'  => 'mitglied',
+			'cap'    => 'read',
+			'render' => 'vp_render_kalender_section',
+		),
 		'abstimmung' => array(
 			'label'     => __( 'Wunschliste & Abstimmung', 'vereinsplugin' ),
 			'group'     => 'mitglied',
@@ -477,6 +483,10 @@ function vp_render_dashboard_section() {
 		echo '<div class="vp-card vp-tile' . ( $n ? ' vp-tile-alert' : '' ) . '"><div class="vp-tile-num">' . $n . '</div><div>' . esc_html__( 'offene Mitgliedsanträge', 'vereinsplugin' ) . '</div></div>';
 	}
 	echo '</div>';
+
+	if ( function_exists( 'vp_kal_naechste_termine_html' ) ) {
+		echo vp_kal_naechste_termine_html(); // phpcs:ignore WordPress.Security.EscapeOutput
+	}
 
 	echo '<p class="vp-muted">' . esc_html__( 'Wähle links einen Bereich.', 'vereinsplugin' ) . '</p>';
 	return ob_get_clean();

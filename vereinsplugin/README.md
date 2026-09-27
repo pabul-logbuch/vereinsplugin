@@ -75,6 +75,43 @@ wieder einblenden“** reaktivieren.
   Passwort-Link verschicken. Ein erneuter Import erkennt die Personen über die
   Mitglieds-Nr. wieder.
 
+## Kalender
+
+Im Mitgliederbereich gibt es in der Seitenleiste den Punkt **Kalender**
+(direkt unter „Start“). Er führt alle Termine des Vereins zusammen – die Daten
+bleiben dabei in ihren Modulen, es wird nichts doppelt gepflegt:
+
+- **Veranstaltungen** aus dem Veranstaltungs-Publisher (Entwürfe nur für
+  Leute mit Veranstaltungsrechten),
+- **Sitzungen** aus „Sitzungen & Protokolle“ (Sitzungen „nur Gremium“ nur für
+  dessen Mitglieder) und **Termine aus Beschlüssen**,
+- **Schichtpläne** je Veranstaltungstag mit freien Plätzen – plus die eigenen
+  Schichten hervorgehoben,
+- **Öffnungszeiten** (wöchentlich wiederkehrend) mit **Schließtagen/Ferien**,
+- **Weitere Termine**, frei eingetragen (für alle oder nur den Vorstand),
+- **Nextcloud-Kalender** (siehe unten).
+
+Ansichten: Monat (auf dem Handy automatisch als Liste), Liste; Kategorien
+lassen sich per Filter ein-/ausblenden. Auf der Startseite erscheinen die
+nächsten Termine. Öffnungszeiten, weitere Termine und Nextcloud-Kalender
+pflegt der Vorstand unter **Kalender → Verwalten**.
+
+**Nextcloud – beide Richtungen:**
+
+- *Nextcloud → Vereinskalender:* Unter „Verwalten“ werden die Kalender des in
+  den Einstellungen hinterlegten Nextcloud-Kontos zum Anklicken angeboten.
+  Alternativ lässt sich jeder Freigabe-/Abo-Link (oder jede andere ICS-Adresse)
+  einfügen. Die Termine werden alle 15 Minuten gelesen (nur lesend,
+  Wiederholungen und Ausnahmen werden aufgelöst). Zugangsdaten gehen nur an
+  den eigenen Nextcloud-Host.
+- *Vereinskalender → Nextcloud:* Unter „Abonnieren / Nextcloud“ bekommt jede
+  Person einen persönlichen ICS-Link. In Nextcloud: Kalender → „+ Neuer
+  Kalender“ → „Neues Abonnement aus Link“. Funktioniert genauso mit Google,
+  Apple, Outlook und Thunderbird. Der Link enthält nur, was die Person auch im
+  Mitgliederbereich sieht, und lässt sich jederzeit neu erzeugen.
+
+Weitere Quellen können sich über den Filter `vp_kalender_termine` anhängen.
+
 ## Updates über GitHub
 
 Das Plugin bringt einen Update-Checker mit (`vendor/plugin-update-checker/`,
