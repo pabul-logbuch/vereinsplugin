@@ -14,8 +14,8 @@ function wl_admin_menu() {
     );
     add_submenu_page('wunschliste', 'Import', 'CSV/XML Import', 'wl_manage_wishes', 'wunschliste-import', 'wl_import_page');
     add_submenu_page('wunschliste', 'Einstellungen', 'Einstellungen', 'manage_options', 'wunschliste-einstellungen', 'wl_settings_page');
-    add_submenu_page('wunschliste', 'Neues Mitglied', 'Mitglied anlegen', 'manage_options', 'wunschliste-mitglied', 'wl_new_member_page');
-    add_submenu_page('wunschliste', 'Mitglieder Import', 'Mitglieder Import', 'manage_options', 'wunschliste-mitglieder-import', 'wl_member_import_page');
+    add_submenu_page('wunschliste', 'Neues Mitglied', 'Mitglied anlegen', 'vp_manage_members', 'wunschliste-mitglied', 'wl_new_member_page');
+    add_submenu_page('wunschliste', 'Mitglieder Import', 'Mitglieder Import', 'vp_manage_members', 'wunschliste-mitglieder-import', 'wl_member_import_page');
 }
 
 // ─── MITGLIEDER-IMPORT-SEITE ──────────────────────────────────────────────

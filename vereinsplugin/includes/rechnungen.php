@@ -530,6 +530,7 @@ function vp_render_rechnungen_section() {
 		return '<div class="vp-note vp-note-error">' . esc_html__( 'Keine Berechtigung.', 'vereinsplugin' ) . '</div>';
 	}
 	vp_rechnungen_maybe_upgrade();
+	$nur_lesen = function_exists( 'vp_kasse_nur_lesen_hinweis' ) ? vp_kasse_nur_lesen_hinweis() : '';
 
 	$msg = '';
 	$err = '';
@@ -618,6 +619,7 @@ function vp_render_rechnungen_section() {
 
 	ob_start();
 	echo '<h2>' . esc_html__( 'Rechnungen', 'vereinsplugin' ) . '</h2>';
+	echo $nur_lesen; // phpcs:ignore
 	if ( $msg ) {
 		echo '<div class="vp-note">' . esc_html( $msg ) . '</div>';
 	}

@@ -731,6 +731,7 @@ function vp_render_sepa_section() {
 		return '<div class="vp-note vp-note-error">' . esc_html__( 'Keine Berechtigung.', 'vereinsplugin' ) . '</div>';
 	}
 	vp_sepa_maybe_upgrade();
+	$nur_lesen = function_exists( 'vp_kasse_nur_lesen_hinweis' ) ? vp_kasse_nur_lesen_hinweis() : '';
 
 	$msg  = '';
 	$err  = '';
@@ -829,6 +830,7 @@ function vp_render_sepa_section() {
 
 	ob_start();
 	echo '<h2>' . esc_html__( 'SEPA-Lastschrift', 'vereinsplugin' ) . '</h2>';
+	echo $nur_lesen; // phpcs:ignore
 	echo '<nav class="vp-subnav">';
 	$tabs = array(
 		'mandate' => __( 'Mandate', 'vereinsplugin' ),

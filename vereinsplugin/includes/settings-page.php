@@ -365,6 +365,8 @@ function vp_render_settings_page() {
 				</tr>
 			</table>
 
+			<?php echo function_exists( 'vp_vorstand_rechte_einstellungen_html' ) ? vp_vorstand_rechte_einstellungen_html() : ''; // phpcs:ignore ?>
+
 			<h2><?php esc_html_e( 'Module', 'vereinsplugin' ); ?></h2>
 			<table class="form-table" role="presentation">
 				<?php foreach ( vp_modules() as $key => $mod ) : ?>

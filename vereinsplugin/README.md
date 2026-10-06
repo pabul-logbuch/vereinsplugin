@@ -76,6 +76,18 @@ wieder einblenden“** reaktivieren.
   sehen keine Admin-Bar. Abschaltbar in den Einstellungen.
 - Vorstand = WordPress-Rollen **Administrator/Redakteur**: zusätzlich Kassen-
   und Versand-Rechte (`jbf_send_external`, `jb_approve_auslagen` …).
+  Mitglieder anlegen und der Mitglieder-CSV-Import stehen dem ganzen Vorstand
+  offen (Recht `vp_manage_members`).
+- **Rechte im Vorstand** (Verein → Einstellungen, nur Administrator:innen):
+  - *Nur Kassenwart:innen dürfen buchen* – aus (Standard) darf der ganze
+    Vorstand buchen; an behalten nur Administrator:innen und die gewählten
+    Kassenwart:innen die schreibenden Kassenrechte (Journal, Bank-Import,
+    Z-Bon, Auslagen genehmigen/auszahlen, Rechnungen, SEPA-Läufe, Spenden,
+    Buchhaltungs-Einstellungen – auch in der Desktop-App). Der übrige Vorstand
+    sieht alles weiter. Kassenwart:innen können auch einfache Mitglieder sein.
+  - *Eigene Auslagen selbst genehmigen erlauben* – aus = Vier-Augen-Prinzip:
+    Wer eine Auslage eingereicht hat, kann sie nicht selbst genehmigen oder
+    ablehnen (Vorstand, Kreis-Kassen, Desktop-App).
 - Im Mitgliederbereich unter **Mitglieder** (Recht `vp_manage_members`) lassen
   sich Konten suchen, filtern und bearbeiten: Stammdaten, Anschrift, Beitrag,
   SEPA-Angaben, Konto für Erstattungen, interne Notiz sowie ein Link „Passwort-Link per E-Mail senden“.
