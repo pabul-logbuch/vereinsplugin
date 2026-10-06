@@ -1105,35 +1105,40 @@ function vp_sync_action_bank_csv( WP_REST_Request $req ) {
 	$b     = (array) $req->get_json_params();
 	$delim = ( $b['delim'] ?? ';' ) === ',' ? ',' : ';';
 
+	// Vorschau: Zeilen lesen und mit Journal, offenen Auslagen und Belegen
+	// abgleichen (dublette / auslage / beleg, siehe includes/bank-abgleich.php).
 	if ( empty( $b['import'] ) ) {
 		$rows = vp_bh_parse_bank_csv( (string) ( $b['csv'] ?? '' ), $delim );
+		if ( $rows && function_exists( 'vp_bank_abgleich' ) ) {
+			$rows = vp_bank_abgleich( $rows, sanitize_text_field( (string) ( $b['geldkonto'] ?? '' ) ) );
+		}
 		return rest_ensure_response( array( 'ok' => true, 'rows' => $rows ) );
 	}
 
+	// Import: je Zeile optional auslage_id (Erstattung) oder beleg_id (Beleg
+	// anhängen); Zeilen mit skip = true werden nicht gebucht.
 	$rows = is_array( $b['rows'] ?? null ) ? $b['rows'] : array();
-	$made = 0;
+	$n    = array( 'normal' => 0, 'auslage' => 0, 'beleg' => 0 );
 	foreach ( $rows as $r ) {
-		$betrag = (float) str_replace( ',', '.', (string) ( $r['betrag'] ?? 0 ) );
-		$datum  = sanitize_text_field( (string) ( $r['datum'] ?? '' ) );
-		if ( ! $datum || 0.0 === $betrag ) {
+		if ( ! is_array( $r ) || ! empty( $r['skip'] ) ) {
 			continue;
 		}
-		$konto   = sanitize_text_field( (string) ( $r['konto'] ?? '' ) );
-		$sphaere = ( $konto && function_exists( 'jb_konto_sphaere' ) ) ? jb_konto_sphaere( $konto ) : '';
-		jb_journal_add( array(
-			'buchung_datum' => $datum,
-			'betrag'        => $betrag,
-			'kategorie'     => sanitize_text_field( (string) ( $r['kategorie'] ?? ( $r['zweck'] ?? 'Bank' ) ) ),
-			'beschreibung'  => sanitize_textarea_field( trim( (string) ( $r['name'] ?? '' ) . ' — ' . (string) ( $r['zweck'] ?? '' ), ' —' ) ),
-			'quelle'        => 'Bank KSK',
-			'geldkonto'     => sanitize_text_field( (string) ( $r['geldkonto'] ?? '' ) ),
-			'konto'         => $konto,
-			'sphaere'       => $sphaere,
-			'gegenpartei'   => sanitize_text_field( (string) ( $r['name'] ?? '' ) ),
-		) );
-		$made++;
+		$r['betrag'] = (float) str_replace( ',', '.', (string) ( $r['betrag'] ?? 0 ) );
+		$text        = sanitize_textarea_field( trim( (string) ( $r['name'] ?? '' ) . ' — ' . (string) ( $r['zweck'] ?? '' ), ' —' ) );
+		$res         = vp_bank_zeile_buchen( $r, (string) ( $r['geldkonto'] ?? '' ), (int) ( $r['auslage_id'] ?? 0 ), (int) ( $r['beleg_id'] ?? 0 ), $text );
+		if ( $res['id'] ) {
+			$n[ $res['art'] ]++;
+		}
 	}
-	return rest_ensure_response( array( 'ok' => true, 'imported' => $made ) );
+	if ( function_exists( 'vp_bh_cache_leeren' ) ) {
+		vp_bh_cache_leeren();
+	}
+	return rest_ensure_response( array(
+		'ok'          => true,
+		'imported'    => array_sum( $n ),
+		'erstattungen'=> $n['auslage'],
+		'belege'      => $n['beleg'],
+	) );
 }
 
 /* =========================================================================

@@ -20,6 +20,13 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
   Desktop-App): Zettle-Tagesabschluss eintippen (Bar, Karte, Trinkgeld,
   Produkt „Spende“) – daraus werden bis zu vier Buchungen auf Barkasse bzw.
   PayPal/Zettle, mit Live-Vorschau und Schutz vor doppeltem Buchen.
+  **Bank-Import mit Abgleich** (Buchhaltung → „Bank-Import“, auch in der
+  Desktop-App): Zeilen, die schon im Journal stehen, werden übersprungen.
+  Erstattungen genehmigter Auslagen werden erkannt (Kennung `AUSLAGE-12` im
+  Verwendungszweck des GiroCodes, sonst IBAN oder Name plus Betrag) und nur
+  als Ausgleich des Auslagen-Kontos (1600) gebucht – die Ausgabe zählt einmal,
+  die Auslage steht danach auf „ausgezahlt“. Belege aus „nur Beleg“ werden
+  bei passendem Betrag und Datum (±10 Tage) an die Bankbuchung gehängt.
 - **Veranstaltungs-Publisher** – Veranstaltungen an Mastodon, Bluesky, Telegram,
   Presse, Signal u. a. verteilen (Frontend-UI folgt in Stage 2).
 

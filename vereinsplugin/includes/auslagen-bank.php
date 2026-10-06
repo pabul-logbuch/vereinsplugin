@@ -14,7 +14,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_AUSLAGEN_BANK_DB_VERSION', '1' );
+define( 'VP_AUSLAGEN_BANK_DB_VERSION', '2' );
 
 add_action( 'plugins_loaded', 'vp_auslagen_bank_maybe_upgrade', 7 );
 function vp_auslagen_bank_maybe_upgrade() {
@@ -34,6 +34,8 @@ function vp_auslagen_bank_maybe_upgrade() {
 		'haendler'     => "`haendler` VARCHAR(150) NOT NULL DEFAULT ''",
 		'zahl_inhaber' => "`zahl_inhaber` VARCHAR(70) NOT NULL DEFAULT ''",
 		'zahl_iban'    => "`zahl_iban` VARCHAR(40) NOT NULL DEFAULT ''",
+		// Bankbuchung, mit der die Auslage erstattet wurde (Bank-Import-Abgleich).
+		'erstattung_buchung_id' => '`erstattung_buchung_id` BIGINT UNSIGNED DEFAULT NULL',
 	) as $col => $def ) {
 		if ( ! in_array( $col, $cols, true ) ) {
 			$wpdb->query( "ALTER TABLE `{$t}` ADD COLUMN {$def}" );
@@ -145,8 +147,9 @@ function vp_auslage_zahlungsziel_aus_formular( $user_id, array $data ) {
  * ---------------------------------------------------------------------- */
 
 /**
- * „Rückzahlung Einkauf bei Rewe am 24.09.2026, Zweck KST 10, Sommerfest, 4900 Material“
- * (max. 140 Zeichen – Grenze des EPC-Verwendungszwecks).
+ * „AUSLAGE-12 Rückzahlung Einkauf bei Rewe am 24.09.2026, Zweck KST 10, Sommerfest, 4900 Material“
+ * (max. 140 Zeichen – Grenze des EPC-Verwendungszwecks). Die Kennung vorne
+ * erkennt der Bank-Import wieder (vp_bank_abgleich).
  */
 function vp_auslage_verwendungszweck( array $a ) {
 	global $wpdb;
@@ -176,9 +179,9 @@ function vp_auslage_verwendungszweck( array $a ) {
 
 	$haendler = trim( (string) ( $a['haendler'] ?? '' ) );
 	$datum    = date_i18n( 'd.m.Y', strtotime( $a['ausgabe_datum'] ) );
-	$text     = '' !== $haendler
+	$text     = ( ! empty( $a['id'] ) ? vp_auslage_kennung( (int) $a['id'] ) . ' ' : '' ) . ( '' !== $haendler
 		? sprintf( __( 'Rückzahlung Einkauf bei %1$s am %2$s', 'vereinsplugin' ), $haendler, $datum )
-		: sprintf( __( 'Rückzahlung Einkauf am %s', 'vereinsplugin' ), $datum );
+		: sprintf( __( 'Rückzahlung Einkauf am %s', 'vereinsplugin' ), $datum ) );
 	if ( $zweck ) {
 		$text .= ', ' . sprintf( __( 'Zweck %s', 'vereinsplugin' ), implode( ', ', array_filter( $zweck ) ) );
 	}

@@ -628,24 +628,46 @@ function bankCsvForm(d) {
   vor.addEventListener('click', async () => {
     out.innerHTML = '';
     try {
-      zeilen = ((await call(api.action.run('bank-csv', { csv: ta.value, delim: delim.value }))).rows) || [];
+      zeilen = ((await call(api.action.run('bank-csv', { csv: ta.value, delim: delim.value, geldkonto: geld.value }))).rows) || [];
       if (!zeilen.length) return out.append(el('div', { class: 'note warn' }, 'Keine verwertbaren Zeilen erkannt.'));
+      // Abgleich vom Server: dublette (schon im Journal), auslage (Erstattung), beleg (passender Beleg).
+      zeilen.forEach((z) => { z.nimm = !z.dublette; z.nimmAuslage = !!z.auslage; z.nimmBeleg = !!z.beleg; });
+      const anz = (k) => zeilen.filter((z) => z[k]).length;
+      if (anz('dublette') || anz('auslage') || anz('beleg')) {
+        out.append(el('div', { class: 'note' }, `Abgleich: ${anz('dublette')} schon im Journal (werden übersprungen), ${anz('auslage')} Auslagen-Erstattungen, ${anz('beleg')} passende Belege. Bitte prüfen – Haken lassen sich ändern.`));
+      }
+      const haken = (an, onchange, label) => el('label', {}, el('input', { type: 'checkbox', checked: an ? '' : null, onchange }), ' ', label);
       const t = el('table');
-      t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Datum'), el('th', {}, 'Betrag'), el('th', {}, 'Name / Zweck'), el('th', {}, 'SKR-Konto'))));
+      t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Buchen'), el('th', {}, 'Datum'), el('th', {}, 'Betrag'), el('th', {}, 'Name / Zweck'), el('th', {}, 'SKR-Konto'))));
       const tb = el('tbody');
       zeilen.forEach((z, i) => {
-        tb.append(el('tr', {}, el('td', {}, z.datum),
+        const info = el('td', {}, `${z.name || ''} — ${z.zweck || ''}`);
+        if (z.dublette) info.append(el('div', { class: 'muted' }, `schon im Journal (Buchung #${z.dublette})`));
+        if (z.auslage) {
+          info.append(el('div', {}, haken(true, (e) => { zeilen[i].nimmAuslage = e.target.checked; }, `${z.auslage.text} (erkannt an: ${z.auslage.grund})`)));
+          info.append(el('div', { class: 'muted' }, 'Ausgabe ist schon gebucht – diese Zeile gleicht nur das Auslagen-Konto aus.'));
+        }
+        if (z.beleg) info.append(el('div', {}, haken(true, (e) => { zeilen[i].nimmBeleg = e.target.checked; }, `${z.beleg.text} anhängen`)));
+        tb.append(el('tr', z.dublette ? { style: 'opacity:.6' } : {},
+          el('td', {}, el('input', { type: 'checkbox', checked: z.nimm ? '' : null, onchange: (e) => { zeilen[i].nimm = e.target.checked; } })),
+          el('td', {}, z.datum),
           el('td', { style: 'text-align:right;color:' + (z.betrag < 0 ? 'var(--err-ink)' : 'var(--accent)') }, eur(z.betrag)),
-          el('td', {}, `${z.name || ''} — ${z.zweck || ''}`),
+          info,
           el('td', {}, kontoSelect(d.konten, z.konto || '', 'alle', '– noch nicht zugeordnet –', { onchange: (e) => { zeilen[i].konto = e.target.value; } }))));
       });
       t.append(tb);
       out.append(t);
-      const imp = el('button', { class: 'primary', type: 'button' }, `${zeilen.length} Buchung(en) importieren`);
+      const imp = el('button', { class: 'primary', type: 'button' }, 'Angehakte Zeilen importieren');
       imp.addEventListener('click', async () => {
         imp.disabled = true;
         try {
-          await bhAktion('bank-csv', { import: true, rows: zeilen.map((z) => ({ ...z, geldkonto: geld.value })) }, (r) => `${r.imported} Buchung(en) importiert.`);
+          const rows = zeilen.map((z) => ({
+            datum: z.datum, betrag: z.betrag, name: z.name, zweck: z.zweck, konto: z.konto, geldkonto: geld.value,
+            skip: !z.nimm,
+            auslage_id: z.auslage && z.nimmAuslage ? z.auslage.id : 0,
+            beleg_id: z.beleg && z.nimmBeleg ? z.beleg.id : 0,
+          }));
+          await bhAktion('bank-csv', { import: true, rows }, (r) => `${r.imported} Buchung(en) importiert${r.erstattungen ? `, davon ${r.erstattungen} Auslagen-Erstattungen` : ''}${r.belege ? `, ${r.belege} Belege angehängt` : ''}.`);
           showJournal();
         } catch (e) { toast(e.message, true); imp.disabled = false; }
       });
