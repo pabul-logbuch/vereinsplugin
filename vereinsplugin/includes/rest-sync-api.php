@@ -382,6 +382,7 @@ add_action( 'rest_api_init', function () {
 	$route( '/actions/shift-schicht-delete','wl_manage_wishes','vp_sync_action_shift_schicht_delete' );
 	$route( '/actions/shift-tausch',       'read',            'vp_sync_action_shift_tausch' );
 	$route( '/actions/zbon-import',        'jb_view_journal', 'vp_sync_action_zbon_import' );
+	$route( '/actions/zettle-tag',         'jb_edit_journal', 'vp_sync_action_zettle_tag' );
 	$route( '/actions/split-buchung',      'jb_view_journal', 'vp_sync_action_split_buchung' );
 	$route( '/actions/zu-umbuchung',       'jb_view_journal', 'vp_sync_action_zu_umbuchung' );
 	// Geschäftsjahr: Buchführungsart, Jahresabschluss, Konten zusammenlegen (v0.33)
@@ -1981,7 +1982,47 @@ function vp_sync_action_zbon_import( WP_REST_Request $req ) {
 	if ( is_wp_error( $z ) ) {
 		return $z;
 	}
-	return rest_ensure_response( array( 'ok' => true, 'preview' => false, 'lines' => $z['lines'], 'booked_ids' => $z['booked_ids'] ) );
+	// Aus Zettle geholt: Zeitraum merken, auf Wunsch Getränkebestand abbuchen.
+	$bestand = null;
+	if ( ! empty( $b['zettle_von'] ) && ! empty( $b['zettle_bis'] ) && function_exists( 'vp_zettle_zeitraum_merken' ) ) {
+		vp_zettle_zeitraum_merken( $z['nr'], sanitize_text_field( (string) $b['zettle_von'] ), sanitize_text_field( (string) $b['zettle_bis'] ) );
+		if ( ! empty( $b['bestand'] ) && is_array( $b['mengen'] ?? null ) ) {
+			$bestand = vp_zettle_bestand_abbuchen( $b['mengen'], $z['datum'], $z['ref'] );
+		}
+	}
+	return rest_ensure_response( array( 'ok' => true, 'preview' => false, 'lines' => $z['lines'], 'booked_ids' => $z['booked_ids'], 'bestand' => $bestand ) );
+}
+
+/**
+ * POST /actions/zettle-tag  { tag: "2026-10-05" }
+ *
+ * Verkäufe eines Kassentags aus Zettle holen und zu Z-Bon-Werten
+ * zusammenfassen (siehe includes/zettle.php).
+ */
+function vp_sync_action_zettle_tag( WP_REST_Request $req ) {
+	if ( ! function_exists( 'vp_zettle_verbunden' ) || ! vp_zettle_verbunden() ) {
+		return new WP_Error( 'zettle_off', 'Zettle ist nicht verbunden – API-Schlüssel im Mitgliederbereich unter Buchhaltung → Z-Bon hinterlegen.', array( 'status' => 400 ) );
+	}
+	$b   = vp_sync_json( $req );
+	$tag = (string) ( $b['tag'] ?? '' );
+	if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $tag ) ) {
+		$tag = vp_zettle_naechster_tag();
+	}
+	$kt  = vp_zettle_kassentag( $tag );
+	$res = vp_zettle_verkaeufe( $kt['von'], $kt['bis'] );
+	if ( is_wp_error( $res ) ) {
+		$res->add_data( array( 'status' => 502 ) );
+		return $res;
+	}
+	$s = vp_zettle_zusammenfassen( $res );
+	return rest_ensure_response( array(
+		'ok'              => true,
+		'tag'             => $tag,
+		'von'             => $kt['von'],
+		'bis'             => $kt['bis'],
+		'zusammenfassung' => $s,
+		'ueberschneidung' => vp_zettle_ueberschneidung( $kt['von'], $kt['bis'] ),
+	) );
 }
 
 /**
