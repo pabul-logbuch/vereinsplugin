@@ -24,6 +24,14 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
   in Nextcloud abgelegt (`Belege/<Jahr>/Z-Bon/`, nie überschrieben) und an
   alle Buchungen des Bons gehängt; für ältere Bons lässt er sich in der Liste
   „Zuletzt gebucht“ nachreichen. Spenden werden getrennt nach bar/Karte erfasst.
+  **Umsatzsteuer-Rücklage** (Buchhaltung → Rücklagen): Ist der Verein in
+  einem Jahr umsatzsteuerpflichtig (Einstellung je Geschäftsjahr), wird aus
+  den Buchungen im Zweckbetrieb (Vorgabe 7 %) und im wirtschaftlichen
+  Geschäftsbetrieb (19 %) die Umsatzsteuer und Vorsteuer herausgerechnet –
+  je Voranmeldungszeitraum, wahlweise mit pauschaler Vorsteuer nach § 23a
+  UStG. Abzüglich der Zahlungen ans Finanzamt (Steuerkonto, Vorgabe 7600)
+  steht der offene Betrag als eigene Zeile im Rücklagenbedarf. Steuersatz je
+  Konto einstellbar (0 % für steuerfreie Umsätze).
   **Bank-Import mit Abgleich** (Buchhaltung → „Bank-Import“, auch in der
   Desktop-App): Zeilen, die schon im Journal stehen, werden übersprungen.
   Erstattungen genehmigter Auslagen werden erkannt (Kennung `AUSLAGE-12` im

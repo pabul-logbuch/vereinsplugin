@@ -566,6 +566,9 @@ function vp_bh_ruecklagen() {
 		$msg = __( 'Vorausplanung gespeichert.', 'vereinsplugin' );
 	}
 
+	if ( function_exists( 'vp_ust_post_verarbeiten' ) ) {
+		vp_ust_post_verarbeiten( $can_edit );
+	}
 	$horizont = max( 0, (int) get_option( 'jb_ruecklagen_horizont_monate', 9 ) );
 	$rl = jb_ruecklagen_get_all();
 
@@ -619,6 +622,23 @@ function vp_bh_ruecklagen() {
 			$edit_cell
 		);
 	}
+	// Umsatzsteuer, die dem Finanzamt gehört (nur USt-pflichtige Jahre, siehe includes/umsatzsteuer.php).
+	if ( function_exists( 'vp_ust_offen_fuer_ruecklagen' ) ) {
+		foreach ( vp_ust_offen_fuer_ruecklagen() as $ust_jahr => $ust_offen ) {
+			if ( $ust_offen <= 0 ) {
+				continue;
+			}
+			$sum += $ust_offen;
+			printf(
+				'<tr><td><a href="%s">%s</a></td><td colspan="4" class="vp-muted">%s</td><td style="text-align:right">%s €</td>%s</tr>',
+				esc_url( vp_bh_url( array( 'vp_bh' => 'ruecklagen', 'jahr' => (int) $ust_jahr ) ) . '#ust' ),
+				esc_html( sprintf( __( 'Umsatzsteuer %d (offen)', 'vereinsplugin' ), (int) $ust_jahr ) ),
+				esc_html__( 'aus Zweckbetrieb und wirtschaftlichem Geschäftsbetrieb, noch nicht ans Finanzamt gezahlt', 'vereinsplugin' ),
+				esc_html( number_format( $ust_offen, 2, ',', '.' ) ),
+				$can_edit ? '<td></td>' : ''
+			);
+		}
+	}
 	printf( '<tr style="font-weight:700"><td colspan="5">%s</td><td style="text-align:right">%s €</td>%s</tr>', esc_html__( 'Rücklagenbedarf gesamt', 'vereinsplugin' ), esc_html( number_format( $sum, 2, ',', '.' ) ), $can_edit ? '<td></td>' : '' );
 	echo '</tbody></table></div>';
 
@@ -632,6 +652,9 @@ function vp_bh_ruecklagen() {
 		echo '<label>' . esc_html__( 'Letzte Zahlung', 'vereinsplugin' ) . '<input name="letzte_zahlung" type="date" value="' . esc_attr( gmdate( 'Y-m-d' ) ) . '"></label>';
 		echo '<label class="vp-col-2">' . esc_html__( 'Notiz', 'vereinsplugin' ) . '<input name="notiz"></label>';
 		echo '</div><p><button class="vp-btn vp-btn-primary" name="vp_rl_save" value="1">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button></p></form></details>';
+	}
+	if ( function_exists( 'vp_ust_abschnitt' ) ) {
+		echo vp_ust_abschnitt( $can_edit ); // phpcs:ignore
 	}
 	return ob_get_clean();
 }
