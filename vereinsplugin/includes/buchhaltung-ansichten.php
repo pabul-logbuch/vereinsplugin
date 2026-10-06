@@ -71,7 +71,7 @@ function vp_bh_jahresleiste( $jahr, $tab, $mit_folgejahr = false ) {
 
 /**
  * <option>-Liste der Konten, gruppiert.
- * @param string $filter alle | geld (Geld- und Bestandskonten) | erfolg (Einnahmen/Ausgaben)
+ * @param string $filter alle | geld (Geld- und Bestandskonten) | erfolg (Einnahmen/Ausgaben) | einnahme
  */
 function vp_bh_konto_options( $selected, $filter = 'alle', $leer = '' ) {
 	$gruppen = array(
@@ -81,9 +81,10 @@ function vp_bh_konto_options( $selected, $filter = 'alle', $leer = '' ) {
 		'ausgabe'  => __( 'Ausgaben', 'vereinsplugin' ),
 	);
 	$erlaubt = array(
-		'alle'   => array( 'geld', 'bestand', 'einnahme', 'ausgabe' ),
-		'geld'   => array( 'geld', 'bestand' ),
-		'erfolg' => array( 'einnahme', 'ausgabe' ),
+		'alle'     => array( 'geld', 'bestand', 'einnahme', 'ausgabe' ),
+		'geld'     => array( 'geld', 'bestand' ),
+		'erfolg'   => array( 'einnahme', 'ausgabe' ),
+		'einnahme' => array( 'einnahme' ),
 	);
 	$liste    = array();
 	$selected = (string) $selected;

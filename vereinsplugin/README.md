@@ -16,6 +16,10 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
   Genehmigung zeigt der Vorstand einen **GiroCode** (EPC-QR) mit dem
   Verwendungszweck „Rückzahlung Einkauf bei [Händler] am [Datum], Zweck
   [Kostenstelle, Budget, Konto]“ zum Scannen in der Banking-App.
+  **Z-Bon** (Mitgliederbereich → Buchhaltung → „Z-Bon“, wie in der
+  Desktop-App): Zettle-Tagesabschluss eintippen (Bar, Karte, Trinkgeld,
+  Produkt „Spende“) – daraus werden bis zu vier Buchungen auf Barkasse bzw.
+  PayPal/Zettle, mit Live-Vorschau und Schutz vor doppeltem Buchen.
 - **Veranstaltungs-Publisher** – Veranstaltungen an Mastodon, Bluesky, Telegram,
   Presse, Signal u. a. verteilen (Frontend-UI folgt in Stage 2).
 
