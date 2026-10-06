@@ -111,6 +111,7 @@ function vp_bank_offene_belege() {
  * @param string $geldkonto Geldkonto des Kontoauszugs (für die Dubletten-Suche)
  * @return array Zeilen, ergänzt um
  *   dublette: Journal-ID oder 0,
+ *   vorgemerkt: true, wenn die Bank den Umsatz nur vorgemerkt hat,
  *   auslage:  null | { id, text, grund },
  *   beleg:    null | { id, text, konto }
  *   Bei einer erkannten Auslage wird konto auf das Auslagen-Konto gesetzt.
@@ -130,6 +131,8 @@ function vp_bank_abgleich( array $rows, $geldkonto = '' ) {
 		$r['dublette'] = 0;
 		$r['auslage']  = null;
 		$r['beleg']    = null;
+		// Vorgemerkte Umsätze können sich noch ändern – erst nach der Buchung importieren.
+		$r['vorgemerkt'] = false !== stripos( (string) ( $r['info'] ?? '' ), 'vorgemerkt' );
 
 		// 1. Dublette: gleiches Datum, gleicher Betrag, gleiche Gegenpartei.
 		$sql  = "SELECT id, gegenpartei, beschreibung FROM `{$jt}` WHERE buchung_datum = %s AND ABS(betrag - %f) < 0.005";
@@ -153,7 +156,7 @@ function vp_bank_abgleich( array $rows, $geldkonto = '' ) {
 				break;
 			}
 		}
-		if ( $r['dublette'] || $betrag >= 0 ) {
+		if ( $r['dublette'] || $r['vorgemerkt'] || $betrag >= 0 ) {
 			continue;
 		}
 
@@ -323,4 +326,144 @@ function vp_bank_zeile_buchen( array $r, $geldkonto, $auslage_id = 0, $beleg_id 
 		return array( 'id' => $id, 'art' => 'beleg' );
 	}
 	return array( 'id' => $id, 'art' => 'normal' );
+}
+
+/* =========================================================================
+ * Protokoll: wann wurde welcher Zeitraum importiert?
+ * ====================================================================== */
+
+/**
+ * Import im Protokoll vermerken (Option vp_bank_import_log, je Geldkonto die
+ * letzten 20 Einträge).
+ *
+ * @param array $gebucht die tatsächlich gebuchten Zeilen (datum, betrag, name)
+ */
+function vp_bank_protokoll_add( $geldkonto, array $alle, array $gebucht, $herkunft = 'web' ) {
+	if ( ! $alle ) {
+		return;
+	}
+	$daten = array_column( $alle, 'datum' );
+	$log   = (array) get_option( 'vp_bank_import_log', array() );
+	$k     = (string) $geldkonto;
+	$e     = array(
+		'zeit'     => current_time( 'mysql' ),
+		'user'     => get_current_user_id(),
+		'von'      => min( $daten ),
+		'bis'      => max( $daten ),
+		'zeilen'   => count( $alle ),
+		'gebucht'  => count( $gebucht ),
+		'herkunft' => $herkunft,
+	);
+	// Letzte Zeile des Kontoauszugs (neuestes Datum) zur Orientierung.
+	usort( $alle, static function ( $a, $b ) {
+		return strcmp( $b['datum'], $a['datum'] );
+	} );
+	$e['letzte'] = array(
+		'datum'  => $alle[0]['datum'],
+		'name'   => (string) ( $alle[0]['name'] ?? '' ),
+		'betrag' => (float) $alle[0]['betrag'],
+	);
+	$log[ $k ] = array_slice( array_merge( array( $e ), (array) ( $log[ $k ] ?? array() ) ), 0, 20 );
+	update_option( 'vp_bank_import_log', $log, false );
+}
+
+/**
+ * Stand eines Geldkontos: letzter protokollierter Import und – für Importe
+ * vor v0.46 – die neueste Bank-Buchung im Journal.
+ *
+ * @return array{import:?array, journal:?array}
+ */
+function vp_bank_stand( $geldkonto ) {
+	global $wpdb;
+	$log = (array) get_option( 'vp_bank_import_log', array() );
+	$imp = $log[ (string) $geldkonto ][0] ?? null;
+	$jt  = function_exists( 'jb_table_journal' ) ? jb_table_journal() : $wpdb->prefix . 'jb_buchungen';
+	$cols = (array) $wpdb->get_col( "SHOW COLUMNS FROM `{$jt}`" );
+	$j    = null;
+	if ( in_array( 'geldkonto', $cols, true ) ) {
+		$j = $wpdb->get_row( $wpdb->prepare(
+			"SELECT buchung_datum AS datum, gegenpartei AS name, betrag FROM `{$jt}`
+			 WHERE geldkonto = %s AND quelle = 'Bank KSK' ORDER BY buchung_datum DESC, id DESC LIMIT 1",
+			(string) $geldkonto
+		), ARRAY_A );
+	}
+	return array( 'import' => $imp, 'journal' => $j ?: null );
+}
+
+/** Ab welchem Datum soll der nächste Export beginnen? (letzter Tag inklusive) */
+function vp_bank_export_ab( $geldkonto ) {
+	$s = vp_bank_stand( $geldkonto );
+	$d = $s['import']['bis'] ?? '';
+	if ( ! empty( $s['journal']['datum'] ) && $s['journal']['datum'] > $d ) {
+		$d = $s['journal']['datum'];
+	}
+	return $d;
+}
+
+/** Hinweis-Box zum letzten Import eines Geldkontos. */
+function vp_bank_stand_html( $geldkonto ) {
+	$s   = vp_bank_stand( $geldkonto );
+	$ab  = vp_bank_export_ab( $geldkonto );
+	$fmt = static function ( $d ) {
+		return $d ? mysql2date( 'd.m.Y', $d ) : '';
+	};
+	if ( ! $ab ) {
+		return '<p class="vp-muted">' . esc_html__( 'Für dieses Konto wurde noch nichts importiert.', 'vereinsplugin' ) . '</p>';
+	}
+	$h = '<ul style="margin:.3em 0 .3em 1.2em">';
+	if ( $s['import'] ) {
+		$i = $s['import'];
+		$u = $i['user'] ? get_userdata( (int) $i['user'] ) : null;
+		$h .= '<li>' . esc_html( sprintf(
+			/* translators: 1: date/time, 2: person, 3: from, 4: to, 5: booked, 6: rows */
+			__( 'Letzter Import am %1$s von %2$s: Umsätze %3$s bis %4$s, %5$d von %6$d Zeilen gebucht.', 'vereinsplugin' ),
+			mysql2date( 'd.m.Y H:i', $i['zeit'] ),
+			$u ? $u->display_name : '?',
+			$fmt( $i['von'] ),
+			$fmt( $i['bis'] ),
+			(int) $i['gebucht'],
+			(int) $i['zeilen']
+		) ) . '</li>';
+		if ( ! empty( $i['letzte'] ) ) {
+			$h .= '<li>' . esc_html( sprintf(
+				__( 'Letzte Zeile im Kontoauszug: %1$s · %2$s · %3$s', 'vereinsplugin' ),
+				$fmt( $i['letzte']['datum'] ),
+				$i['letzte']['name'],
+				vp_bh_eur( $i['letzte']['betrag'] )
+			) ) . '</li>';
+		}
+	}
+	if ( $s['journal'] ) {
+		$h .= '<li>' . esc_html( sprintf(
+			__( 'Neueste Bankbuchung im Journal: %1$s · %2$s · %3$s', 'vereinsplugin' ),
+			$fmt( $s['journal']['datum'] ),
+			$s['journal']['name'],
+			vp_bh_eur( $s['journal']['betrag'] )
+		) ) . '</li>';
+	}
+	$h .= '</ul>';
+	$h .= '<p><strong>' . esc_html( sprintf( __( 'Nächsten Export ab %s (einschließlich) erstellen.', 'vereinsplugin' ), $fmt( $ab ) ) ) . '</strong> '
+		. esc_html__( 'Die Überschneidung ist gewollt: Zeilen, die schon im Journal stehen, erkennt der Import und überspringt sie. So geht nichts verloren, auch nicht Umsätze vom Tag des letzten Exports.', 'vereinsplugin' ) . '</p>';
+	return $h;
+}
+
+/**
+ * Prüft den Zeitraum eines neuen Kontoauszugs gegen den letzten Import.
+ * @return string Warnung (leer = passt)
+ */
+function vp_bank_luecke( array $rows, $geldkonto ) {
+	$ab = vp_bank_export_ab( $geldkonto );
+	if ( ! $ab || ! $rows ) {
+		return '';
+	}
+	$min = min( array_column( $rows, 'datum' ) );
+	if ( $min <= $ab ) {
+		return '';
+	}
+	return sprintf(
+		/* translators: 1: last imported date, 2: first date of new file */
+		__( 'Achtung, mögliche Lücke: Bisher importiert bis %1$s, dieser Kontoauszug beginnt erst am %2$s. Umsätze dazwischen fehlen eventuell – lieber ab %1$s exportieren.', 'vereinsplugin' ),
+		mysql2date( 'd.m.Y', $ab ),
+		mysql2date( 'd.m.Y', $min )
+	);
 }

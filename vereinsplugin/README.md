@@ -27,6 +27,11 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
   als Ausgleich des Auslagen-Kontos (1600) gebucht – die Ausgabe zählt einmal,
   die Auslage steht danach auf „ausgezahlt“. Belege aus „nur Beleg“ werden
   bei passendem Betrag und Datum (±10 Tage) an die Bankbuchung gehängt.
+  Über dem Import steht je Geldkonto der **letzte Import** (Zeitraum, letzte
+  Zeile, wer/wann) und ab welchem Datum der nächste Export beginnen sollte –
+  bewusst mit einem Tag Überschneidung, die der Abgleich überspringt. Beginnt
+  ein Kontoauszug später, warnt der Import vor einer Lücke. Bei der Bank nur
+  **vorgemerkte** Umsätze (Sparkasse, Spalte „Info“) werden nicht importiert.
 - **Veranstaltungs-Publisher** – Veranstaltungen an Mastodon, Bluesky, Telegram,
   Presse, Signal u. a. verteilen (Frontend-UI folgt in Stage 2).
 
