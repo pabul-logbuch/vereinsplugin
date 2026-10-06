@@ -20,14 +20,10 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
   Desktop-App): Zettle-Tagesabschluss eintippen (Bar, Karte, Trinkgeld,
   Produkt „Spende“) – daraus werden bis zu vier Buchungen auf Barkasse bzw.
   PayPal/Zettle, mit Live-Vorschau und Schutz vor doppeltem Buchen.
-  **Zettle-Anbindung:** Mit einem API-Schlüssel aus my.zettle.com (Recht
-  `READ:PURCHASE`, einzutragen unter Z-Bon → „Zettle-Einstellungen“) holt
-  „Verkäufe abrufen“ einen Kassentag (Standard 05:00–05:00 Uhr, damit Abende
-  über Mitternacht zusammenbleiben) und füllt Bar, Karte, Trinkgeld und
-  Spenden (Produktnamen einstellbar, anteilig bar/Karte) vor. Erstattungen
-  werden abgezogen, Gutschein/Rechnung u. Ä. nur gemeldet. Beim Buchen werden
-  die verkauften Getränke auf Wunsch vom Getränkebestand abgebucht; schon
-  gebuchte Zeiträume werden erkannt. Geht genauso in der Desktop-App.
+  Der Z-Bon selbst (PDF aus Zettle oder Foto) wird beim Buchen als **Beleg**
+  in Nextcloud abgelegt (`Belege/<Jahr>/Z-Bon/`, nie überschrieben) und an
+  alle Buchungen des Bons gehängt; für ältere Bons lässt er sich in der Liste
+  „Zuletzt gebucht“ nachreichen. Spenden werden getrennt nach bar/Karte erfasst.
   **Bank-Import mit Abgleich** (Buchhaltung → „Bank-Import“, auch in der
   Desktop-App): Zeilen, die schon im Journal stehen, werden übersprungen.
   Erstattungen genehmigter Auslagen werden erkannt (Kennung `AUSLAGE-12` im

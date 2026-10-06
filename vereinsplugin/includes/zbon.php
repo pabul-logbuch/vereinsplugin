@@ -2,7 +2,8 @@
 /**
  * Z-Bon (Zettle/POS) aufteilen und ins Journal buchen – gemeinsam genutzt von
  * der Desktop-App (REST: /actions/zbon-import) und dem Mitgliederbereich
- * (Buchhaltung → Z-Bon).
+ * (Buchhaltung → Z-Bon). Der Z-Bon selbst (PDF aus Zettle oder Foto) wird als
+ * Beleg in Nextcloud abgelegt und an alle Buchungen des Bons gehängt.
  *
  * Aus einem Z-Bon entstehen bis zu vier Buchungen:
  *   Getränke Bar Z-Bon #N       = Bar   − (Produkt-Spende, falls bar bezahlt)       → Barkasse
@@ -33,7 +34,7 @@ function vp_zbon_betrag( $v ) {
  * @param array $b nr, datum, bar, karte, trinkgeld, spende_produkt,
  *                 spende_bezahlung (bar|karte), konto_getraenke, konto_spende, konto_trinkgeld.
  *                 Statt spende_produkt + spende_bezahlung gehen auch spende_bar und
- *                 spende_karte getrennt (z. B. aus dem Zettle-Abruf).
+ *                 spende_karte getrennt.
  * @return array|WP_Error { nr, datum, ref, lines: [ { label, betrag, konto, sphaere, quelle } ] }
  */
 function vp_zbon_zeilen( array $b ) {
@@ -116,11 +117,10 @@ function vp_zbon_schon_gebucht( $ref ) {
 }
 
 /**
- * Z-Bon aufteilen und buchen.
- * @param array $b wie vp_zbon_zeilen(), zusätzlich force (erneut buchen trotz vorhandener Referenz)
- * @return array|WP_Error { nr, datum, ref, lines, booked_ids }
+ * Z-Bon aufteilen und prüfen, ob er gebucht werden darf (ohne zu buchen).
+ * @return array|WP_Error wie vp_zbon_zeilen()
  */
-function vp_zbon_buchen( array $b ) {
+function vp_zbon_pruefen( array $b ) {
 	if ( ! function_exists( 'jb_journal_add' ) ) {
 		return new WP_Error( 'no_fn', 'Buchhaltungs-Modul nicht geladen.', array( 'status' => 400 ) );
 	}
@@ -133,6 +133,21 @@ function vp_zbon_buchen( array $b ) {
 	if ( $exists && empty( $b['force'] ) ) {
 		return new WP_Error( 'schon_gebucht', 'Z-Bon #' . $z['nr'] . ' ist bereits gebucht (' . $exists . ' Zeilen). „force" zum erneuten Buchen.', array( 'status' => 409 ) );
 	}
+	return $z;
+}
+
+/**
+ * Z-Bon aufteilen und buchen.
+ * @param array $b wie vp_zbon_zeilen(), zusätzlich force (erneut buchen trotz vorhandener
+ *                 Referenz) und beleg_pfad (Nextcloud-Pfad des Z-Bon-PDFs, an alle Zeilen)
+ * @return array|WP_Error { nr, datum, ref, lines, booked_ids }
+ */
+function vp_zbon_buchen( array $b ) {
+	$z = vp_zbon_pruefen( $b );
+	if ( is_wp_error( $z ) ) {
+		return $z;
+	}
+	$beleg = vp_zbon_beleg_pfad_ok( $b['beleg_pfad'] ?? '' );
 
 	$ids = array();
 	foreach ( $z['lines'] as $ln ) {
@@ -146,6 +161,7 @@ function vp_zbon_buchen( array $b ) {
 			'sphaere'        => $ln['sphaere'],
 			'gegenpartei'    => 'Z-Bon #' . $z['nr'],
 			'beleg_referenz' => $z['ref'],
+			'beleg_pfad'     => $beleg,
 		) );
 	}
 	if ( function_exists( 'vp_bh_cache_leeren' ) ) {
@@ -159,7 +175,7 @@ function vp_zbon_buchen( array $b ) {
 function vp_zbon_liste( $limit = 30 ) {
 	global $wpdb;
 	$rows = (array) $wpdb->get_results( $wpdb->prepare(
-		"SELECT beleg_referenz AS ref, MIN(buchung_datum) AS datum, SUM(betrag) AS summe, COUNT(*) AS n
+		"SELECT beleg_referenz AS ref, MIN(buchung_datum) AS datum, SUM(betrag) AS summe, COUNT(*) AS n, MAX(beleg_pfad) AS beleg
 		 FROM {$wpdb->prefix}jb_buchungen WHERE beleg_referenz LIKE %s
 		 GROUP BY beleg_referenz ORDER BY MIN(buchung_datum) DESC, beleg_referenz DESC LIMIT %d",
 		$wpdb->esc_like( 'ZBON-' ) . '%',
@@ -182,6 +198,97 @@ function vp_zbon_naechste_nr() {
 		}
 	}
 	return $max + 1;
+}
+
+/* =========================================================================
+ * Z-Bon als Beleg (PDF oder Foto) in Nextcloud
+ * ====================================================================== */
+
+/** Ist Nextcloud für Belege eingerichtet? */
+function vp_zbon_beleg_moeglich() {
+	return function_exists( 'jb_nc' ) && jb_nc()->is_configured();
+}
+
+/** Nur Pfade unterhalb von „Belege/“ übernehmen (z. B. von der Desktop-App). */
+function vp_zbon_beleg_pfad_ok( $pfad ) {
+	$pfad = ltrim( sanitize_text_field( (string) $pfad ), '/' );
+	return ( 0 === strpos( $pfad, 'Belege/' ) && false === strpos( $pfad, '..' ) ) ? $pfad : '';
+}
+
+/**
+ * Z-Bon-Datei prüfen und nach Nextcloud hochladen:
+ * Belege/<Jahr>/Z-Bon/ZBON-<Nr>_<Zeitstempel>.<ext>. Der Zeitstempel sorgt
+ * dafür, dass nie ein vorhandener Beleg überschrieben wird.
+ * @return string|WP_Error Nextcloud-Pfad
+ */
+function vp_zbon_beleg_hochladen( array $file, $nr, $datum ) {
+	if ( ! vp_zbon_beleg_moeglich() ) {
+		return new WP_Error( 'nc_off', __( 'Nextcloud ist nicht eingerichtet.', 'vereinsplugin' ) );
+	}
+	if ( ( $file['error'] ?? UPLOAD_ERR_NO_FILE ) !== UPLOAD_ERR_OK || empty( $file['tmp_name'] ) ) {
+		return new WP_Error( 'upload', sprintf( __( 'Upload-Fehler (Code %s).', 'vereinsplugin' ), $file['error'] ?? '?' ) );
+	}
+	if ( (int) ( $file['size'] ?? 0 ) > 10 * MB_IN_BYTES ) {
+		return new WP_Error( 'zu_gross', __( 'Datei zu groß (max. 10 MB).', 'vereinsplugin' ) );
+	}
+	$typen = array(
+		'application/pdf' => 'pdf',
+		'image/jpeg'      => 'jpg',
+		'image/png'       => 'png',
+		'image/webp'      => 'webp',
+		'image/heic'      => 'heic',
+	);
+	$mime = ( new finfo( FILEINFO_MIME_TYPE ) )->file( $file['tmp_name'] );
+	if ( ! isset( $typen[ $mime ] ) ) {
+		return new WP_Error( 'typ', sprintf( __( 'Nur PDF oder Foto (JPG, PNG, WEBP, HEIC) erlaubt – erkannt: %s.', 'vereinsplugin' ), (string) $mime ) );
+	}
+	$jahr = preg_match( '/^\d{4}/', (string) $datum ) ? substr( $datum, 0, 4 ) : current_time( 'Y' );
+	$nr   = preg_replace( '/[^0-9A-Za-z\-]/', '', (string) $nr );
+	$pfad = 'Belege/' . $jahr . '/Z-Bon/ZBON-' . $nr . '_' . current_time( 'Ymd-His' ) . '.' . $typen[ $mime ];
+	$res  = jb_nc()->upload_beleg( $file['tmp_name'], $pfad );
+	return is_wp_error( $res ) ? $res : $pfad;
+}
+
+/**
+ * Beleg zu einem schon gebuchten Z-Bon nachreichen: hängt ihn an alle Zeilen
+ * dieser Referenz, die noch keinen Beleg haben.
+ * @return int|WP_Error Anzahl ergänzter Buchungen
+ */
+function vp_zbon_beleg_nachreichen( $ref, array $file ) {
+	global $wpdb;
+	if ( ! preg_match( '/^ZBON-[0-9A-Za-z\-]+$/', (string) $ref ) ) {
+		return new WP_Error( 'ref', __( 'Unbekannter Z-Bon.', 'vereinsplugin' ) );
+	}
+	$t   = jb_table_journal();
+	$dat = (string) $wpdb->get_var( $wpdb->prepare( "SELECT MIN(buchung_datum) FROM `{$t}` WHERE beleg_referenz = %s", $ref ) );
+	if ( '' === $dat ) {
+		return new WP_Error( 'ref', __( 'Unbekannter Z-Bon.', 'vereinsplugin' ) );
+	}
+	$pfad = vp_zbon_beleg_hochladen( $file, substr( $ref, 5 ), $dat );
+	if ( is_wp_error( $pfad ) ) {
+		return $pfad;
+	}
+	return (int) $wpdb->query( $wpdb->prepare(
+		"UPDATE `{$t}` SET beleg_pfad = %s WHERE beleg_referenz = %s AND (beleg_pfad IS NULL OR beleg_pfad = '')",
+		$pfad,
+		$ref
+	) );
+}
+
+/**
+ * Aufräumen nach v0.47: Die Zettle-API-Anbindung wurde entfernt – den dort
+ * gespeicherten API-Schlüssel und die Einstellungen löschen.
+ */
+add_action( 'admin_init', 'vp_zettle_reste_entfernen' );
+add_action( 'init', 'vp_zettle_reste_entfernen', 99 );
+function vp_zettle_reste_entfernen() {
+	if ( false === get_option( 'vp_zettle_api_key', false ) && false === get_option( 'vp_zettle_einstellungen', false ) && false === get_option( 'vp_zettle_gebucht', false ) ) {
+		return;
+	}
+	delete_option( 'vp_zettle_api_key' );
+	delete_option( 'vp_zettle_einstellungen' );
+	delete_option( 'vp_zettle_gebucht' );
+	delete_transient( 'vp_zettle_token' );
 }
 
 /* =========================================================================
@@ -208,66 +315,7 @@ function vp_bh_zbon() {
 	);
 	$out         = '';
 	$frage_force = false;
-	$zettle      = function_exists( 'vp_zettle_verbunden' );
-	$z_info      = null; // Zusammenfassung eines Zettle-Abrufs
-	$z_von       = sanitize_text_field( wp_unslash( $_POST['zettle_von'] ?? '' ) );
-	$z_bis       = sanitize_text_field( wp_unslash( $_POST['zettle_bis'] ?? '' ) );
-	$z_mengen    = (string) wp_unslash( $_POST['zettle_mengen'] ?? '' );
-	$eur_feld    = static function ( $x ) {
-		return $x ? number_format( (float) $x, 2, ',', '' ) : '';
-	};
-
-	// ---- Zettle: Schlüssel und Einstellungen ----
-	if ( $zettle && isset( $_POST['vp_zettle_setup'] ) && check_admin_referer( 'vp_bh_zbon', 'vp_zbon_nonce' ) ) {
-		$e = array(
-			'tagesgrenze' => sanitize_text_field( wp_unslash( $_POST['tagesgrenze'] ?? '05:00' ) ),
-			'spende'      => sanitize_text_field( wp_unslash( $_POST['spende_namen'] ?? 'Spende' ) ),
-		);
-		update_option( 'vp_zettle_einstellungen', $e, false );
-		$key = trim( (string) wp_unslash( $_POST['zettle_key'] ?? '' ) );
-		if ( ! empty( $_POST['zettle_trennen'] ) ) {
-			vp_zettle_key_speichern( '' );
-			$out .= '<div class="vp-note">' . esc_html__( 'Zettle-Verbindung entfernt.', 'vereinsplugin' ) . '</div>';
-		} elseif ( '' !== $key ) {
-			$r    = vp_zettle_key_speichern( $key );
-			$out .= is_wp_error( $r )
-				? '<div class="vp-note vp-note-error">' . esc_html( $r->get_error_message() ) . '</div>'
-				: '<div class="vp-note">' . esc_html__( 'Zettle ist verbunden.', 'vereinsplugin' ) . '</div>';
-		} else {
-			$out .= '<div class="vp-note">' . esc_html__( 'Einstellungen gespeichert.', 'vereinsplugin' ) . '</div>';
-		}
-	}
-
-	// ---- Zettle: Verkäufe eines Kassentags abrufen ----
-	if ( $zettle && isset( $_POST['vp_zettle_holen'] ) && check_admin_referer( 'vp_bh_zbon', 'vp_zbon_nonce' ) ) {
-		$tag = sanitize_text_field( wp_unslash( $_POST['zettle_tag'] ?? '' ) );
-		if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $tag ) ) {
-			$tag = current_time( 'Y-m-d' );
-		}
-		$kt  = vp_zettle_kassentag( $tag );
-		$res = vp_zettle_verkaeufe( $kt['von'], $kt['bis'] );
-		if ( is_wp_error( $res ) ) {
-			$out .= '<div class="vp-note vp-note-error">' . esc_html( $res->get_error_message() ) . '</div>';
-		} else {
-			$z_info   = vp_zettle_zusammenfassen( $res );
-			$z_von    = $kt['von'];
-			$z_bis    = $kt['bis'];
-			$z_mengen = wp_json_encode( $z_info['mengen'] );
-			$v        = array_merge( $v, array(
-				'datum'        => $tag,
-				'bar'          => $eur_feld( $z_info['bar'] ),
-				'karte'        => $eur_feld( $z_info['karte'] ),
-				'trinkgeld'    => $eur_feld( $z_info['trinkgeld'] ),
-				'spende_bar'   => $eur_feld( $z_info['spende_bar'] ),
-				'spende_karte' => $eur_feld( $z_info['spende_karte'] ),
-			) );
-			foreach ( array( 'konto_getraenke', 'konto_spende', 'konto_trinkgeld' ) as $k ) {
-				if ( ! empty( $_POST[ $k ] ) ) {
-					$v[ $k ] = sanitize_text_field( wp_unslash( $_POST[ $k ] ) );
-				}
-			}
-		}
-	}
+	$mit_nc      = vp_zbon_beleg_moeglich();
 
 	// ---- Buchen ----
 	if ( isset( $_POST['vp_zbon_buchen'] ) && check_admin_referer( 'vp_bh_zbon', 'vp_zbon_nonce' ) ) {
@@ -276,7 +324,20 @@ function vp_bh_zbon() {
 			$b[ $k ] = sanitize_text_field( wp_unslash( $_POST[ $k ] ?? '' ) );
 		}
 		$b['force'] = ! empty( $_POST['force'] );
-		$r          = vp_zbon_buchen( $b );
+		// Erst prüfen, dann den Beleg ablegen, dann buchen.
+		$r     = vp_zbon_pruefen( $b );
+		$datei = $_FILES['zbon_beleg'] ?? array();
+		if ( ! is_wp_error( $r ) && $mit_nc && ! empty( $datei['name'] ) ) {
+			$pfad = vp_zbon_beleg_hochladen( $datei, $r['nr'], $r['datum'] );
+			if ( is_wp_error( $pfad ) ) {
+				$r = $pfad;
+			} else {
+				$b['beleg_pfad'] = $pfad;
+			}
+		}
+		if ( ! is_wp_error( $r ) ) {
+			$r = vp_zbon_buchen( $b );
+		}
 		if ( is_wp_error( $r ) ) {
 			$v           = array_merge( $v, $b );
 			$frage_force = 'schon_gebucht' === $r->get_error_code();
@@ -292,20 +353,8 @@ function vp_bh_zbon() {
 				count( $r['booked_ids'] ),
 				$r['nr']
 			);
-			if ( $zettle && $z_von && $z_bis ) {
-				vp_zettle_zeitraum_merken( $r['nr'], $z_von, $z_bis );
-				if ( ! empty( $_POST['bestand'] ) ) {
-					$mengen = json_decode( $z_mengen, true );
-					$bs     = vp_zettle_bestand_abbuchen( is_array( $mengen ) ? $mengen : array(), $r['datum'], $r['ref'] );
-					if ( $bs['schon'] ) {
-						$msg .= ' ' . __( 'Getränkebestand war für diesen Z-Bon schon abgebucht.', 'vereinsplugin' );
-					} else {
-						$msg .= ' ' . sprintf( __( 'Getränkebestand: %d Produkte abgebucht.', 'vereinsplugin' ), $bs['gebucht'] );
-						if ( $bs['nicht_gefunden'] ) {
-							$msg .= ' ' . sprintf( __( 'Nicht im Bestand gefunden: %s.', 'vereinsplugin' ), implode( ', ', $bs['nicht_gefunden'] ) );
-						}
-					}
-				}
+			if ( ! empty( $b['beleg_pfad'] ) ) {
+				$msg .= ' ' . __( 'Z-Bon als Beleg abgelegt.', 'vereinsplugin' );
 			}
 			$out .= '<div class="vp-note">' . esc_html( $msg ) . ' <a href="' . esc_url( vp_bh_url( array( 'vp_bh' => 'journal', 'jahr' => (int) substr( $r['datum'], 0, 4 ) ) ) ) . '">' . esc_html__( 'Im Journal ansehen', 'vereinsplugin' ) . '</a></div>';
 			// Formular für den nächsten Bon vorbereiten, Konten beibehalten.
@@ -314,8 +363,15 @@ function vp_bh_zbon() {
 			foreach ( array( 'konto_getraenke', 'konto_spende', 'konto_trinkgeld' ) as $k ) {
 				$v[ $k ] = $b[ $k ];
 			}
-			$z_von = $z_bis = $z_mengen = '';
 		}
+	}
+
+	// ---- Beleg für einen gebuchten Z-Bon nachreichen ----
+	if ( $mit_nc && isset( $_POST['vp_zbon_nachreichen'] ) && check_admin_referer( 'vp_bh_zbon', 'vp_zbon_nonce' ) ) {
+		$res  = vp_zbon_beleg_nachreichen( sanitize_text_field( wp_unslash( $_POST['ref'] ?? '' ) ), $_FILES['zbon_beleg'] ?? array() );
+		$out .= is_wp_error( $res )
+			? '<div class="vp-note vp-note-error">' . esc_html( $res->get_error_message() ) . '</div>'
+			: '<div class="vp-note">' . esc_html( sprintf( __( 'Beleg an %d Buchung(en) gehängt.', 'vereinsplugin' ), $res ) ) . '</div>';
 	}
 
 	$konto_namen = array();
@@ -326,106 +382,18 @@ function vp_bh_zbon() {
 		return '<label>' . esc_html( $label ) . '<input type="text" name="' . esc_attr( $name ) . '" value="' . esc_attr( $wert ) . '" ' . $extra . '></label>';
 	};
 	$geld = 'inputmode="decimal" placeholder="0,00" data-vp-zbon';
-	$fmt  = static function ( $lokal ) {
-		return mysql2date( 'd.m.Y H:i', $lokal );
-	};
 
 	ob_start();
 	echo vp_bh_hilfe( __( 'So funktioniert der Z-Bon', 'vereinsplugin' ), array(
-		__( 'Den Tagesabschluss (Z-Bon) aus Zettle abtippen – oder mit verbundenem Zettle-Konto per Knopfdruck holen. Daraus entstehen bis zu vier Buchungen: <strong>Getränke Bar</strong>, <strong>Getränke Karte</strong>, <strong>Trinkgeld</strong> und <strong>Spende</strong>.', 'vereinsplugin' ),
+		__( 'Den Tagesabschluss (Z-Bon) aus Zettle abtippen und das Z-Bon-PDF (oder ein Foto) als Beleg anhängen. Daraus entstehen bis zu vier Buchungen: <strong>Getränke Bar</strong>, <strong>Getränke Karte</strong>, <strong>Trinkgeld</strong> und <strong>Spende</strong>.', 'vereinsplugin' ),
 		__( 'Bar geht auf die Barkasse, Karte und Trinkgeld auf PayPal – Zettle und PayPal sind dasselbe Konto. Trinkgeld und Spenden werden vom jeweiligen Umsatz abgezogen, damit die Summen je Geldkonto genau dem Bon entsprechen.', 'vereinsplugin' ),
 		__( 'Welche Geldkonten das sind, stellt ihr unter „Geschäftsjahr“ bei den Vorgabe-Konten ein. Jeder Z-Bon lässt sich nur einmal buchen.', 'vereinsplugin' ),
 	) ); // phpcs:ignore
 	echo $out; // phpcs:ignore
 
-	// ---- Zettle-Bereich ----
-	if ( $zettle ) {
-		$ze = vp_zettle_einstellungen();
-		echo '<div class="vp-card"><h3 style="margin-top:0">' . esc_html__( 'Aus Zettle holen', 'vereinsplugin' ) . '</h3>';
-		if ( vp_zettle_verbunden() ) {
-			$tag = sanitize_text_field( wp_unslash( $_POST['zettle_tag'] ?? '' ) ) ?: vp_zettle_naechster_tag();
-			echo '<form method="post" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">' . wp_nonce_field( 'vp_bh_zbon', 'vp_zbon_nonce', true, false ); // phpcs:ignore
-			echo '<label>' . esc_html__( 'Kassentag', 'vereinsplugin' ) . '<br><input type="date" name="zettle_tag" value="' . esc_attr( $tag ) . '"></label>';
-			foreach ( array( 'konto_getraenke', 'konto_spende', 'konto_trinkgeld' ) as $k ) {
-				echo '<input type="hidden" name="' . esc_attr( $k ) . '" value="' . esc_attr( $v[ $k ] ) . '">';
-			}
-			echo '<button class="vp-btn vp-btn-primary" name="vp_zettle_holen" value="1">' . esc_html__( 'Verkäufe abrufen', 'vereinsplugin' ) . '</button></form>';
-			echo '<p class="vp-muted">' . esc_html( sprintf(
-				/* translators: %s: time */
-				__( 'Ein Kassentag läuft von %1$s Uhr bis %1$s Uhr am Folgetag, damit Abende über Mitternacht zusammenbleiben.', 'vereinsplugin' ),
-				$ze['tagesgrenze']
-			) ) . '</p>';
-		} else {
-			echo '<p>' . esc_html__( 'Mit verbundenem Zettle-Konto werden Bar, Karte, Trinkgeld und Spenden eines Kassentags automatisch eingetragen und der Getränkebestand abgebucht.', 'vereinsplugin' ) . '</p>';
-			echo '<ol><li>' . sprintf(
-				/* translators: %s: link */
-				esc_html__( 'Als Inhaber:in des Zettle-Kontos %s öffnen und einen API-Schlüssel anlegen (Recht „READ:PURCHASE“ ist vorausgewählt).', 'vereinsplugin' ),
-				'<a href="' . esc_url( vp_zettle_key_link() ) . '" target="_blank" rel="noopener">my.zettle.com → API-Schlüssel</a>'
-			) . '</li><li>' . esc_html__( 'Den angezeigten Schlüssel unten einfügen und speichern.', 'vereinsplugin' ) . '</li></ol>';
-		}
-		echo '<details><summary>' . esc_html__( 'Zettle-Einstellungen', 'vereinsplugin' ) . '</summary>';
-		echo '<form method="post" class="vp-form">' . wp_nonce_field( 'vp_bh_zbon', 'vp_zbon_nonce', true, false ); // phpcs:ignore
-		echo '<div class="vp-form-grid">';
-		echo '<label class="vp-col-2">' . esc_html( vp_zettle_verbunden() ? __( 'Neuer API-Schlüssel (leer lassen = behalten)', 'vereinsplugin' ) : __( 'API-Schlüssel', 'vereinsplugin' ) ) . '<input type="password" name="zettle_key" autocomplete="off"></label>';
-		echo '<label>' . esc_html__( 'Kassentag beginnt um', 'vereinsplugin' ) . '<input type="time" name="tagesgrenze" value="' . esc_attr( $ze['tagesgrenze'] ) . '"></label>';
-		echo '<label>' . esc_html__( 'Produkte, die als Spende zählen (kommagetrennt)', 'vereinsplugin' ) . '<input type="text" name="spende_namen" value="' . esc_attr( $ze['spende'] ) . '"></label>';
-		echo '</div>';
-		if ( vp_zettle_verbunden() ) {
-			echo '<p><label><input type="checkbox" name="zettle_trennen" value="1"> ' . esc_html__( 'Verbindung entfernen (Schlüssel löschen)', 'vereinsplugin' ) . '</label></p>';
-		}
-		echo '<p class="vp-muted">' . esc_html__( 'Der Schlüssel erlaubt nur das Lesen von Verkäufen und wird nicht angezeigt. Entziehen könnt ihr ihn jederzeit unter my.zettle.com.', 'vereinsplugin' ) . '</p>';
-		echo '<p><button class="vp-btn" name="vp_zettle_setup" value="1">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button></p></form></details>';
-
-		if ( $z_info ) {
-			echo '<h4>' . esc_html( sprintf(
-				/* translators: 1: from, 2: to, 3: count */
-				__( 'Verkäufe %1$s – %2$s: %3$d', 'vereinsplugin' ),
-				$fmt( $z_von ),
-				$fmt( $z_bis ),
-				$z_info['anzahl']
-			) ) . '</h4>';
-			$warn = array();
-			if ( ! $z_info['anzahl'] ) {
-				$warn[] = __( 'In diesem Zeitraum gibt es keine Verkäufe.', 'vereinsplugin' );
-			}
-			foreach ( vp_zettle_ueberschneidung( $z_von, $z_bis ) as $u ) {
-				$warn[] = sprintf( __( 'Achtung: Dieser Zeitraum ist schon als Z-Bon #%1$s gebucht (%2$s – %3$s).', 'vereinsplugin' ), $u['nr'], $fmt( $u['von'] ), $fmt( $u['bis'] ) );
-			}
-			if ( $z_info['erstattungen'] ) {
-				$warn[] = sprintf( __( '%d Erstattung(en) sind bereits abgezogen.', 'vereinsplugin' ), $z_info['erstattungen'] );
-			}
-			if ( $z_info['trinkgeld_bar'] ) {
-				$warn[] = sprintf( __( '%s Trinkgeld wurde bar gegeben – es steckt im Bar-Betrag und wird als Getränke Bar gebucht. Bei Bedarf von Hand umbuchen.', 'vereinsplugin' ), vp_bh_eur( $z_info['trinkgeld_bar'] ) );
-			}
-			foreach ( $z_info['sonstige'] as $typ => $summe ) {
-				$warn[] = sprintf( __( '%1$s per %2$s – landet weder in der Barkasse noch auf PayPal und wird nicht gebucht.', 'vereinsplugin' ), vp_bh_eur( $summe ), $typ );
-			}
-			foreach ( $warn as $w ) {
-				echo '<div class="vp-note vp-note-warn">' . esc_html( $w ) . '</div>';
-			}
-			if ( $z_info['produkte'] ) {
-				echo '<details><summary>' . esc_html( sprintf( __( 'Verkaufte Produkte (%d)', 'vereinsplugin' ), count( $z_info['produkte'] ) ) ) . '</summary><div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Produkt', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Menge', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Umsatz', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
-				foreach ( $z_info['produkte'] as $name => $p ) {
-					printf(
-						'<tr><td>%s%s</td><td style="text-align:right">%s</td><td style="text-align:right">%s</td></tr>',
-						esc_html( $name ),
-						$p['spende'] ? ' <span class="vp-badge">' . esc_html__( 'Spende', 'vereinsplugin' ) . '</span>' : '',
-						esc_html( rtrim( rtrim( number_format( $p['menge'], 2, ',', '' ), '0' ), ',' ) ),
-						esc_html( vp_bh_eur( $p['summe'] ) )
-					);
-				}
-				echo '</tbody></table></div></details>';
-			}
-			echo '<p class="vp-muted">' . esc_html__( 'Die Werte stehen unten im Formular. Bitte mit dem Z-Bon vergleichen, dann buchen.', 'vereinsplugin' ) . '</p>';
-		}
-		echo '</div>';
-	}
 	?>
-	<form method="post" class="vp-card vp-form" id="vp-zbon-form">
+	<form method="post" enctype="multipart/form-data" class="vp-card vp-form" id="vp-zbon-form">
 		<?php echo wp_nonce_field( 'vp_bh_zbon', 'vp_zbon_nonce', true, false ); // phpcs:ignore ?>
-		<input type="hidden" name="zettle_von" value="<?php echo esc_attr( $z_von ); ?>">
-		<input type="hidden" name="zettle_bis" value="<?php echo esc_attr( $z_bis ); ?>">
-		<input type="hidden" name="zettle_mengen" value="<?php echo esc_attr( $z_mengen ); ?>">
 		<div class="vp-form-grid">
 			<?php
 			echo $feld( 'nr', __( 'Z-Bon-Nr.', 'vereinsplugin' ), $v['nr'], 'required data-vp-zbon' ); // phpcs:ignore
@@ -443,8 +411,11 @@ function vp_bh_zbon() {
 		</div>
 		<h3><?php esc_html_e( 'Vorschau', 'vereinsplugin' ); ?></h3>
 		<div id="vp-zbon-vorschau"><p class="vp-muted"><?php esc_html_e( 'Beträge eintragen – die Aufteilung erscheint hier.', 'vereinsplugin' ); ?></p></div>
-		<?php if ( $z_von && function_exists( 'jb_bewegung_add' ) && $z_mengen && '[]' !== $z_mengen ) : ?>
-			<p><label><input type="checkbox" name="bestand" value="1" checked> <?php esc_html_e( 'Verkaufte Getränke aus dem Getränkebestand abbuchen', 'vereinsplugin' ); ?></label></p>
+		<?php if ( $mit_nc ) : ?>
+			<p><label><?php esc_html_e( 'Z-Bon als Beleg (PDF aus Zettle oder Foto)', 'vereinsplugin' ); ?><br>
+				<input type="file" name="zbon_beleg" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,application/pdf,image/*"></label></p>
+		<?php else : ?>
+			<p class="vp-muted"><?php esc_html_e( 'Zum Anhängen des Z-Bons als Beleg muss Nextcloud in den Einstellungen eingerichtet sein.', 'vereinsplugin' ); ?></p>
 		<?php endif; ?>
 		<?php if ( $frage_force ) : ?>
 			<p><label><input type="checkbox" name="force" value="1"> <?php esc_html_e( 'trotzdem erneut buchen', 'vereinsplugin' ); ?></label></p>
@@ -506,14 +477,26 @@ function vp_bh_zbon() {
 	$liste = vp_zbon_liste();
 	if ( $liste ) {
 		echo '<h3>' . esc_html__( 'Zuletzt gebucht', 'vereinsplugin' ) . '</h3>';
-		echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Z-Bon', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Buchungen', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Summe', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
+		echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Z-Bon', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Buchungen', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Summe', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Beleg', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
 		foreach ( $liste as $z ) {
+			if ( '' !== (string) $z['beleg'] ) {
+				$zelle = '✓ <span class="vp-muted">' . esc_html( basename( (string) $z['beleg'] ) ) . '</span>';
+			} elseif ( $mit_nc ) {
+				$zelle = '<form method="post" enctype="multipart/form-data" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
+					. wp_nonce_field( 'vp_bh_zbon', 'vp_zbon_nonce', true, false )
+					. '<input type="hidden" name="ref" value="' . esc_attr( $z['ref'] ) . '">'
+					. '<input type="file" name="zbon_beleg" required accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,application/pdf,image/*" style="max-width:180px">'
+					. '<button class="vp-btn" name="vp_zbon_nachreichen" value="1">' . esc_html__( 'nachreichen', 'vereinsplugin' ) . '</button></form>';
+			} else {
+				$zelle = '<span class="vp-muted">–</span>';
+			}
 			printf(
-				'<tr><td>#%s</td><td>%s</td><td>%d</td><td style="text-align:right">%s</td></tr>',
+				'<tr><td>#%s</td><td>%s</td><td>%d</td><td style="text-align:right">%s</td><td>%s</td></tr>',
 				esc_html( substr( (string) $z['ref'], 5 ) ),
 				esc_html( mysql2date( 'd.m.Y', $z['datum'] ) ),
 				(int) $z['n'],
-				esc_html( vp_bh_eur( abs( (float) $z['summe'] ) ) )
+				esc_html( vp_bh_eur( abs( (float) $z['summe'] ) ) ),
+				$zelle // phpcs:ignore
 			);
 		}
 		echo '</tbody></table></div>';
