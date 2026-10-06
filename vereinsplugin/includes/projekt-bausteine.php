@@ -644,6 +644,59 @@ function vp_projekt_bausteine_merken( $p, $keys ) {
  * Zeitpunkt eines Baustein-Eintrags relativ zum Projektbeginn.
  * Ohne Beginn: null – die Checkliste steht, die Termine tragt ihr nach.
  */
+/**
+ * Längster Vorlauf aller Bausteine in Tagen (z. B. 90 bei Förderanträgen) –
+ * das ist der „normale“ Planungshorizont, für den die Vorlagen gedacht sind.
+ */
+function vp_projekt_baustein_horizont() {
+	static $h = null;
+	if ( null === $h ) {
+		$h = 1;
+		foreach ( vp_projekt_bausteine() as $bs ) {
+			foreach ( array( 'ablauf', 'oeffentlichkeit', 'todos' ) as $liste ) {
+				foreach ( (array) ( $bs[ $liste ] ?? array() ) as $item ) {
+					if ( empty( $item['versatz'] ) && empty( $item['ende'] ) && (int) ( $item['tage'] ?? 0 ) < 0 ) {
+						$h = max( $h, abs( (int) $item['tage'] ) );
+					}
+				}
+			}
+		}
+	}
+	return (int) apply_filters( 'vp_projekt_baustein_horizont', $h );
+}
+
+/**
+ * Vorlauf eines Bausteins an die tatsächlich verbleibende Zeit anpassen.
+ *
+ * Die Vorlagen rechnen mit einem normalen Horizont (vp_projekt_baustein_horizont).
+ * Ist die Veranstaltung näher (spontan in 2 Wochen) oder viel weiter weg (in 12
+ * Monaten), wird der Zeitplan auf „heute bis Veranstaltung“ verteilt: Die
+ * frühesten Punkte beginnen heute, die kurzfristigen der letzten Tage (bis
+ * 14 Tage, höchstens die halbe verbleibende Zeit) bleiben, wie sie sind.
+ * Nach der Veranstaltung (positive Tage) ändert sich nichts.
+ *
+ * @return int Tage relativ zum Beginn (negativ = vorher)
+ */
+function vp_projekt_tage_skaliert( $p, $tage ) {
+	$tage = (int) $tage;
+	if ( $tage >= 0 || empty( $p->beginn ) || ! apply_filters( 'vp_projekt_zeitplan_skalieren', true, $p ) ) {
+		return $tage;
+	}
+	$heute = strtotime( current_time( 'Y-m-d' ) );
+	$v     = (int) floor( ( strtotime( gmdate( 'Y-m-d', strtotime( $p->beginn ) ) ) - $heute ) / DAY_IN_SECONDS );
+	if ( $v <= 0 ) {
+		return $tage; // Veranstaltung ist heute oder vorbei – nichts zu verteilen.
+	}
+	$r = max( 1, vp_projekt_baustein_horizont() );
+	$k = min( (int) apply_filters( 'vp_projekt_zeitplan_kurzfristig', 14 ), $v / 2 );
+	$a = abs( $tage );
+	if ( $a <= $k ) {
+		return $tage;
+	}
+	$neu = $r > $k ? $k + ( min( $a, $r ) - $k ) * ( $v - $k ) / ( $r - $k ) : $v;
+	return -1 * (int) round( min( $neu, $v ) );
+}
+
 function vp_projekt_baustein_zeitpunkt( $p, $item ) {
 	if ( ! $p->beginn ) {
 		return null;
@@ -654,7 +707,7 @@ function vp_projekt_baustein_zeitpunkt( $p, $item ) {
 	if ( ! empty( $item['versatz'] ) ) {
 		return gmdate( 'Y-m-d H:i:s', strtotime( $p->beginn . ' ' . $item['versatz'] ) );
 	}
-	return vp_projekt_relativ( $p, (int) ( $item['tage'] ?? 0 ), ! empty( $item['zeit'] ) ? $item['zeit'] : null );
+	return vp_projekt_relativ( $p, vp_projekt_tage_skaliert( $p, (int) ( $item['tage'] ?? 0 ) ), ! empty( $item['zeit'] ) ? $item['zeit'] : null );
 }
 
 /**
@@ -756,7 +809,7 @@ function vp_projekt_baustein_todos( $p, $key, $todos, &$zahl ) {
 			'titel'                       => $item['titel'],
 			'beschreibung'                => (string) ( $item['text'] ?? '' ),
 			'verantwortliches_gremium_id' => $p->gremium_id ?: null,
-			'faelligkeitsdatum'           => $p->beginn ? gmdate( 'Y-m-d', strtotime( $p->beginn . ' ' . ( (int) ( $item['tage'] ?? 0 ) >= 0 ? '+' : '' ) . (int) ( $item['tage'] ?? 0 ) . ' days' ) ) : null,
+			'faelligkeitsdatum'           => vp_projekt_todo_faellig( $p, $item ),
 			'quelle_termin_id'            => $p->termin_id ?: null,
 			'projekt_id'                  => (int) $p->id,
 		) );
@@ -764,6 +817,62 @@ function vp_projekt_baustein_todos( $p, $key, $todos, &$zahl ) {
 	}
 	return $n;
 }
+
+function vp_projekt_todo_faellig( $p, $item ) {
+	if ( ! $p->beginn ) {
+		return null;
+	}
+	$t = vp_projekt_tage_skaliert( $p, (int) ( $item['tage'] ?? 0 ) );
+	return gmdate( 'Y-m-d', strtotime( $p->beginn . ' ' . ( $t >= 0 ? '+' : '' ) . $t . ' days' ) );
+}
+
+/**
+ * Termine aller noch offenen Baustein-Einträge (Ablauf, Öffentlichkeitsarbeit,
+ * ToDos) neu berechnen – ab heute, auf die verbleibende Zeit verteilt. Für
+ * bestehende Projekte oder wenn sich das Datum der Veranstaltung ändert.
+ *
+ * @return int Anzahl angepasster Einträge
+ */
+function vp_projekt_zeitplan_neu( $p ) {
+	global $wpdb;
+	if ( ! $p->beginn ) {
+		return 0;
+	}
+	$n = 0;
+	$t = $wpdb->prefix . 'pp_aufgaben';
+	$mit_todos = function_exists( 'vp_kreis_col_exists' ) && vp_kreis_col_exists( $t, 'projekt_id' );
+	foreach ( vp_projekt_bausteine_von( $p ) as $key ) {
+		$bs = vp_projekt_baustein( $key );
+		if ( ! $bs ) {
+			continue;
+		}
+		foreach ( array( 'ablauf', 'oeffentlichkeit' ) as $bereich ) {
+			foreach ( (array) ( $bs[ $bereich ] ?? array() ) as $item ) {
+				$zeit = vp_projekt_baustein_zeitpunkt( $p, 'oeffentlichkeit' === $bereich ? $item + array( 'zeit' => '12:00' ) : $item );
+				$n   += (int) $wpdb->query( $wpdb->prepare(
+					'UPDATE ' . vp_projekt_punkte_table() . " SET zeitpunkt = %s WHERE projekt_id = %d AND bereich = %s AND quelle = %s AND titel = %s AND status <> 'erledigt'",
+					$zeit, (int) $p->id, $bereich, $key, $item['titel']
+				) );
+			}
+		}
+		if ( $mit_todos ) {
+			foreach ( (array) ( $bs['todos'] ?? array() ) as $item ) {
+				$n += (int) $wpdb->query( $wpdb->prepare(
+					"UPDATE $t SET faelligkeitsdatum = %s WHERE projekt_id = %d AND titel = %s AND status = 'offen'",
+					vp_projekt_todo_faellig( $p, $item ), (int) $p->id, $item['titel']
+				) );
+			}
+		}
+	}
+	return $n;
+}
+
+add_action( 'admin_post_vp_projekt_zeitplan_neu', function () {
+	vp_kreis_check( 'vp_projekt_zeitplan_neu' );
+	$p = vp_projekt_oder_fehler( (int) $_POST['projekt_id'] );
+	$n = vp_projekt_zeitplan_neu( $p );
+	vp_projekt_zurueck( $p, 'bausteine', array( 'vp_zeitplan_neu' => $n ) );
+} );
 
 /** Titel-Vergleich für den Dopplungsschutz: Groß-/Kleinschreibung egal. */
 function vp_projekt_titel_schluessel( $titel ) {
@@ -967,7 +1076,31 @@ function vp_projekt_tab_bausteine( $p ) {
 	<p class="pp-meta"><?php esc_html_e( 'Bausteine sind fertige Checklisten für einzelne Themen. Sie füllen Ablauf, Öffentlichkeitsarbeit, Kalkulation und ToDos – kombiniert, so wie diese Veranstaltung es braucht. Nichts wird überschrieben: Einträge, die es schon gibt, werden übersprungen.', 'vereinsplugin' ); ?></p>
 
 	<?php if ( ! $p->beginn ) : ?>
-		<p class="pp-hint"><?php esc_html_e( 'Dieses Projekt hat noch keinen Beginn. Die Bausteine lassen sich trotzdem anwenden – die Einträge werden dann ohne Datum angelegt. Mit einem Beginn setzt das Plugin alle Fristen automatisch (z. B. „GEMA anmelden" vier Wochen vorher).', 'vereinsplugin' ); ?></p>
+		<p class="pp-hint"><?php esc_html_e( 'Dieses Projekt hat noch keinen Beginn. Die Bausteine lassen sich trotzdem anwenden – die Einträge werden dann ohne Datum angelegt. Mit einem Beginn setzt das Plugin alle Fristen automatisch – verteilt auf die Zeit von heute bis zur Veranstaltung.', 'vereinsplugin' ); ?></p>
+	<?php else :
+		$bis = (int) floor( ( strtotime( gmdate( 'Y-m-d', strtotime( $p->beginn ) ) ) - strtotime( current_time( 'Y-m-d' ) ) ) / DAY_IN_SECONDS ); ?>
+		<p class="pp-meta vp-zeitplan-info">
+			<?php
+			if ( $bis > 0 ) {
+				echo esc_html( sprintf(
+					/* translators: 1: Tage bis zur Veranstaltung, 2: normaler Vorlauf */
+					__( 'Zeitplan ab heute: noch %1$d Tage bis zur Veranstaltung. Die Fristen der Bausteine (gedacht für rund %2$d Tage Vorlauf) werden auf diese Zeit verteilt – bei spontanen Veranstaltungen enger, bei langer Planung großzügiger. Die letzten Handgriffe kurz vorher bleiben, wie sie sind.', 'vereinsplugin' ),
+					$bis,
+					vp_projekt_baustein_horizont()
+				) );
+			}
+			?>
+		</p>
+		<?php if ( isset( $_GET['vp_zeitplan_neu'] ) ) : ?>
+			<div class="pp-front-notice pp-front-notice-success"><?php echo esc_html( sprintf( /* translators: %d = count */ _n( '%d Termin neu berechnet.', '%d Termine neu berechnet.', (int) $_GET['vp_zeitplan_neu'], 'vereinsplugin' ), (int) $_GET['vp_zeitplan_neu'] ) ); ?></div>
+		<?php endif; ?>
+		<?php if ( $drin && $bis > 0 ) : ?>
+			<?php vp_kreis_form( 'vp_projekt_zeitplan_neu', 'pp-inline-form' ); ?>
+				<input type="hidden" name="projekt_id" value="<?php echo (int) $p->id; ?>">
+				<button type="submit" class="pp-btn pp-btn-small" onclick="return confirm('<?php echo esc_js( __( 'Termine aller noch offenen Baustein-Einträge (Ablauf, Öffentlichkeitsarbeit, ToDos) ab heute neu verteilen? Erledigte und selbst angelegte Einträge bleiben unverändert.', 'vereinsplugin' ) ); ?>')"><?php esc_html_e( 'Zeitplan ab heute neu verteilen', 'vereinsplugin' ); ?></button>
+				<span class="pp-meta"><?php esc_html_e( 'z. B. nach einer Datumsänderung oder bei Projekten, die vorher angelegt wurden.', 'vereinsplugin' ); ?></span>
+			</form>
+		<?php endif; ?>
 	<?php endif; ?>
 
 	<?php if ( isset( $_GET['vp_bs_neu'] ) ) : ?>

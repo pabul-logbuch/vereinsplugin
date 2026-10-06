@@ -195,6 +195,11 @@ function vp_render_budgets_section() {
 	</form>
 	<?php
 
+	// Projekte: Kalkulation gegen tatsächliche Buchungen (Kostenstellen).
+	if ( function_exists( 'vp_projekt_kassen_uebersicht' ) ) {
+		echo vp_projekt_kassen_uebersicht(); // phpcs:ignore WordPress.Security.EscapeOutput
+	}
+
 	// Rücklagen (wiederkehrende Kosten) direkt darunter.
 	if ( function_exists( 'vp_bh_ruecklagen' ) ) {
 		echo '<h2 style="margin-top:32px">' . esc_html__( 'Rücklagen für wiederkehrende Kosten', 'vereinsplugin' ) . '</h2>';

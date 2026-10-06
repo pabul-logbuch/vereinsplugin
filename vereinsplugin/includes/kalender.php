@@ -30,7 +30,8 @@ function vp_kal_kategorien() {
 	return apply_filters( 'vp_kalender_kategorien', array(
 		'veranstaltung' => array( 'label' => __( 'Veranstaltungen', 'vereinsplugin' ), 'farbe' => '#2563eb' ),
 		'sitzung'       => array( 'label' => __( 'Sitzungen', 'vereinsplugin' ), 'farbe' => '#7c3aed' ),
-		'termin'        => array( 'label' => __( 'Termine aus Beschlüssen', 'vereinsplugin' ), 'farbe' => '#0891b2' ),
+		'termin'        => array( 'label' => __( 'Kreis-Termine', 'vereinsplugin' ), 'farbe' => '#0891b2' ),
+		'aufgabe'       => array( 'label' => __( 'Meine Aufgaben-Fristen', 'vereinsplugin' ), 'farbe' => '#ca8a04' ),
 		'schicht'       => array( 'label' => __( 'Schichtpläne', 'vereinsplugin' ), 'farbe' => '#ea580c' ),
 		'oeffnung'      => array( 'label' => __( 'Öffnungszeiten', 'vereinsplugin' ), 'farbe' => '#16a34a' ),
 		'sonstiges'     => array( 'label' => __( 'Weitere Termine', 'vereinsplugin' ), 'farbe' => '#db2777' ),
@@ -99,6 +100,7 @@ function vp_kal_termine( $von, $bis, $user_id = 0, $args = array() ) {
 	$quellen = array(
 		'veranstaltung' => 'vp_kal_quelle_veranstaltungen',
 		'sitzung'       => 'vp_kal_quelle_sitzungen',
+		'aufgabe'       => 'vp_kal_quelle_aufgaben',
 		'schicht'       => 'vp_kal_quelle_schichten',
 		'oeffnung'      => 'vp_kal_quelle_oeffnungszeiten',
 		'sonstiges'     => 'vp_kal_quelle_eigene',
@@ -225,10 +227,13 @@ function vp_kal_quelle_sitzungen( $von, $bis, $user_id ) {
 
 	$term = $wpdb->prefix . 'pp_termine';
 	if ( vp_kal_table_exists( $term ) ) {
+		// Termine, die ProtokollPro für geplante Sitzungen anlegt, stehen schon
+		// als Sitzung im Kalender – nicht doppelt zeigen.
+		$ohne_sitzung = $wpdb->get_var( "SHOW COLUMNS FROM $term LIKE 'quelle_protokoll_id'" ) ? ' AND t.quelle_protokoll_id IS NULL' : '';
 		$rows = $wpdb->get_results( $wpdb->prepare(
 			"SELECT t.id, t.titel, t.datum, t.ort, g.name AS gremium
 			 FROM $term t LEFT JOIN $grem g ON g.id = t.gremium_id
-			 WHERE t.datum >= %s AND t.datum < %s AND (g.id IS NULL OR " . $sicht( 'g.oeffentlichkeit' ) . ')',
+			 WHERE t.datum >= %s AND t.datum < %s$ohne_sitzung AND (g.id IS NULL OR " . $sicht( 'g.oeffentlichkeit' ) . ')',
 			$von . ' 00:00:00', gmdate( 'Y-m-d', strtotime( $bis . ' +1 day' ) ) . ' 00:00:00'
 		) );
 		foreach ( (array) $rows as $r ) {
@@ -238,9 +243,35 @@ function vp_kal_quelle_sitzungen( $von, $bis, $user_id ) {
 				'id'       => 'termin-' . $r->id,
 				'ganztags' => $ganzt,
 				'ort'      => (string) $r->ort,
-				'info'     => $r->gremium ? sprintf( /* translators: %s = Gremium */ __( 'Beschlossen in: %s', 'vereinsplugin' ), $r->gremium ) : '',
+				'info'     => (string) $r->gremium,
 			) );
 		}
+	}
+	return $out;
+}
+
+/* ---- Eigene offene Aufgaben mit Fälligkeit (ProtokollPro) ---- */
+
+function vp_kal_quelle_aufgaben( $von, $bis, $user_id ) {
+	global $wpdb;
+	$t = $wpdb->prefix . 'pp_aufgaben';
+	if ( ! vp_kal_table_exists( $t ) ) {
+		return array();
+	}
+	$rows = $wpdb->get_results( $wpdb->prepare(
+		"SELECT id, titel, faelligkeitsdatum FROM $t
+		 WHERE verantwortlich_user_id = %d AND status = 'offen'
+		   AND faelligkeitsdatum BETWEEN %s AND %s",
+		$user_id, $von, $bis
+	) );
+	$out = array();
+	foreach ( (array) $rows as $r ) {
+		$out[] = vp_kal_eintrag( 'aufgabe', sprintf( /* translators: %s = Aufgabe */ __( 'Fällig: %s', 'vereinsplugin' ), $r->titel ), $r->faelligkeitsdatum, array(
+			'id'       => 'aufgabe-' . $r->id,
+			'ganztags' => true,
+			'url'      => user_can( $user_id, 'pp_manage' ) ? vp_kal_area_url( array( 'vp_tab' => 'aufgaben' ) ) : '',
+			'mein'     => true,
+		) );
 	}
 	return $out;
 }
@@ -979,6 +1010,11 @@ function vp_render_kalender_section() {
 	$tz     = wp_timezone();
 	$heute  = new DateTimeImmutable( 'now', $tz );
 	$ansicht = isset( $_GET['vp_kal'] ) ? sanitize_key( wp_unslash( $_GET['vp_kal'] ) ) : 'monat';
+	// Alte Links auf ProtokollPro „Termine“ / „Kalender-Sync“ landen hier.
+	if ( ! isset( $_GET['vp_kal'] ) && isset( $_GET['pp_view'] ) ) {
+		$pv      = sanitize_key( wp_unslash( $_GET['pp_view'] ) );
+		$ansicht = 'kalender' === $pv ? 'abo' : ( 'termine' === $pv && vp_kal_can_manage() ? 'verwalten' : $ansicht );
+	}
 	if ( ! in_array( $ansicht, array( 'monat', 'liste', 'abo', 'verwalten' ), true ) || ( 'verwalten' === $ansicht && ! vp_kal_can_manage() ) ) {
 		$ansicht = 'monat';
 	}
@@ -988,6 +1024,18 @@ function vp_render_kalender_section() {
 	ob_start();
 	echo '<div class="vp-kal" id="vp-kal">';
 	echo '<h2>' . esc_html__( 'Kalender', 'vereinsplugin' ) . '</h2>';
+
+	// Rückmeldungen nach „Set anwenden“ u. Ä. (ProtokollPro leitet mit ?pp_… zurück).
+	if ( isset( $_GET['pp_set_erzeugt'] ) ) {
+		echo '<div class="vp-note">' . esc_html( sprintf( /* translators: %d = count */ __( '%d Aufgabe(n) aus dem Set erzeugt.', 'vereinsplugin' ), (int) $_GET['pp_set_erzeugt'] ) );
+		if ( ! empty( $_GET['pp_set_uebersprungen'] ) ) {
+			echo ' ' . esc_html( sprintf( /* translators: %d = count */ __( '%d übersprungen, weil sie für diesen Termin bereits existieren.', 'vereinsplugin' ), (int) $_GET['pp_set_uebersprungen'] ) );
+		}
+		echo '</div>';
+	}
+	if ( isset( $_GET['pp_error'] ) ) {
+		echo '<div class="vp-note vp-note-error">' . esc_html( str_replace( '+', ' ', sanitize_text_field( wp_unslash( $_GET['pp_error'] ) ) ) ) . '</div>';
+	}
 
 	$tabs = array(
 		'monat' => __( 'Monat', 'vereinsplugin' ),
@@ -1207,7 +1255,13 @@ function vp_kal_render_zeile( $t, $kats ) {
 		$t['url'] ? '<a href="' . esc_url( $t['url'] ) . '">' . esc_html( $t['titel'] ) . '</a>' : esc_html( $t['titel'] )
 	);
 	$meta = array_filter( array( $kat, $t['ort'] ? '📍 ' . $t['ort'] : '' ) );
-	$html .= '<div class="vp-kal-zeile-meta">' . esc_html( implode( ' · ', $meta ) ) . '</div>';
+	$html .= '<div class="vp-kal-zeile-meta">' . esc_html( implode( ' · ', $meta ) );
+	// Termin als TOP vorschlagen (Themenspeicher).
+	if ( function_exists( 'vp_thema_link' ) && vp_thema_verfuegbar() && vp_thema_darf() && 'oeffnung' !== $t['kat'] ) {
+		$wann  = wp_date( 'd.m.Y', strtotime( substr( $t['start'], 0, 10 ) . ' 12:00' ) ) . ( vp_kal_zeit_text( $t, false ) ? ' ' . vp_kal_zeit_text( $t, false ) : '' );
+		$html .= ' · <a class="vp-kal-thema" href="' . esc_url( vp_thema_link( sprintf( /* translators: 1: Termin, 2: Datum */ __( 'Termin „%1$s“ (%2$s): ', 'vereinsplugin' ), $t['titel'], $wann ), trim( $t['ort'] . "\n" . $t['info'] ), 0, vp_kal_url( array( 'vp_kal' => 'liste', 'vp_kal_m' => substr( $t['start'], 0, 7 ) ) ) ) ) . '" title="' . esc_attr__( 'Als TOP vorschlagen', 'vereinsplugin' ) . '">📌 ' . esc_html__( 'als TOP', 'vereinsplugin' ) . '</a>';
+	}
+	$html .= '</div>';
 	if ( $t['info'] ) {
 		$html .= '<div class="vp-kal-zeile-info">' . nl2br( esc_html( $t['info'] ) ) . '</div>';
 	}
@@ -1232,7 +1286,7 @@ function vp_kal_render_abo() {
 	}
 	echo '<div class="vp-card">';
 	echo '<h3>' . esc_html__( 'Kalender abonnieren', 'vereinsplugin' ) . '</h3>';
-	echo '<p>' . esc_html__( 'Mit diesem persönlichen Link erscheinen alle Vereinstermine, die du hier siehst – inklusive deiner eigenen Schichten – automatisch in deinem Kalender und bleiben aktuell.', 'vereinsplugin' ) . '</p>';
+	echo '<p>' . esc_html__( 'Mit diesem persönlichen Link erscheinen alle Vereinstermine, die du hier siehst – inklusive deiner eigenen Schichten und der Fristen deiner offenen Aufgaben – automatisch in deinem Kalender und bleiben aktuell.', 'vereinsplugin' ) . '</p>';
 	printf(
 		'<p><input type="text" readonly class="vp-kal-abo-url" value="%s" onclick="this.select()" style="width:100%%"></p><p><button type="button" class="vp-btn vp-btn-primary" data-kal-copy>%s</button> <a class="vp-btn" href="%s">%s</a></p>',
 		esc_attr( $url ),
@@ -1317,7 +1371,20 @@ function vp_kal_verwalten_speichern() {
 	if ( isset( $p['vp_kal_termin_speichern'] ) ) {
 		$titel = sanitize_text_field( $p['t_titel'] ?? '' );
 		$datum = preg_match( '/^\d{4}-\d{2}-\d{2}$/', (string) ( $p['t_datum'] ?? '' ) ) ? $p['t_datum'] : '';
-		if ( $titel && $datum ) {
+		$gremium = (int) ( $p['t_gremium'] ?? 0 );
+		if ( $titel && $datum && $gremium && vp_kal_pp_termine_moeglich() ) {
+			// Kreis-Termin: in ProtokollPro speichern, damit Aufgaben-Sets und
+			// Rollenaufgaben daran hängen können.
+			global $wpdb;
+			$von = preg_match( '/^\d{2}:\d{2}$/', (string) ( $p['t_von'] ?? '' ) ) ? $p['t_von'] : '00:00';
+			$wpdb->insert( $wpdb->prefix . 'pp_termine', array(
+				'titel'      => $titel,
+				'datum'      => $datum . ' ' . $von . ':00',
+				'ort'        => sanitize_text_field( $p['t_ort'] ?? '' ),
+				'gremium_id' => $gremium,
+			) );
+			$msg[] = __( 'Kreis-Termin gespeichert. Unten kannst du Aufgaben-Sets und Rollenaufgaben dafür erzeugen.', 'vereinsplugin' );
+		} elseif ( $titel && $datum ) {
 			$von      = preg_match( '/^\d{2}:\d{2}$/', (string) ( $p['t_von'] ?? '' ) ) ? $p['t_von'] : '';
 			$bis      = preg_match( '/^\d{2}:\d{2}$/', (string) ( $p['t_bis'] ?? '' ) ) ? $p['t_bis'] : '';
 			$bisdatum = preg_match( '/^\d{4}-\d{2}-\d{2}$/', (string) ( $p['t_bisdatum'] ?? '' ) ) && $p['t_bisdatum'] > $datum ? $p['t_bisdatum'] : '';
@@ -1352,6 +1419,23 @@ function vp_kal_verwalten_speichern() {
 		$msg[] = __( 'Termin gelöscht.', 'vereinsplugin' );
 	}
 
+	if ( isset( $p['vp_kal_pp_rollen'] ) && vp_kal_pp_termine_moeglich() && function_exists( 'pp_erzeuge_event_aufgaben' ) ) {
+		$n     = pp_erzeuge_event_aufgaben( (int) $p['vp_kal_pp_rollen'] );
+		$msg[] = false === $n
+			? __( 'Für Rollenaufgaben braucht der Termin einen Kreis und ein Datum.', 'vereinsplugin' )
+			: sprintf( /* translators: %d = count */ __( '%d Rollenaufgabe(n) erzeugt (bereits vorhandene werden übersprungen).', 'vereinsplugin' ), (int) $n );
+	}
+
+	if ( isset( $p['vp_kal_pp_loeschen'] ) && vp_kal_pp_termine_moeglich() ) {
+		global $wpdb;
+		// Nur manuell angelegte Termine – Sitzungstermine hängen an der Sitzung.
+		$wpdb->query( $wpdb->prepare(
+			"DELETE FROM {$wpdb->prefix}pp_termine WHERE id = %d AND quelle_protokoll_id IS NULL AND quelle_top_id IS NULL",
+			(int) $p['vp_kal_pp_loeschen']
+		) );
+		$msg[] = __( 'Kreis-Termin gelöscht.', 'vereinsplugin' );
+	}
+
 	if ( isset( $p['vp_kal_nc_hinzu'] ) ) {
 		$url = esc_url_raw( vp_kal_nc_normalize_url( $p['nc_url'] ?? '' ), array( 'http', 'https' ) );
 		if ( $url ) {
@@ -1381,6 +1465,69 @@ function vp_kal_verwalten_speichern() {
 	}
 
 	return $msg;
+}
+
+/** Darf die Person Kreis-Termine (ProtokollPro) anlegen und vorbereiten? */
+function vp_kal_pp_termine_moeglich() {
+	global $wpdb;
+	return ( current_user_can( 'pp_manage' ) || current_user_can( 'manage_options' ) )
+		&& function_exists( 'pp_get_gremien' )
+		&& vp_kal_table_exists( $wpdb->prefix . 'pp_termine' );
+}
+
+/**
+ * Anstehende Kreis-Termine (inkl. geplanter Sitzungen) mit den Vorbereitungs-
+ * Funktionen, die früher im Reiter „Termine“ von Sitzungen & Protokolle lagen.
+ */
+function vp_kal_render_pp_termine( $nonce ) {
+	if ( ! vp_kal_pp_termine_moeglich() ) {
+		return '';
+	}
+	global $wpdb;
+	$termine = function_exists( 'pp_get_naechste_termine' ) ? (array) pp_get_naechste_termine( 50 ) : array();
+	$sets    = function_exists( 'pp_get_aufgaben_sets' ) ? (array) pp_get_aufgaben_sets() : array();
+	$zurueck = vp_kal_url( array( 'vp_kal' => 'verwalten' ) );
+
+	ob_start();
+	echo '<div class="vp-card" id="vp-kal-kreistermine"><h3>' . esc_html__( 'Kreis-Termine & Vorbereitung', 'vereinsplugin' ) . '</h3>';
+	echo '<p class="vp-muted">' . esc_html__( 'Geplante Sitzungen erscheinen hier automatisch, sobald ein Datum eingetragen ist. „Set anwenden“ erzeugt alle Vorbereitungsaufgaben eines Aufgaben-Sets; „Rollenaufgaben“ erzeugt die Aufgaben, die bei den Rollen des Kreises „vor Veranstaltungen“ hinterlegt sind.', 'vereinsplugin' ) . '</p>';
+	if ( ! $termine ) {
+		echo '<p class="vp-muted">' . esc_html__( 'Keine anstehenden Kreis-Termine. Oben beim Termin einen Kreis auswählen, um einen anzulegen.', 'vereinsplugin' ) . '</p></div>';
+		return ob_get_clean();
+	}
+	echo '<div class="vp-table-wrap"><table class="vp-table vp-kal-pp-termine"><thead><tr><th>' . esc_html__( 'Termin', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Kreis', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Vorbereitung', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
+	foreach ( $termine as $t ) {
+		$herkunft = ! empty( $t->quelle_protokoll_id ) ? __( 'geplante Sitzung', 'vereinsplugin' ) : ( ! empty( $t->quelle_top_id ) ? __( 'aus Beschluss', 'vereinsplugin' ) : '' );
+		echo '<tr><td><strong>' . esc_html( $t->titel ) . '</strong>' . ( $t->ort ? '<br><small class="vp-muted">' . esc_html( $t->ort ) . '</small>' : '' ) . ( $herkunft ? '<br><small class="vp-muted">' . esc_html( $herkunft ) . '</small>' : '' ) . '</td>';
+		echo '<td style="white-space:nowrap">' . esc_html( mysql2date( 'd.m.Y H:i', $t->datum ) ) . '</td>';
+		echo '<td>' . esc_html( $t->gremium_name ?: '–' ) . '</td><td>';
+
+		// Aufgaben-Set anwenden (ProtokollPro-Handler, leitet zurück in den Kalender).
+		$passende = array_filter( $sets, function ( $set ) use ( $t ) { return ! $set->gremium_id || (int) $set->gremium_id === (int) $t->gremium_id; } );
+		if ( $passende && $t->datum ) {
+			echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
+			wp_nonce_field( 'pp_front_set_anwenden' );
+			echo '<input type="hidden" name="action" value="pp_front_set_anwenden"><input type="hidden" name="termin_id" value="' . (int) $t->id . '"><input type="hidden" name="pp_return" value="' . esc_url( $zurueck ) . '">';
+			echo '<select name="set_id" required><option value="">' . esc_html__( 'Set…', 'vereinsplugin' ) . '</option>';
+			foreach ( $passende as $set ) {
+				echo '<option value="' . (int) $set->id . '">' . esc_html( $set->name ) . '</option>';
+			}
+			echo '</select><button class="vp-btn">' . esc_html__( 'anwenden', 'vereinsplugin' ) . '</button></form> ';
+		}
+		echo '<form method="post">' . $nonce; // phpcs:ignore WordPress.Security.EscapeOutput
+		if ( $t->gremium_id ) {
+			echo '<button class="vp-btn" name="vp_kal_pp_rollen" value="' . (int) $t->id . '">' . esc_html__( 'Rollenaufgaben erzeugen', 'vereinsplugin' ) . '</button>';
+		}
+		if ( function_exists( 'vp_thema_link' ) && vp_thema_verfuegbar() ) {
+			echo '<a class="vp-btn" href="' . esc_url( vp_thema_link( sprintf( /* translators: 1: Termin, 2: Datum */ __( 'Termin „%1$s“ (%2$s): ', 'vereinsplugin' ), $t->titel, mysql2date( 'd.m.Y', $t->datum ) ), (string) $t->ort, (int) $t->gremium_id, $zurueck ) ) . '">📌 ' . esc_html__( 'als TOP', 'vereinsplugin' ) . '</a>';
+		}
+		if ( empty( $t->quelle_protokoll_id ) && empty( $t->quelle_top_id ) ) {
+			echo '<button class="vp-btn vp-btn-danger" name="vp_kal_pp_loeschen" value="' . (int) $t->id . '" onclick="return confirm(\'' . esc_js( __( 'Kreis-Termin löschen?', 'vereinsplugin' ) ) . '\')">' . esc_html__( 'Löschen', 'vereinsplugin' ) . '</button>';
+		}
+		echo '</form></td></tr>';
+	}
+	echo '</tbody></table></div></div>';
+	return ob_get_clean();
 }
 
 function vp_kal_render_verwalten() {
@@ -1464,6 +1611,14 @@ function vp_kal_render_verwalten() {
 		selected( $e['sichtbar'] ?? '', 'vorstand', false ),
 		esc_html__( 'nur Vorstand', 'vereinsplugin' )
 	);
+	if ( ! $e && vp_kal_pp_termine_moeglich() ) {
+		echo '<label>' . esc_html__( 'Kreis (optional)', 'vereinsplugin' ) . '<select name="t_gremium"><option value="">' . esc_html__( '— kein Kreis —', 'vereinsplugin' ) . '</option>';
+		foreach ( (array) pp_get_gremien() as $g ) {
+			echo '<option value="' . (int) $g->id . '">' . esc_html( $g->name ) . '</option>';
+		}
+		echo '</select></label>';
+		echo '<p class="vp-col-2 vp-muted" style="margin:0 0 10px">' . esc_html__( 'Mit Kreis wird der Termin ein Kreis-Termin: Er gilt für den Kreis (Sichtbarkeit wie der Kreis), und du kannst unten Aufgaben-Sets und Rollenaufgaben dafür erzeugen. Mehrtägig, Ende, Link und Beschreibung entfallen dann.', 'vereinsplugin' ) . '</p>';
+	}
 	echo '</div><p><button class="vp-btn vp-btn-primary" name="vp_kal_termin_speichern" value="1">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button>';
 	if ( $e ) {
 		printf( ' <a class="vp-btn" href="%s">%s</a>', esc_url( vp_kal_url( array( 'vp_kal' => 'verwalten' ) ) ), esc_html__( 'Abbrechen', 'vereinsplugin' ) );
@@ -1488,6 +1643,8 @@ function vp_kal_render_verwalten() {
 		}
 		echo '</tbody></table></div></form>';
 	}
+
+	echo vp_kal_render_pp_termine( $nonce ); // phpcs:ignore WordPress.Security.EscapeOutput
 
 	/* -- Nextcloud -- */
 	echo '<div class="vp-card vp-form"><h3>' . esc_html__( 'Nextcloud-Kalender einbinden', 'vereinsplugin' ) . '</h3>';

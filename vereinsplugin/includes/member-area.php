@@ -320,9 +320,13 @@ function vp_shortcode_member_area( $atts ) {
 	}
 
 	$active = isset( $_GET['vp_tab'] ) ? sanitize_key( wp_unslash( $_GET['vp_tab'] ) ) : $atts['start'];
-	// ProtokollPro-Unterlinks setzen nur ?pp_view – dann trotzdem im Protokoll-Tab bleiben.
-	if ( isset( $_GET['pp_view'] ) && isset( $sections['protokolle'] ) ) {
-		$active = 'protokolle';
+	// ProtokollPro-Links setzen nur ?pp_view – die Ansicht bestimmt den Bereich
+	// (Aufgaben, Sitzungen & Protokolle, Kreise …).
+	if ( isset( $_GET['pp_view'] ) && function_exists( 'vp_pp_tab_fuer_view' ) ) {
+		$pp_tab = vp_pp_tab_fuer_view( sanitize_key( wp_unslash( $_GET['pp_view'] ) ) );
+		if ( isset( $sections[ $pp_tab ] ) ) {
+			$active = $pp_tab;
+		}
 	}
 	if ( ! isset( $sections[ $active ] ) ) {
 		$active = array_key_first( $sections );
@@ -387,13 +391,15 @@ function vp_shortcode_member_area( $atts ) {
 							vp_render_nav_children( $key, $s, $base_url, $key === $active );
 							continue;
 						}
-						$url = add_query_arg( 'vp_tab', $key, $base_url );
+						$url   = add_query_arg( 'vp_tab', $key, $base_url );
+						$badge = ( ! empty( $s['badge'] ) && is_callable( $s['badge'] ) ) ? (string) call_user_func( $s['badge'] ) : '';
 						printf(
-							'<a class="vp-nav-item%s" href="%s" data-vp-tab="%s">%s</a>',
+							'<a class="vp-nav-item%s" href="%s" data-vp-tab="%s"><span class="vp-nav-label">%s</span>%s</a>',
 							$key === $active ? ' is-active' : '',
 							esc_url( $url ),
 							esc_attr( $key ),
-							esc_html( $s['label'] )
+							esc_html( $s['label'] ),
+							'' !== $badge ? '<span class="vp-nav-badge">' . esc_html( $badge ) . '</span>' : ''
 						);
 					}
 					if ( $g_label ) {
@@ -417,6 +423,9 @@ function vp_shortcode_member_area( $atts ) {
 						) )
 						. '</div>';
 				}
+
+				// z. B. Leiste „Live-Sitzung läuft“ (includes/live-sitzung.php).
+				do_action( 'vp_member_area_vor_inhalt', $active );
 
 				$s = $sections[ $active ];
 				if ( ! empty( $s['render'] ) && is_callable( $s['render'] ) ) {
@@ -455,41 +464,8 @@ function vp_shortcode_member_area( $atts ) {
  * ---------------------------------------------------------------------- */
 
 function vp_render_dashboard_section() {
-	$u = wp_get_current_user();
-	ob_start();
-	echo '<h2>' . sprintf(
-		/* translators: %s = first name */
-		esc_html__( 'Hallo %s', 'vereinsplugin' ),
-		esc_html( $u->first_name ?: $u->display_name )
-	) . '</h2>';
-
-	echo '<div class="vp-tiles">';
-
-	// Offene Aufgaben (ProtokollPro).
-	if ( function_exists( 'pp_get_meine_aufgaben' ) ) {
-		$auf = pp_get_meine_aufgaben( $u->ID );
-		echo '<div class="vp-card vp-tile"><div class="vp-tile-num">' . (int) count( (array) $auf ) . '</div><div>' . esc_html__( 'offene Aufgaben', 'vereinsplugin' ) . '</div></div>';
-	}
-	// Meine Auslagen (Buchhaltung).
-	if ( function_exists( 'jb_get_auslagen' ) ) {
-		$mine = jb_get_auslagen( array( 'user_id' => $u->ID ) );
-		$offen = array_filter( $mine, function ( $r ) { return in_array( ( is_object( $r ) ? $r->status : $r['status'] ), array( 'ausstehend', 'genehmigt' ), true ); } );
-		echo '<div class="vp-card vp-tile"><div class="vp-tile-num">' . (int) count( $offen ) . '</div><div>' . esc_html__( 'Auslagen in Bearbeitung', 'vereinsplugin' ) . '</div></div>';
-	}
-	// Offene Anträge (nur Vorstand).
-	if ( current_user_can( 'vp_manage_members' ) ) {
-		global $wpdb;
-		$n = (int) $wpdb->get_var( "SELECT COUNT(*) FROM " . vp_antraege_table() . " WHERE status = 'neu'" );
-		echo '<div class="vp-card vp-tile' . ( $n ? ' vp-tile-alert' : '' ) . '"><div class="vp-tile-num">' . $n . '</div><div>' . esc_html__( 'offene Mitgliedsanträge', 'vereinsplugin' ) . '</div></div>';
-	}
-	echo '</div>';
-
-	if ( function_exists( 'vp_kal_naechste_termine_html' ) ) {
-		echo vp_kal_naechste_termine_html(); // phpcs:ignore WordPress.Security.EscapeOutput
-	}
-
-	echo '<p class="vp-muted">' . esc_html__( 'Wähle links einen Bereich.', 'vereinsplugin' ) . '</p>';
-	return ob_get_clean();
+	// Übersicht über alle Bereiche: includes/start-uebersicht.php.
+	return vp_start_render();
 }
 
 function vp_render_profile_section() {
