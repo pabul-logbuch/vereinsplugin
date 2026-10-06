@@ -379,6 +379,7 @@ function vp_render_buchhaltung_hub() {
 		'auswertung' => __( 'Auswertung', 'vereinsplugin' ),
 		'jahr'       => __( 'Geschäftsjahr', 'vereinsplugin' ),
 		'import'     => __( 'Bank-Import', 'vereinsplugin' ),
+		'zbon'       => __( 'Z-Bon', 'vereinsplugin' ),
 		'belege'     => __( 'Belege', 'vereinsplugin' ),
 		'ruecklagen' => __( 'Rücklagen', 'vereinsplugin' ),
 		'konten'     => __( 'Kontenplan', 'vereinsplugin' ),
@@ -412,6 +413,9 @@ function vp_render_buchhaltung_hub() {
 			break;
 		case 'import':
 			echo vp_bh_import(); // phpcs:ignore
+			break;
+		case 'zbon':
+			echo vp_bh_zbon(); // phpcs:ignore
 			break;
 		case 'auswertung':
 			echo vp_bh_auswertung(); // phpcs:ignore

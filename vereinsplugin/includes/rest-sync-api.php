@@ -1938,100 +1938,23 @@ function vp_sync_action_shift_tausch( WP_REST_Request $req ) {
 	return rest_ensure_response( array( 'ok' => true, 'status' => $annehmen ? 'angenommen' : 'abgelehnt' ) );
 }
 
-/* =========================================================================
- * Z-Bon (Zettle/POS) aufteilen und ins Journal buchen.
- *
- * Aus einem Z-Bon entstehen bis zu vier Buchungen:
- *   Getränke Bar Z-Bon #N     = Bar   − (Produkt-Spende, falls bar bezahlt)   → Barkasse
- *   Getränke Karte Z-Bon #N   = Karte − Trinkgeld − (Produkt-Spende, falls Karte) → PayPal
- *   Trinkgeld (Spende) Z-Bon #N = Trinkgeld                                    → PayPal
- *   Spende Z-Bon #N           = Produkt-Spende                                 → Barkasse/PayPal
- *
- * Die Töpfe stimmen per Konstruktion:  Barkasse-Summe = Bar,  PayPal-Summe = Karte.
- * ====================================================================== */
-
+/**
+ * POST /actions/zbon-import – Z-Bon (Zettle/POS) aufteilen und ins Journal
+ * buchen. Logik in includes/zbon.php (auch im Mitgliederbereich genutzt).
+ * Mit „preview" nur die Aufteilung zurückgeben, mit „force" trotz vorhandener
+ * Referenz erneut buchen.
+ */
 function vp_sync_action_zbon_import( WP_REST_Request $req ) {
-	if ( ! function_exists( 'jb_journal_add' ) ) {
-		return new WP_Error( 'no_fn', 'Buchhaltungs-Modul nicht geladen.', array( 'status' => 400 ) );
-	}
-	global $wpdb;
 	$b = vp_sync_json( $req );
-
-	$num  = preg_replace( '/[^0-9A-Za-z\-]/', '', (string) ( $b['nr'] ?? '' ) );
-	$dat  = sanitize_text_field( (string) ( $b['datum'] ?? current_time( 'Y-m-d' ) ) );
-	$f    = static function ( $v ) { return round( (float) str_replace( ',', '.', (string) $v ), 2 ); };
-	$bar  = $f( $b['bar'] ?? 0 );
-	$kar  = $f( $b['karte'] ?? 0 );
-	$tip  = $f( $b['trinkgeld'] ?? 0 );
-	$sp   = $f( $b['spende_produkt'] ?? 0 );
-	$spez = ( ( $b['spende_bezahlung'] ?? 'bar' ) === 'karte' ) ? 'karte' : 'bar';
-
-	if ( '' === $num ) {
-		return new WP_Error( 'bad_req', 'Z-Bon-Nummer fehlt.', array( 'status' => 400 ) );
-	}
-
-	$k_getr = sanitize_text_field( (string) ( $b['konto_getraenke'] ?? '4600' ) );
-	$k_sp   = sanitize_text_field( (string) ( $b['konto_spende'] ?? '4200' ) );
-	$k_tip  = sanitize_text_field( (string) ( $b['konto_trinkgeld'] ?? '4200' ) );
-
-	$sp_bar   = ( 'bar' === $spez ) ? $sp : 0.0;
-	$sp_karte = ( 'karte' === $spez ) ? $sp : 0.0;
-	$getr_bar   = round( $bar - $sp_bar, 2 );
-	$getr_karte = round( $kar - $tip - $sp_karte, 2 );
-
-	if ( $getr_bar < 0 || $getr_karte < 0 ) {
-		return new WP_Error( 'unplausibel', 'Trinkgeld/Spende übersteigen den Bar- bzw. Kartenumsatz.', array( 'status' => 400 ) );
-	}
-
-	$sph = static function ( $konto ) {
-		return function_exists( 'jb_konto_sphaere' ) ? jb_konto_sphaere( $konto ) : '';
-	};
-	$lines = array();
-	$mk = static function ( $label, $betrag, $konto, $quelle ) use ( $num, $dat, $sph, &$lines ) {
-		if ( round( $betrag, 2 ) <= 0 ) {
-			return;
-		}
-		$lines[] = array(
-			'label'   => $label . ' Z-Bon #' . $num,
-			'betrag'  => round( $betrag, 2 ),
-			'konto'   => $konto,
-			'sphaere' => $sph( $konto ),
-			'quelle'  => $quelle,
-		);
-	};
-	$mk( 'Getränke Bar',        $getr_bar,   $k_getr, 'Zettle-Bar' );
-	$mk( 'Getränke Karte',      $getr_karte, $k_getr, 'PayPal' );
-	$mk( 'Trinkgeld (Spende)',  $tip,        $k_tip,  'PayPal' );
-	$mk( 'Spende',              $sp,         $k_sp,   ( 'bar' === $spez ) ? 'Zettle-Bar' : 'PayPal' );
-
 	if ( ! empty( $b['preview'] ) ) {
-		return rest_ensure_response( array( 'ok' => true, 'preview' => true, 'lines' => $lines ) );
+		$z = vp_zbon_zeilen( $b );
+		return is_wp_error( $z ) ? $z : rest_ensure_response( array( 'ok' => true, 'preview' => true, 'lines' => $z['lines'] ) );
 	}
-
-	// Doppel-Import verhindern.
-	$ref    = 'ZBON-' . $num;
-	$exists = (int) $wpdb->get_var( $wpdb->prepare(
-		"SELECT COUNT(*) FROM {$wpdb->prefix}jb_buchungen WHERE beleg_referenz = %s", $ref
-	) );
-	if ( $exists && empty( $b['force'] ) ) {
-		return new WP_Error( 'schon_gebucht', 'Z-Bon #' . $num . ' ist bereits gebucht (' . $exists . ' Zeilen). „force" zum erneuten Buchen.', array( 'status' => 409 ) );
+	$z = vp_zbon_buchen( $b );
+	if ( is_wp_error( $z ) ) {
+		return $z;
 	}
-
-	$ids = array();
-	foreach ( $lines as $ln ) {
-		$ids[] = (int) jb_journal_add( array(
-			'buchung_datum' => $dat,
-			'betrag'        => $ln['betrag'],
-			'kategorie'     => $ln['label'],
-			'beschreibung'  => $ln['label'],
-			'quelle'        => $ln['quelle'],
-			'konto'         => $ln['konto'],
-			'sphaere'       => $ln['sphaere'],
-			'gegenpartei'   => 'Z-Bon #' . $num,
-			'beleg_referenz'=> $ref,
-		) );
-	}
-	return rest_ensure_response( array( 'ok' => true, 'preview' => false, 'lines' => $lines, 'booked_ids' => $ids ) );
+	return rest_ensure_response( array( 'ok' => true, 'preview' => false, 'lines' => $z['lines'], 'booked_ids' => $z['booked_ids'] ) );
 }
 
 /**
