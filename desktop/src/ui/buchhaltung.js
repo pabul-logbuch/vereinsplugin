@@ -614,6 +614,8 @@ function zuUmbuchungForm(d, ids) {
   return card;
 }
 
+const anzahlVorgemerkt = (zeilen) => zeilen.filter((z) => z.vorgemerkt).length;
+
 function bankCsvForm(d) {
   const card = el('div', { class: 'card' });
   card.append(el('h2', {}, 'Bank-CSV importieren'));
@@ -623,15 +625,37 @@ function bankCsvForm(d) {
   const geld = kontoSelect(d.konten, bhVorgabe(d), 'geld', null);
   const out = el('div', {});
   const vor = el('button', { class: 'small', type: 'button' }, 'Vorschau');
-  card.append(el('form', { class: 'detail' }, 'CSV', ta, 'Trenner', delim, labelMitHilfe('Umsätze gehören zu', 'Das Geldkonto, von dem der Kontoauszug stammt.'), geld), el('div', { class: 'form-actions' }, vor), out);
+  // Stand des Geldkontos: neueste Bankbuchung aus den lokalen Daten.
+  const stand = el('p', { class: 'muted' });
+  const zeigStand = () => {
+    const bank = (d.buchungen || []).filter((b) => b.quelle === 'Bank KSK' && String(b.geldkonto || '') === String(geld.value));
+    const letzte = bank.reduce((m, b) => (!m || String(b.buchung_datum) > String(m.buchung_datum) ? b : m), null);
+    const dt = (s) => String(s).slice(8, 10) + '.' + String(s).slice(5, 7) + '.' + String(s).slice(0, 4);
+    stand.textContent = letzte
+      ? `Neueste Bankbuchung auf diesem Konto: ${dt(letzte.buchung_datum)} · ${letzte.gegenpartei || ''} · ${eur(letzte.betrag)}. Nächsten Export ab ${dt(letzte.buchung_datum)} (einschließlich) erstellen – die Überschneidung erkennt der Import und überspringt sie.`
+      : 'Für dieses Konto wurde noch nichts importiert.';
+  };
+  geld.addEventListener('change', zeigStand);
+  zeigStand();
+  card.append(el('form', { class: 'detail' }, 'CSV', ta, 'Trenner', delim, labelMitHilfe('Umsätze gehören zu', 'Das Geldkonto, von dem der Kontoauszug stammt.'), geld), stand, el('div', { class: 'form-actions' }, vor), out);
   let zeilen = [];
   vor.addEventListener('click', async () => {
     out.innerHTML = '';
     try {
-      zeilen = ((await call(api.action.run('bank-csv', { csv: ta.value, delim: delim.value, geldkonto: geld.value }))).rows) || [];
+      const res = await call(api.action.run('bank-csv', { csv: ta.value, delim: delim.value, geldkonto: geld.value }));
+      zeilen = res.rows || [];
       if (!zeilen.length) return out.append(el('div', { class: 'note warn' }, 'Keine verwertbaren Zeilen erkannt.'));
-      // Abgleich vom Server: dublette (schon im Journal), auslage (Erstattung), beleg (passender Beleg).
-      zeilen.forEach((z) => { z.nimm = !z.dublette; z.nimmAuslage = !!z.auslage; z.nimmBeleg = !!z.beleg; });
+      const dt = (s) => (s ? s.slice(8, 10) + '.' + s.slice(5, 7) + '.' + s.slice(0, 4) : '');
+      const daten = zeilen.map((z) => z.datum).sort();
+      const imp0 = res.stand && res.stand.import;
+      out.append(el('p', { class: 'muted' }, `${zeilen.length} Zeilen vom ${dt(daten[0])} bis ${dt(daten[daten.length - 1])}.`
+        + (imp0 ? ` Letzter Import: Umsätze ${dt(imp0.von)} bis ${dt(imp0.bis)} (am ${dt(imp0.zeit.slice(0, 10))}).` : '')
+        + (res.ab ? ` Nächsten Export ab ${dt(res.ab)} (einschließlich) – Überschneidungen werden erkannt.` : '')));
+      if (res.luecke) out.append(el('div', { class: 'note warn' }, res.luecke));
+      // Abgleich vom Server: dublette (schon im Journal), auslage (Erstattung), beleg (passender Beleg),
+      // vorgemerkt (bei der Bank noch nicht gebucht).
+      zeilen.forEach((z) => { z.nimm = !z.dublette && !z.vorgemerkt; z.nimmAuslage = !!z.auslage; z.nimmBeleg = !!z.beleg; });
+      if (anzahlVorgemerkt(zeilen)) out.append(el('div', { class: 'note warn' }, `${anzahlVorgemerkt(zeilen)} Umsätze sind bei der Bank nur vorgemerkt und werden nicht importiert – sie kommen mit dem nächsten Export.`));
       const anz = (k) => zeilen.filter((z) => z[k]).length;
       if (anz('dublette') || anz('auslage') || anz('beleg')) {
         out.append(el('div', { class: 'note' }, `Abgleich: ${anz('dublette')} schon im Journal (werden übersprungen), ${anz('auslage')} Auslagen-Erstattungen, ${anz('beleg')} passende Belege. Bitte prüfen – Haken lassen sich ändern.`));
@@ -643,12 +667,13 @@ function bankCsvForm(d) {
       zeilen.forEach((z, i) => {
         const info = el('td', {}, `${z.name || ''} — ${z.zweck || ''}`);
         if (z.dublette) info.append(el('div', { class: 'muted' }, `schon im Journal (Buchung #${z.dublette})`));
+        if (z.vorgemerkt) info.append(el('div', { class: 'muted' }, 'nur vorgemerkt'));
         if (z.auslage) {
           info.append(el('div', {}, haken(true, (e) => { zeilen[i].nimmAuslage = e.target.checked; }, `${z.auslage.text} (erkannt an: ${z.auslage.grund})`)));
           info.append(el('div', { class: 'muted' }, 'Ausgabe ist schon gebucht – diese Zeile gleicht nur das Auslagen-Konto aus.'));
         }
         if (z.beleg) info.append(el('div', {}, haken(true, (e) => { zeilen[i].nimmBeleg = e.target.checked; }, `${z.beleg.text} anhängen`)));
-        tb.append(el('tr', z.dublette ? { style: 'opacity:.6' } : {},
+        tb.append(el('tr', z.dublette || z.vorgemerkt ? { style: 'opacity:.6' } : {},
           el('td', {}, el('input', { type: 'checkbox', checked: z.nimm ? '' : null, onchange: (e) => { zeilen[i].nimm = e.target.checked; } })),
           el('td', {}, z.datum),
           el('td', { style: 'text-align:right;color:' + (z.betrag < 0 ? 'var(--err-ink)' : 'var(--accent)') }, eur(z.betrag)),
@@ -663,7 +688,7 @@ function bankCsvForm(d) {
         try {
           const rows = zeilen.map((z) => ({
             datum: z.datum, betrag: z.betrag, name: z.name, zweck: z.zweck, konto: z.konto, geldkonto: geld.value,
-            skip: !z.nimm,
+            skip: !z.nimm, vorgemerkt: !!z.vorgemerkt,
             auslage_id: z.auslage && z.nimmAuslage ? z.auslage.id : 0,
             beleg_id: z.beleg && z.nimmBeleg ? z.beleg.id : 0,
           }));

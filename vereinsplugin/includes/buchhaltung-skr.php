@@ -701,6 +701,7 @@ function vp_bh_import() {
 		$ausl      = (array) ( $_POST['auslage'] ?? array() );
 		$bel       = (array) ( $_POST['beleg'] ?? array() );
 		$n         = array( 'normal' => 0, 'auslage' => 0, 'beleg' => 0, 'weg' => 0 );
+		$gebucht   = array();
 		foreach ( (array) $rows as $i => $r ) {
 			if ( empty( $nimm[ $i ] ) ) {
 				$n['weg']++;
@@ -710,7 +711,15 @@ function vp_bh_import() {
 			$res        = vp_bank_zeile_buchen( $r, $geldkonto, (int) ( $ausl[ $i ] ?? 0 ), (int) ( $bel[ $i ] ?? 0 ) );
 			if ( $res['id'] ) {
 				$n[ $res['art'] ]++;
+				$gebucht[] = $r;
 			}
+		}
+		if ( function_exists( 'vp_bank_protokoll_add' ) ) {
+			// Als abgedeckt zählt alles außer vorgemerkten Umsätzen.
+			$abgedeckt = array_values( array_filter( (array) $rows, static function ( $r ) {
+				return empty( $r['vorgemerkt'] );
+			} ) );
+			vp_bank_protokoll_add( $geldkonto, $abgedeckt, $gebucht, 'web' );
 		}
 		if ( function_exists( 'vp_bh_cache_leeren' ) ) {
 			vp_bh_cache_leeren();
@@ -732,13 +741,29 @@ function vp_bh_import() {
 	$konten = jb_konten_all();
 
 	if ( 'preview' === $step ) {
-		$zahl = array( 'dublette' => 0, 'auslage' => 0, 'beleg' => 0 );
+		$zahl = array( 'dublette' => 0, 'auslage' => 0, 'beleg' => 0, 'vorgemerkt' => 0 );
 		foreach ( $parsed as $r ) {
-			$zahl['dublette'] += $r['dublette'] ? 1 : 0;
-			$zahl['auslage']  += $r['auslage'] ? 1 : 0;
-			$zahl['beleg']    += $r['beleg'] ? 1 : 0;
+			$zahl['dublette']   += $r['dublette'] ? 1 : 0;
+			$zahl['auslage']    += $r['auslage'] ? 1 : 0;
+			$zahl['beleg']      += $r['beleg'] ? 1 : 0;
+			$zahl['vorgemerkt'] += ! empty( $r['vorgemerkt'] ) ? 1 : 0;
 		}
-		$out .= '<form method="post"><h3>' . esc_html__( 'Vorschau – Konten prüfen, dann importieren', 'vereinsplugin' ) . '</h3>';
+		$daten = array_column( $parsed, 'datum' );
+		$out  .= '<form method="post"><h3>' . esc_html__( 'Vorschau – Konten prüfen, dann importieren', 'vereinsplugin' ) . '</h3>';
+		$out  .= '<p class="vp-muted">' . esc_html( sprintf(
+			/* translators: 1: rows, 2: from, 3: to */
+			__( '%1$d Zeilen vom %2$s bis %3$s.', 'vereinsplugin' ),
+			count( $parsed ),
+			mysql2date( 'd.m.Y', min( $daten ) ),
+			mysql2date( 'd.m.Y', max( $daten ) )
+		) ) . '</p>';
+		$luecke = function_exists( 'vp_bank_luecke' ) ? vp_bank_luecke( $parsed, $geldkonto ) : '';
+		if ( $luecke ) {
+			$out .= '<div class="vp-note vp-note-warn">' . esc_html( $luecke ) . '</div>';
+		}
+		if ( $zahl['vorgemerkt'] ) {
+			$out .= '<div class="vp-note vp-note-warn">' . esc_html( sprintf( __( '%d Umsätze sind bei der Bank nur vorgemerkt und werden nicht importiert – sie kommen mit dem nächsten Export, sobald sie gebucht sind.', 'vereinsplugin' ), $zahl['vorgemerkt'] ) ) . '</div>';
+		}
 		if ( array_sum( $zahl ) ) {
 			$out .= '<div class="vp-note">' . esc_html( sprintf(
 				/* translators: 1: duplicates, 2: reimbursements, 3: receipts */
@@ -765,8 +790,12 @@ function vp_bh_import() {
 			$sel .= '</select>';
 
 			$hinweis = '';
+			$aus = $r['dublette'] || ! empty( $r['vorgemerkt'] );
 			if ( $r['dublette'] ) {
 				$hinweis .= '<br><span class="vp-badge">' . esc_html( sprintf( __( 'schon im Journal (Buchung #%d)', 'vereinsplugin' ), $r['dublette'] ) ) . '</span>';
+			}
+			if ( ! empty( $r['vorgemerkt'] ) ) {
+				$hinweis .= '<br><span class="vp-badge">' . esc_html__( 'nur vorgemerkt', 'vereinsplugin' ) . '</span>';
 			}
 			if ( $r['auslage'] ) {
 				$hinweis .= '<br><label><input type="checkbox" name="auslage[' . (int) $i . ']" value="' . (int) $r['auslage']['id'] . '" checked> '
@@ -779,9 +808,9 @@ function vp_bh_import() {
 			}
 			$out .= sprintf(
 				'<tr%s><td><input type="checkbox" name="nimm[%d]" value="1"%s aria-label="%s"></td><td>%s</td><td>%s<br><span class="vp-muted">%s</span>%s</td><td style="text-align:right;%s">%s €</td><td>%s</td></tr>',
-				$r['dublette'] ? ' style="opacity:.6"' : '',
+				$aus ? ' style="opacity:.6"' : '',
 				(int) $i,
-				$r['dublette'] ? '' : ' checked',
+				$aus ? '' : ' checked',
 				esc_attr__( 'Diese Zeile buchen', 'vereinsplugin' ),
 				esc_html( $r['datum'] ),
 				esc_html( $r['name'] ),
@@ -812,7 +841,37 @@ function vp_bh_import() {
 			<select name="delim"><option value=";">;  (Sparkasse)</option><option value=",">,</option></select></label></p>
 		<?php if ( function_exists( 'vp_bh_konto_options' ) ) : ?>
 			<p><label><?php esc_html_e( 'Diese Umsätze gehören zum Konto', 'vereinsplugin' ); ?>
-				<select name="geldkonto"><?php echo vp_bh_konto_options( $geldkonto, 'geld' ); // phpcs:ignore ?></select></label></p>
+				<select name="geldkonto" id="vp-imp-geldkonto"><?php echo vp_bh_konto_options( $geldkonto, 'geld' ); // phpcs:ignore ?></select></label></p>
+			<?php if ( function_exists( 'vp_bank_stand_html' ) && function_exists( 'vp_bh_konto_info' ) ) : ?>
+				<div class="vp-note" id="vp-imp-stand">
+					<?php
+					foreach ( vp_bh_konto_info() as $nr => $k ) {
+						if ( 'geld' !== $k['typ'] && (string) $nr !== (string) $geldkonto ) {
+							continue;
+						}
+						printf(
+							'<div data-konto="%s"%s>%s</div>',
+							esc_attr( $nr ),
+							(string) $nr === (string) $geldkonto ? '' : ' hidden',
+							vp_bank_stand_html( $nr ) // phpcs:ignore
+						);
+					}
+					?>
+				</div>
+				<script>
+				(function () {
+					var s = document.getElementById('vp-imp-geldkonto'), box = document.getElementById('vp-imp-stand');
+					if (!s || !box) return;
+					function zeig() {
+						var any = false;
+						box.querySelectorAll('[data-konto]').forEach(function (d) { d.hidden = d.getAttribute('data-konto') !== s.value; any = any || !d.hidden; });
+						box.hidden = !any;
+					}
+					s.addEventListener('change', zeig);
+					zeig();
+				})();
+				</script>
+			<?php endif; ?>
 		<?php endif; ?>
 		<p><button class="vp-btn vp-btn-primary" name="vp_imp_preview" value="1"><?php esc_html_e( 'Vorschau', 'vereinsplugin' ); ?></button></p>
 	</form>
@@ -865,10 +924,11 @@ function vp_bh_parse_bank_csv( $raw, $delim = ';' ) {
 	$i_name   = $find( array( 'beguenstigter/zahlungspflichtiger', 'beguenstigter', 'begünstigter', 'zahlungspflichtiger', 'name', 'auftraggeber/empfänger', 'auftraggeber', 'empfänger', 'empfaenger' ) );
 	$i_zweck  = $find( array( 'verwendungszweck', 'zweck', 'buchungstext', 'vwz' ) );
 	$i_iban   = $find( array( 'kontonummer/iban', 'iban', 'kontonummer' ) );
+	$i_info   = $find( array( 'info' ) ); // Sparkasse: „Umsatz gebucht“ / „Umsatz vorgemerkt“
 
 	// Fallback: reine Spaltenreihenfolge Datum;Betrag;Name;Zweck
 	if ( $i_datum < 0 && $i_betrag < 0 ) {
-		$i_datum = 0; $i_betrag = 1; $i_name = 2; $i_zweck = 3; $i_iban = -1;
+		$i_datum = 0; $i_betrag = 1; $i_name = 2; $i_zweck = 3; $i_iban = -1; $i_info = -1;
 		array_unshift( $lines, implode( $delim, $head ) ); // erste Zeile war doch Daten
 	}
 	if ( $i_betrag < 0 ) {
@@ -894,6 +954,7 @@ function vp_bh_parse_bank_csv( $raw, $delim = ';' ) {
 			'name'   => $name,
 			'zweck'  => $zweck,
 			'iban'   => $i_iban >= 0 ? trim( $c[ $i_iban ] ?? '' ) : '',
+			'info'   => $i_info >= 0 ? trim( $c[ $i_info ] ?? '' ) : '',
 			'konto'  => jb_regel_konto_fuer( $name . ' ' . $zweck ),
 		);
 	}
