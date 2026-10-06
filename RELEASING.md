@@ -63,23 +63,21 @@ Ab dann laufen Updates automatisch.
    hochzählen:
    - Header `* Version:           0.2.0`
    - `define( 'VP_VERSION', '0.2.0' );`
-3. Taggen und pushen:
-
-   ```bash
-   git add -A && git commit -m "Version 0.2.0"
-   git tag v0.2.0
-   git push origin main --tags
-   ```
-
+3. Nach `main` pushen bzw. den Pull Request mergen. **Fertig – kein Tag nötig.**
 4. Der Workflow [`.github/workflows/release.yml`](.github/workflows/release.yml)
-   läuft automatisch: er prüft, dass Tag und Header-Version übereinstimmen, baut
-   `vereinsplugin.zip` (mit korrektem Ordner `vereinsplugin/` darin) und hängt es
-   an ein neues GitHub-Release `v0.2.0`.
+   läuft bei jedem Push nach `main`: Gibt es zur Header-Version noch keinen Tag
+   (z. B. `v0.2.0`), legt er Tag und GitHub-Release an und hängt
+   `vereinsplugin.zip` (mit korrektem Ordner `vereinsplugin/` darin) an. Ist die
+   Version unverändert, passiert nichts.
+
+   Von Hand taggen geht weiterhin (`git tag v0.2.0 && git push origin v0.2.0`);
+   dann prüft der Workflow, dass Tag und Header-Version übereinstimmen.
 5. Innerhalb einiger Stunden (oder sofort per **Plugins → Aktualisieren →
    „Nach Updates suchen“**) zeigt jede Website das Update an.
 
-> Der Tag muss mit `v` beginnen (`v0.2.0`), die Version im Plugin-Header **ohne**
-> `v` (`0.2.0`). Stimmen sie nicht überein, bricht der Workflow mit Fehler ab.
+> Die Version im Plugin-Header steht **ohne** `v` (`0.2.0`), der Tag mit `v`
+> (`v0.2.0`). Wer von Hand taggt und sich vertippt, bekommt einen Fehler im
+> Workflow.
 
 ---
 
