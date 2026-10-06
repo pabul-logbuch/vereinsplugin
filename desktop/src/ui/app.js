@@ -989,7 +989,7 @@ async function showZbon() {
   renderNav();
   view.innerHTML = '';
   view.append(el('h1', {}, 'Z-Bon erfassen'));
-  view.append(el('p', { class: 'sub' }, 'Zettle-Tagesbon in bis zu vier Buchungen aufteilen (Getränke Bar/Karte, Trinkgeld, Spende). Bar geht auf die Barkasse, Karte und Trinkgeld auf PayPal – Zettle und PayPal sind dasselbe Konto.'));
+  view.append(el('p', { class: 'sub' }, 'Zettle-Tagesbon in bis zu vier Buchungen aufteilen (Getränke Bar/Karte, Trinkgeld, Spende) – von Hand oder per „Aus Zettle holen“. Bar geht auf die Barkasse, Karte und Trinkgeld auf PayPal – Zettle und PayPal sind dasselbe Konto.'));
 
   let konten = [];
   let booked = [];
@@ -1020,27 +1020,62 @@ async function showZbon() {
   const bar = moneyInput('', { placeholder: 'Zahlungsart Bar' });
   const karte = moneyInput('', { placeholder: 'Zahlungsart Karte' });
   const tip = moneyInput(0, { placeholder: 'Trinkgelder' });
-  const spende = moneyInput(0, { placeholder: 'Produkt „Spende"' });
-  const spWeg = selectEl([['bar', 'bar bezahlt'], ['karte', 'per Karte bezahlt']], 'bar');
+  const spB = moneyInput(0, { placeholder: 'Spende bar' });
+  const spK = moneyInput(0, { placeholder: 'Spende Karte' });
   const kGetr = pick('4600');
   const kSpende = pick('4200');
   const kTip = pick('4200');
   f.append(
     'Z-Bon-Nr', nr, 'Datum', datum,
     'Bar (Zahlungsart)', bar, 'Karte (Zahlungsart)', karte,
-    'Trinkgeld', tip, 'Produkt „Spende"', spende, 'Spende bezahlt', spWeg,
+    'Trinkgeld (Karte)', tip, 'Spende – bar bezahlt', spB, 'Spende – per Karte', spK,
     'Konto Getränke', kGetr, 'Konto Spende', kSpende, 'Konto Trinkgeld', kTip
   );
   enterAdvances(f);
-  view.append(el('div', { class: 'card' }, f));
+
+  // Aus Zettle holen (API-Schlüssel wird im Mitgliederbereich hinterlegt).
+  let zMeta = null;
+  const zTag = el('input', { type: 'date', value: datum.value });
+  const zBtn = el('button', { class: 'small', type: 'button' }, 'Aus Zettle holen');
+  const zInfo = el('div', {});
+  const zBestand = el('input', { type: 'checkbox', checked: '' });
+  const zBestandLabel = el('label', { hidden: '' }, zBestand, ' Verkaufte Getränke aus dem Getränkebestand abbuchen');
+  const setNum = (inp, x) => { inp.value = x ? String(x).replace('.', ',') : ''; };
+  zBtn.addEventListener('click', async () => {
+    zBtn.disabled = true;
+    zInfo.innerHTML = '';
+    try {
+      const r = await call(api.action.run('zettle-tag', { tag: zTag.value }));
+      const z = r.zusammenfassung;
+      setNum(bar, z.bar); setNum(karte, z.karte); setNum(tip, z.trinkgeld); setNum(spB, z.spende_bar); setNum(spK, z.spende_karte);
+      datum.value = r.tag;
+      zMeta = { von: r.von, bis: r.bis, mengen: z.mengen };
+      zInfo.append(el('p', { class: 'muted' }, `${z.anzahl} Verkäufe von ${r.von} bis ${r.bis}. Bitte mit dem Z-Bon vergleichen, dann buchen.`));
+      const warn = [];
+      if (!z.anzahl) warn.push('In diesem Zeitraum gibt es keine Verkäufe.');
+      (r.ueberschneidung || []).forEach((u) => warn.push(`Achtung: Dieser Zeitraum ist schon als Z-Bon #${u.nr} gebucht (${u.von} – ${u.bis}).`));
+      if (z.erstattungen) warn.push(`${z.erstattungen} Erstattung(en) sind bereits abgezogen.`);
+      if (z.trinkgeld_bar) warn.push(`${eur(z.trinkgeld_bar)} Trinkgeld wurde bar gegeben – es steckt im Bar-Betrag.`);
+      Object.entries(z.sonstige || {}).forEach(([typ, summe]) => warn.push(`${eur(summe)} per ${typ} – weder Barkasse noch PayPal, wird nicht gebucht.`));
+      warn.forEach((w) => zInfo.append(el('div', { class: 'note warn' }, w)));
+      zBestandLabel.hidden = !Object.keys(z.mengen || {}).length;
+      drawPreview();
+    } catch (e) {
+      zInfo.append(el('div', { class: 'note err' }, e.message));
+    } finally {
+      zBtn.disabled = false;
+    }
+  });
+  view.append(el('div', { class: 'card' }, el('div', { class: 'form-actions' }, 'Kassentag ', zTag, ' ', zBtn), zInfo));
+  view.append(el('div', { class: 'card' }, f, zBestandLabel));
 
   const prev = el('div', {});
   view.append(prev);
   const num = (x) => parseNum(x.value);
 
   function computeLines() {
-    const spBar = spWeg.value === 'bar' ? num(spende) : 0;
-    const spKarte = spWeg.value === 'karte' ? num(spende) : 0;
+    const spBar = num(spB);
+    const spKarte = num(spK);
     const getrBar = +(num(bar) - spBar).toFixed(2);
     const getrKarte = +(num(karte) - num(tip) - spKarte).toFixed(2);
     const kn = (v) => (kOpts.find((o) => o[0] === v) || [v, v])[1];
@@ -1048,7 +1083,9 @@ async function showZbon() {
     if (getrBar > 0) lines.push(['Getränke Bar', getrBar, kn(kGetr.value), 'Barkasse']);
     if (getrKarte > 0) lines.push(['Getränke Karte', getrKarte, kn(kGetr.value), 'PayPal / Zettle']);
     if (num(tip) > 0) lines.push(['Trinkgeld (Spende)', +num(tip).toFixed(2), kn(kTip.value), 'PayPal / Zettle']);
-    if (num(spende) > 0) lines.push(['Spende', +num(spende).toFixed(2), kn(kSpende.value), spWeg.value === 'bar' ? 'Barkasse' : 'PayPal / Zettle']);
+    const beide = spBar > 0 && spKarte > 0;
+    if (spBar > 0) lines.push([beide ? 'Spende bar' : 'Spende', +spBar.toFixed(2), kn(kSpende.value), 'Barkasse']);
+    if (spKarte > 0) lines.push([beide ? 'Spende Karte' : 'Spende', +spKarte.toFixed(2), kn(kSpende.value), 'PayPal / Zettle']);
     return { lines, getrBar, getrKarte };
   }
 
@@ -1082,10 +1119,12 @@ async function showZbon() {
     try {
       const r = await call(api.action.run('zbon-import', {
         nr: nr.value, datum: datum.value, bar: num(bar), karte: num(karte), trinkgeld: num(tip),
-        spende_produkt: num(spende), spende_bezahlung: spWeg.value,
+        spende_bar: num(spB), spende_karte: num(spK),
         konto_getraenke: kGetr.value, konto_spende: kSpende.value, konto_trinkgeld: kTip.value,
+        ...(zMeta ? { zettle_von: zMeta.von, zettle_bis: zMeta.bis, mengen: zMeta.mengen, bestand: !zBestandLabel.hidden && zBestand.checked } : {}),
       }));
-      toast(`${(r.booked_ids || []).length} Buchung(en) angelegt.`);
+      const bs = r.bestand;
+      toast(`${(r.booked_ids || []).length} Buchung(en) angelegt.` + (bs ? (bs.schon ? ' Bestand war schon abgebucht.' : ` Bestand: ${bs.gebucht} Produkte abgebucht.` + (bs.nicht_gefunden.length ? ` Nicht gefunden: ${bs.nicht_gefunden.join(', ')}.` : '')) : ''));
       await runSyncQuiet();
       showZbon();
     } catch (e) {
@@ -1093,7 +1132,7 @@ async function showZbon() {
     }
   }
 
-  [nr, bar, karte, tip, spende, spWeg, kGetr, kSpende, kTip].forEach((n) => n.addEventListener('input', drawPreview));
+  [nr, bar, karte, tip, spB, spK, kGetr, kSpende, kTip].forEach((n) => n.addEventListener('input', drawPreview));
   f.addEventListener('submit', (e) => { e.preventDefault(); book(); });
   drawPreview();
 
