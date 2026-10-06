@@ -989,7 +989,7 @@ async function showZbon() {
   renderNav();
   view.innerHTML = '';
   view.append(el('h1', {}, 'Z-Bon erfassen'));
-  view.append(el('p', { class: 'sub' }, 'Zettle-Tagesbon in bis zu vier Buchungen aufteilen (Getränke Bar/Karte, Trinkgeld, Spende) – von Hand oder per „Aus Zettle holen“. Bar geht auf die Barkasse, Karte und Trinkgeld auf PayPal – Zettle und PayPal sind dasselbe Konto.'));
+  view.append(el('p', { class: 'sub' }, 'Zettle-Tagesbon in bis zu vier Buchungen aufteilen (Getränke Bar/Karte, Trinkgeld, Spende) und das Z-Bon-PDF als Beleg anhängen. Bar geht auf die Barkasse, Karte und Trinkgeld auf PayPal – Zettle und PayPal sind dasselbe Konto.'));
 
   let konten = [];
   let booked = [];
@@ -1033,41 +1033,9 @@ async function showZbon() {
   );
   enterAdvances(f);
 
-  // Aus Zettle holen (API-Schlüssel wird im Mitgliederbereich hinterlegt).
-  let zMeta = null;
-  const zTag = el('input', { type: 'date', value: datum.value });
-  const zBtn = el('button', { class: 'small', type: 'button' }, 'Aus Zettle holen');
-  const zInfo = el('div', {});
-  const zBestand = el('input', { type: 'checkbox', checked: '' });
-  const zBestandLabel = el('label', { hidden: '' }, zBestand, ' Verkaufte Getränke aus dem Getränkebestand abbuchen');
-  const setNum = (inp, x) => { inp.value = x ? String(x).replace('.', ',') : ''; };
-  zBtn.addEventListener('click', async () => {
-    zBtn.disabled = true;
-    zInfo.innerHTML = '';
-    try {
-      const r = await call(api.action.run('zettle-tag', { tag: zTag.value }));
-      const z = r.zusammenfassung;
-      setNum(bar, z.bar); setNum(karte, z.karte); setNum(tip, z.trinkgeld); setNum(spB, z.spende_bar); setNum(spK, z.spende_karte);
-      datum.value = r.tag;
-      zMeta = { von: r.von, bis: r.bis, mengen: z.mengen };
-      zInfo.append(el('p', { class: 'muted' }, `${z.anzahl} Verkäufe von ${r.von} bis ${r.bis}. Bitte mit dem Z-Bon vergleichen, dann buchen.`));
-      const warn = [];
-      if (!z.anzahl) warn.push('In diesem Zeitraum gibt es keine Verkäufe.');
-      (r.ueberschneidung || []).forEach((u) => warn.push(`Achtung: Dieser Zeitraum ist schon als Z-Bon #${u.nr} gebucht (${u.von} – ${u.bis}).`));
-      if (z.erstattungen) warn.push(`${z.erstattungen} Erstattung(en) sind bereits abgezogen.`);
-      if (z.trinkgeld_bar) warn.push(`${eur(z.trinkgeld_bar)} Trinkgeld wurde bar gegeben – es steckt im Bar-Betrag.`);
-      Object.entries(z.sonstige || {}).forEach(([typ, summe]) => warn.push(`${eur(summe)} per ${typ} – weder Barkasse noch PayPal, wird nicht gebucht.`));
-      warn.forEach((w) => zInfo.append(el('div', { class: 'note warn' }, w)));
-      zBestandLabel.hidden = !Object.keys(z.mengen || {}).length;
-      drawPreview();
-    } catch (e) {
-      zInfo.append(el('div', { class: 'note err' }, e.message));
-    } finally {
-      zBtn.disabled = false;
-    }
-  });
-  view.append(el('div', { class: 'card' }, el('div', { class: 'form-actions' }, 'Kassentag ', zTag, ' ', zBtn), zInfo));
-  view.append(el('div', { class: 'card' }, f, zBestandLabel));
+  // Z-Bon als Beleg (PDF aus Zettle oder Foto) – landet in Nextcloud an allen Buchungen des Bons.
+  const zDatei = el('input', { type: 'file', accept: 'application/pdf,image/*' });
+  view.append(el('div', { class: 'card' }, f, el('label', {}, 'Z-Bon als Beleg (PDF oder Foto) ', zDatei)));
 
   const prev = el('div', {});
   view.append(prev);
@@ -1117,14 +1085,22 @@ async function showZbon() {
   async function book() {
     if (!nr.value.trim()) return toast('Z-Bon-Nummer fehlt.', true);
     try {
+      let belegPfad = '';
+      const datei = zDatei.files && zDatei.files[0];
+      if (datei) {
+        const stempel = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+        const ext = (datei.name.split('.').pop() || 'pdf').toLowerCase().replace(/[^a-z0-9]/g, '') || 'pdf';
+        const pfad = `Belege/${String(datum.value).slice(0, 4)}/Z-Bon/ZBON-${String(nr.value).replace(/[^0-9A-Za-z-]/g, '')}_${stempel}.${ext}`;
+        const up = await call(api.nc.belegUpload(pfad, { name: datei.name, buffer: new Uint8Array(await datei.arrayBuffer()) }, {}));
+        belegPfad = (up && up.path) || pfad;
+      }
       const r = await call(api.action.run('zbon-import', {
         nr: nr.value, datum: datum.value, bar: num(bar), karte: num(karte), trinkgeld: num(tip),
         spende_bar: num(spB), spende_karte: num(spK),
         konto_getraenke: kGetr.value, konto_spende: kSpende.value, konto_trinkgeld: kTip.value,
-        ...(zMeta ? { zettle_von: zMeta.von, zettle_bis: zMeta.bis, mengen: zMeta.mengen, bestand: !zBestandLabel.hidden && zBestand.checked } : {}),
+        beleg_pfad: belegPfad,
       }));
-      const bs = r.bestand;
-      toast(`${(r.booked_ids || []).length} Buchung(en) angelegt.` + (bs ? (bs.schon ? ' Bestand war schon abgebucht.' : ` Bestand: ${bs.gebucht} Produkte abgebucht.` + (bs.nicht_gefunden.length ? ` Nicht gefunden: ${bs.nicht_gefunden.join(', ')}.` : '')) : ''));
+      toast(`${(r.booked_ids || []).length} Buchung(en) angelegt.` + (belegPfad ? ' Z-Bon als Beleg abgelegt.' : ''));
       await runSyncQuiet();
       showZbon();
     } catch (e) {
