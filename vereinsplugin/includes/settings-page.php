@@ -404,7 +404,7 @@ function vp_render_settings_page() {
 				</tr>
 			</table>
 
-			<?php submit_button(); ?>
+			<?php submit_button( null, 'primary', 'vp_save_settings' ); ?>
 		</form>
 
 		<hr>
