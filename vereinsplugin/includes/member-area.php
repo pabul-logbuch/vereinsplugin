@@ -791,7 +791,7 @@ function vp_render_members_list() {
 	echo '<h2>' . esc_html__( 'Mitglieder', 'vereinsplugin' ) . ' <span class="vp-muted">(' . (int) count( $rows )
 		. ( count( $rows ) !== $total ? ' / ' . (int) $total : '' ) . ')</span></h2>';
 
-	if ( current_user_can( 'manage_options' ) ) {
+	if ( current_user_can( 'vp_manage_members' ) || current_user_can( 'manage_options' ) ) {
 		echo '<p><a class="vp-btn" href="' . esc_url( admin_url( 'admin.php?page=wunschliste-mitglied' ) ) . '">' . esc_html__( 'Mitglied manuell anlegen', 'vereinsplugin' ) . '</a> ';
 		echo '<a class="vp-btn" href="' . esc_url( admin_url( 'admin.php?page=wunschliste-mitglieder-import' ) ) . '">' . esc_html__( 'CSV-Import', 'vereinsplugin' ) . '</a></p>';
 	}
@@ -1140,7 +1140,9 @@ function vp_render_auslagen_pruefen_section() {
 			echo vp_auslage_girocode_html( $r ); // phpcs:ignore WordPress.Security.EscapeOutput -- baut escaped HTML
 		}
 		echo '<div class="vp-auslage-actions">';
-		if ( 'ausstehend' === $r->status ) {
+		if ( 'ausstehend' === $r->status && function_exists( 'vp_auslage_entscheiden_ok' ) && ! vp_auslage_entscheiden_ok( $r ) ) {
+			echo '<span class="vp-muted">' . esc_html( vp_auslage_selbst_text() ) . '</span>';
+		} elseif ( 'ausstehend' === $r->status ) {
 			echo '<input type="text" class="vp-jb-notiz" placeholder="' . esc_attr__( 'Notiz / Ablehnungsgrund (optional)', 'vereinsplugin' ) . '">';
 			echo '<button type="button" class="vp-btn vp-btn-primary vp-jb-decide" data-do="approve">' . esc_html__( 'Genehmigen', 'vereinsplugin' ) . '</button> ';
 			echo '<button type="button" class="vp-btn vp-btn-danger vp-jb-decide" data-do="reject">' . esc_html__( 'Ablehnen', 'vereinsplugin' ) . '</button>';

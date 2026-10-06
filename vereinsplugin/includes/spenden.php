@@ -644,6 +644,7 @@ function vp_render_spenden_section() {
 		return '<div class="vp-note vp-note-error">' . esc_html__( 'Keine Berechtigung.', 'vereinsplugin' ) . '</div>';
 	}
 	vp_spenden_maybe_upgrade();
+	$nur_lesen = function_exists( 'vp_kasse_nur_lesen_hinweis' ) ? vp_kasse_nur_lesen_hinweis() : '';
 
 	global $wpdb;
 	$msg  = '';
@@ -755,6 +756,7 @@ function vp_render_spenden_section() {
 
 	ob_start();
 	echo '<h2>' . esc_html__( 'Spenden & Zuwendungsbestätigungen', 'vereinsplugin' ) . '</h2>';
+	echo $nur_lesen; // phpcs:ignore
 	echo '<nav class="vp-subnav">';
 	foreach ( array(
 		'zuwendungen'     => __( 'Zuwendungen', 'vereinsplugin' ),

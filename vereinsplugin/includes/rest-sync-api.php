@@ -381,21 +381,21 @@ add_action( 'rest_api_init', function () {
 	$route( '/actions/shift-schicht-save', 'wl_manage_wishes', 'vp_sync_action_shift_schicht_save' );
 	$route( '/actions/shift-schicht-delete','wl_manage_wishes','vp_sync_action_shift_schicht_delete' );
 	$route( '/actions/shift-tausch',       'read',            'vp_sync_action_shift_tausch' );
-	$route( '/actions/zbon-import',        'jb_view_journal', 'vp_sync_action_zbon_import' );
-	$route( '/actions/split-buchung',      'jb_view_journal', 'vp_sync_action_split_buchung' );
-	$route( '/actions/zu-umbuchung',       'jb_view_journal', 'vp_sync_action_zu_umbuchung' );
+	$route( '/actions/zbon-import',        'jb_edit_journal', 'vp_sync_action_zbon_import' );
+	$route( '/actions/split-buchung',      'jb_edit_journal', 'vp_sync_action_split_buchung' );
+	$route( '/actions/zu-umbuchung',       'jb_edit_journal', 'vp_sync_action_zu_umbuchung' );
 	// Geschäftsjahr: Buchführungsart, Jahresabschluss, Konten zusammenlegen (v0.33)
 	$route( '/actions/geschaeftsjahr',       'jb_edit_journal', 'vp_sync_action_geschaeftsjahr' );
 	$route( '/actions/jahresabschluss',      'jb_edit_journal', 'vp_sync_action_jahresabschluss' );
 	$route( '/actions/konten-zusammenlegen', 'jb_edit_journal', 'vp_sync_action_konten_zusammenlegen' );
 	// Rechnungen / SEPA / Spenden (v0.22)
-	$route( '/actions/rechnung-save',      'jb_view_journal', 'vp_sync_action_rechnung_save' );
-	$route( '/actions/rechnung-status',    'jb_view_journal', 'vp_sync_action_rechnung_status' );
+	$route( '/actions/rechnung-save',      'jb_edit_journal', 'vp_sync_action_rechnung_save' );
+	$route( '/actions/rechnung-status',    'jb_edit_journal', 'vp_sync_action_rechnung_status' );
 	$route( '/actions/sepa-mandat-save',   'jb_view_journal', 'vp_sync_action_sepa_mandat_save' );
-	$route( '/actions/sepa-lauf',          'jb_view_journal', 'vp_sync_action_sepa_lauf' );
-	$route( '/actions/spende-save',        'jb_view_journal', 'vp_sync_action_spende_save' );
-	$route( '/actions/spender-save',       'jb_view_journal', 'vp_sync_action_spender_save' );
-	$route( '/actions/zuwendung',          'jb_view_journal', 'vp_sync_action_zuwendung' );
+	$route( '/actions/sepa-lauf',          'jb_edit_journal', 'vp_sync_action_sepa_lauf' );
+	$route( '/actions/spende-save',        'jb_edit_journal', 'vp_sync_action_spende_save' );
+	$route( '/actions/spender-save',       'jb_edit_journal', 'vp_sync_action_spender_save' );
+	$route( '/actions/zuwendung',          'jb_edit_journal', 'vp_sync_action_zuwendung' );
 
 	register_rest_route( VP_SYNC_API_NS, '/nextcloud/users', array(
 		'methods'             => 'GET',
@@ -467,7 +467,7 @@ function vp_sync_route_meta() {
 			'time_col'   => $def['time'],
 			'columns'    => array_values( $cols ),
 			'visibility' => $vis['mode'], // all | self
-			'writable'   => 'all' === $vis['mode'] ? array_values( array_diff( $cols, array( $def['pk'] ) ) ) : array(),
+			'writable'   => 'all' === $vis['mode'] && ( ! function_exists( 'vp_kasse_sync_schreiben_ok' ) || vp_kasse_sync_schreiben_ok( $slug ) ) ? array_values( array_diff( $cols, array( $def['pk'] ) ) ) : array(),
 		);
 	}
 
@@ -712,6 +712,10 @@ function vp_sync_apply_one( $slug, $op, $pk, $baserev, array $fields ) {
 	// Tabellen nichts geändert werden (Mitglieder-Workflows laufen über /actions).
 	if ( 'all' !== vp_sync_visibility( $def )['mode'] ) {
 		return array( 'kind' => 'error', 'message' => 'Kein Schreibrecht für „' . $slug . '" – bitte den passenden Vorgang (Aktion) nutzen.' );
+	}
+	// Kassen-Tabellen nur mit Kassenrecht (siehe includes/vorstand-rechte.php).
+	if ( function_exists( 'vp_kasse_sync_schreiben_ok' ) && ! vp_kasse_sync_schreiben_ok( $slug ) ) {
+		return array( 'kind' => 'error', 'message' => 'Kein Kassenrecht für „' . $slug . '" – buchen dürfen nur Kassenwart:innen und Administrator:innen.' );
 	}
 
 	// Nur echte Spalten (ohne PK) sind schreibbar.
@@ -979,6 +983,10 @@ function vp_sync_action_auslage_decide( WP_REST_Request $req ) {
 	$notiz   = sanitize_textarea_field( (string) ( $b['notiz'] ?? '' ) );
 	if ( ! $id ) {
 		return new WP_Error( 'bad_req', 'id nötig.', array( 'status' => 400 ) );
+	}
+	$aus = function_exists( 'jb_get_auslage' ) ? jb_get_auslage( $id ) : null;
+	if ( $aus && function_exists( 'vp_auslage_entscheiden_ok' ) && ! vp_auslage_entscheiden_ok( $aus ) ) {
+		return new WP_Error( 'selbst', vp_auslage_selbst_text(), array( 'status' => 403 ) );
 	}
 	$ok = jb_approve_auslage( $id, $approve, $notiz );
 	if ( ! $ok ) {

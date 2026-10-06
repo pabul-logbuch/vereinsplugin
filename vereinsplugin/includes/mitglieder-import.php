@@ -32,7 +32,7 @@ function vp_mimport_transient() {
  */
 add_action( 'admin_menu', function () {
 	if ( ! function_exists( 'wl_member_import_page' ) ) {
-		add_submenu_page( 'options.php', __( 'Mitglieder importieren', 'vereinsplugin' ), '', 'manage_options', 'wunschliste-mitglieder-import', 'vp_mitglieder_import_page' );
+		add_submenu_page( 'options.php', __( 'Mitglieder importieren', 'vereinsplugin' ), '', 'vp_manage_members', 'wunschliste-mitglieder-import', 'vp_mitglieder_import_page' );
 	}
 }, 20 );
 
@@ -648,7 +648,7 @@ function vp_mimport_invite( WP_User $u ) {
  * ---------------------------------------------------------------------- */
 
 function vp_mitglieder_import_page() {
-	if ( ! current_user_can( 'manage_options' ) ) {
+	if ( ! current_user_can( 'vp_manage_members' ) && ! current_user_can( 'manage_options' ) ) {
 		wp_die( esc_html__( 'Keine Berechtigung.', 'vereinsplugin' ) );
 	}
 

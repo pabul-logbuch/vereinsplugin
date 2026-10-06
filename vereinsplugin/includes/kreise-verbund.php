@@ -1033,6 +1033,9 @@ function vp_kreis_handle_auslage() {
 
 	$was   = sanitize_key( $_POST['entscheidung'] ?? '' );
 	$notiz = sanitize_textarea_field( wp_unslash( $_POST['notiz'] ?? '' ) );
+	if ( in_array( $was, array( 'approve', 'reject' ), true ) && function_exists( 'vp_auslage_entscheiden_ok' ) && ! vp_auslage_entscheiden_ok( $auslage ) ) {
+		vp_kreis_fehler( vp_auslage_selbst_text() );
+	}
 
 	if ( in_array( $was, array( 'approve', 'reject' ), true ) && 'ausstehend' === $auslage['status'] ) {
 		$ja = 'approve' === $was;

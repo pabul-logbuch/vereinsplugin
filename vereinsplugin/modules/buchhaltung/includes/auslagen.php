@@ -135,6 +135,8 @@ function jb_get_auslage(int $id): ?array {
 
 function jb_approve_auslage(int $id, bool $approve, string $notiz = ''): bool {
     if (!jb_can_approve()) return false;
+    // Vier-Augen-Prinzip (Einstellung, siehe includes/vorstand-rechte.php).
+    if (function_exists('vp_auslage_entscheiden_ok') && ($a = jb_get_auslage($id)) && !vp_auslage_entscheiden_ok($a)) return false;
     global $wpdb;
 
     $status = $approve ? 'genehmigt' : 'abgelehnt';
