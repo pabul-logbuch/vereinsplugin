@@ -1113,7 +1113,8 @@ async function showZbon() {
   drawPreview();
 
   // Bereits gebuchte Z-Bons
-  const done = [...new Set(booked.filter((x) => String(x.beleg_referenz || '').startsWith('ZBON-')).map((x) => x.beleg_referenz))].sort();
+  const done = [...new Set(booked.filter((x) => String(x.beleg_referenz || '').startsWith('ZBON-')).map((x) => x.beleg_referenz))]
+    .sort((a, b) => (parseInt(a.slice(5), 10) || 0) - (parseInt(b.slice(5), 10) || 0) || a.localeCompare(b));
   if (done.length) {
     view.append(el('h2', {}, 'Bereits gebucht'));
     view.append(el('p', { class: 'muted' }, done.map((d) => d.replace('ZBON-', '#')).join(' · ')));
