@@ -171,13 +171,13 @@ function vp_zbon_buchen( array $b ) {
 	return $z;
 }
 
-/** Bereits gebuchte Z-Bons: Nummer → Datum, neueste zuerst. */
+/** Bereits gebuchte Z-Bons, nach Nummer sortiert (höchste zuerst, numerisch: #10 vor #9). */
 function vp_zbon_liste( $limit = 30 ) {
 	global $wpdb;
 	$rows = (array) $wpdb->get_results( $wpdb->prepare(
 		"SELECT beleg_referenz AS ref, MIN(buchung_datum) AS datum, SUM(betrag) AS summe, COUNT(*) AS n, MAX(beleg_pfad) AS beleg
 		 FROM {$wpdb->prefix}jb_buchungen WHERE beleg_referenz LIKE %s
-		 GROUP BY beleg_referenz ORDER BY MIN(buchung_datum) DESC, beleg_referenz DESC LIMIT %d",
+		 GROUP BY beleg_referenz ORDER BY CAST(SUBSTRING(beleg_referenz, 6) AS UNSIGNED) DESC, beleg_referenz DESC LIMIT %d",
 		$wpdb->esc_like( 'ZBON-' ) . '%',
 		(int) $limit
 	), ARRAY_A );
