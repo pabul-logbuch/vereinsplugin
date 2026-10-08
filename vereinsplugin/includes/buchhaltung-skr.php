@@ -445,25 +445,26 @@ function vp_bh_belege() {
 	$can_edit = current_user_can( 'jb_edit_journal' ) || current_user_can( 'jb_approve_auslagen' ) || current_user_can( 'manage_options' );
 	$msg = '';
 
+	$fehler_id = 0;
 	if ( $can_edit && isset( $_POST['vp_beleg_buchen'] ) && check_admin_referer( 'vp_bh_belege', 'vp_belege_nonce' ) ) {
-		$aid   = (int) $_POST['auslage_id'];
-		$a     = function_exists( 'jb_get_auslage' ) ? jb_get_auslage( $aid ) : null;
-		if ( $a && empty( $a['buchung_id'] ) && function_exists( 'jb_journal_add' ) ) {
-			$konto = sanitize_text_field( wp_unslash( $_POST['konto'] ?? ( $a['konto'] ?? '' ) ) );
-			$geld  = sanitize_text_field( wp_unslash( $_POST['geldkonto'] ?? '' ) );
-			$bid = jb_journal_add( array(
-				'buchung_datum' => $a['ausgabe_datum'],
-				'betrag'        => -abs( (float) $a['betrag'] ),
-				'kategorie'     => $konto ? ( $konto . ' ' . ( jb_konto_get( $konto )->bezeichnung ?? '' ) ) : ( $a['kategorie'] ?? 'Beleg' ),
-				'beschreibung'  => 'Beleg #' . $aid . ': ' . $a['beschreibung'],
-				'quelle'        => 'Manuell',
-				'geldkonto'     => $geld,
-				'beleg_pfad'    => $a['beleg_pfad'],
-				'konto'         => $konto,
-				'sphaere'       => jb_konto_sphaere( $konto ),
-				'gegenpartei'   => $a['user_name'] ?? '',
-			) );
+		$aid = (int) $_POST['auslage_id'];
+		$a   = function_exists( 'jb_get_auslage' ) ? jb_get_auslage( $aid ) : null;
+		$d   = function_exists( 'vp_bh_buchung_aus_post' ) ? vp_bh_buchung_aus_post() : new WP_Error( 'fn', __( 'Nicht verfügbar.', 'vereinsplugin' ) );
+		if ( ! $a || ! empty( $a['buchung_id'] ) ) {
+			$msg = __( 'Dieser Beleg ist schon gebucht.', 'vereinsplugin' );
+		} elseif ( is_wp_error( $d ) ) {
+			$msg       = $d->get_error_message();
+			$fehler_id = $aid;
+		} elseif ( function_exists( 'jb_journal_add' ) ) {
+			$d               = vp_bh_zuordnung_aus_post( $d );
+			$d['quelle']     = 'Manuell';
+			$d['beleg_pfad'] = $a['beleg_pfad'];
+			$bid             = jb_journal_add( $d );
 			$wpdb->update( jb_table_auslagen(), array( 'buchung_id' => $bid ), array( 'id' => $aid ) );
+			if ( ! empty( $d['budget_id'] ) && function_exists( 'jb_table_budgets' ) ) {
+				$wpdb->query( $wpdb->prepare( 'UPDATE ' . jb_table_budgets() . ' SET ausgegeben = ausgegeben + %f WHERE id = %d', abs( (float) $d['betrag'] ), (int) $d['budget_id'] ) );
+			}
+			vp_bh_cache_leeren();
 			$msg = __( 'Beleg als Buchung übernommen.', 'vereinsplugin' );
 		}
 	}
@@ -476,7 +477,10 @@ function vp_bh_belege() {
 	if ( $msg ) {
 		echo '<div class="vp-note">' . esc_html( $msg ) . '</div>';
 	}
-	echo '<p class="vp-muted">' . esc_html__( 'Belege, die ohne Erstattung eingereicht wurden (Verein hat per Karte/Bar bezahlt). Einer Buchung zuordnen oder direkt als Buchung übernehmen.', 'vereinsplugin' ) . '</p>';
+	echo '<p class="vp-muted">' . esc_html__( 'Belege, die ohne Erstattung eingereicht wurden (Verein hat per Karte/Bar bezahlt). Beim Bank-Import werden passende Belege automatisch angehängt – oder hier direkt als Buchung übernehmen.', 'vereinsplugin' ) . '</p>';
+	if ( function_exists( 'vp_bh_kostenstellen_datalist' ) ) {
+		echo vp_bh_kostenstellen_datalist(); // phpcs:ignore
+	}
 	if ( ! $rows ) {
 		echo '<p class="vp-muted">' . esc_html__( 'Keine offenen Belege.', 'vereinsplugin' ) . '</p>';
 		return ob_get_clean();
@@ -493,22 +497,19 @@ function vp_bh_belege() {
 		if ( ! empty( $a['beleg_pfad'] ) && function_exists( 'jb_nc' ) ) {
 			echo ' <a class="vp-btn" target="_blank" rel="noopener" href="' . esc_url( jb_nc()->get_download_url( $a['beleg_pfad'] ) ) . '">' . esc_html__( 'Beleg', 'vereinsplugin' ) . '</a>';
 		}
-		if ( $can_edit ) {
-			echo '<form method="post" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">';
-			echo wp_nonce_field( 'vp_bh_belege', 'vp_belege_nonce', true, false );
+		if ( $can_edit && function_exists( 'vp_bh_buchungsfelder_fuer_auslage' ) ) {
+			echo '<details style="margin-top:8px"' . ( (int) $a['id'] === $fehler_id ? ' open' : '' ) . '><summary class="vp-btn vp-btn-primary">' . esc_html__( 'Prüfen & buchen …', 'vereinsplugin' ) . '</summary>';
+			echo '<form method="post" class="vp-form" style="margin-top:10px">' . wp_nonce_field( 'vp_bh_belege', 'vp_belege_nonce', true, false );
 			echo '<input type="hidden" name="auslage_id" value="' . (int) $a['id'] . '">';
-			echo '<select name="konto"><option value="">' . esc_html__( 'Konto wählen', 'vereinsplugin' ) . '</option>';
-			foreach ( $konten as $k ) {
-				echo '<option value="' . esc_attr( $k->nummer ) . '"' . selected( $a['konto'] ?? '', $k->nummer, false ) . '>' . esc_html( $k->nummer . ' · ' . $k->bezeichnung ) . '</option>';
-			}
-			echo '</select>';
-			if ( function_exists( 'vp_bh_konto_options' ) ) {
-				echo '<select name="geldkonto" aria-label="' . esc_attr__( 'Bezahlt von', 'vereinsplugin' ) . '">' . vp_bh_konto_options( vp_bh_vorgabe_geldkonto( 'Bank KSK' ), 'geld' ) . '</select>'; // phpcs:ignore
-			}
-			echo '<button class="vp-btn vp-btn-primary" name="vp_beleg_buchen" value="1">' . esc_html__( 'Als Buchung übernehmen', 'vereinsplugin' ) . '</button>';
-			echo '</form>';
+			echo '<p class="vp-muted">' . esc_html__( 'Vorbelegt aus der Einreichung, alles änderbar. Geldkonto = womit der Verein bezahlt hat (Bank, Barkasse, PayPal). Kommt die Zahlung später per Bank-Import, lieber dort zuordnen – sonst steht sie doppelt im Journal.', 'vereinsplugin' ) . '</p>';
+			echo vp_bh_buchungsfelder_fuer_auslage( $a, vp_bh_vorgabe_geldkonto( 'Bank KSK' ) ); // phpcs:ignore
+			echo '<p><button class="vp-btn vp-btn-primary" name="vp_beleg_buchen" value="1">' . esc_html__( 'Als Buchung übernehmen', 'vereinsplugin' ) . '</button></p>';
+			echo '</form></details>';
 		}
 		echo '</div>';
+	}
+	if ( function_exists( 'vp_bh_art_js' ) ) {
+		echo vp_bh_art_js(); // phpcs:ignore
 	}
 	return ob_get_clean();
 }
@@ -678,7 +679,9 @@ function vp_bh_journal_beleg_upload( $buchung_id, $file ) {
 	$ext  = preg_replace( '/[^a-z0-9]/', '', $ext );
 	$year = substr( (string) $b['buchung_datum'], 0, 4 ) ?: gmdate( 'Y' );
 	$ref  = $b['beleg_nr'] ?: ( 'B' . $buchung_id );
-	$nc_path = "Belege/{$year}/Buchungen/{$ref}.{$ext}";
+	$ref     = preg_replace( '/[^0-9A-Za-z\-_]/', '', (string) $ref ) ?: 'B' . (int) $buchung_id;
+	// Zeitstempel im Namen: ein neuer Beleg überschreibt nie einen alten.
+	$nc_path = "Belege/{$year}/Buchungen/{$ref}_" . current_time( 'Ymd-His' ) . ".{$ext}";
 	$res = jb_nc()->upload_beleg( $file['tmp_name'], $nc_path );
 	if ( is_wp_error( $res ) ) {
 		return $res->get_error_message();
