@@ -1101,6 +1101,12 @@ function vp_render_auslagen_pruefen_section() {
 		return '<div class="vp-note vp-note-error">' . esc_html__( 'Nicht verfügbar.', 'vereinsplugin' ) . '</div>';
 	}
 
+	// Genehmigen mit allen Buchungsfeldern (Formular „Prüfen & genehmigen“).
+	$meldung = null;
+	if ( isset( $_POST['vp_auslage_buchen'] ) && check_admin_referer( 'vp_auslage_buchen', 'vp_auslage_nonce' ) && function_exists( 'vp_auslage_genehmigen_und_buchen' ) ) {
+		$meldung = vp_auslage_genehmigen_und_buchen( (int) ( $_POST['auslage_id'] ?? 0 ) );
+	}
+
 	$pending  = jb_get_auslagen( array( 'status' => 'ausstehend' ) );
 	$approved = jb_get_auslagen( array( 'status' => 'genehmigt' ) );
 	$budgets  = function_exists( 'jb_budgets_get_all' ) ? jb_budgets_get_all() : array();
@@ -1118,8 +1124,15 @@ function vp_render_auslagen_pruefen_section() {
 
 	ob_start();
 	echo '<h2>' . esc_html__( 'Auslagen prüfen', 'vereinsplugin' ) . '</h2>';
+	if ( $meldung ) {
+		echo '<div class="vp-note' . ( $meldung['ok'] ? '' : ' vp-note-error' ) . '">' . esc_html( $meldung['text'] ) . '</div>';
+	}
+	if ( function_exists( 'vp_bh_kostenstellen_datalist' ) ) {
+		echo vp_bh_kostenstellen_datalist(); // phpcs:ignore
+	}
+	$geld_auslage = function_exists( 'vp_bh_vorgabe_geldkonto' ) ? vp_bh_vorgabe_geldkonto( 'Auslage' ) : '1600';
 
-	$render_row = function ( $r ) use ( $budget_name ) {
+	$render_row = function ( $r ) use ( $budget_name, $geld_auslage, $meldung ) {
 		$r = (object) $r;
 		echo '<div class="vp-card vp-auslage" data-id="' . (int) $r->id . '">';
 		printf(
@@ -1142,6 +1155,19 @@ function vp_render_auslagen_pruefen_section() {
 		echo '<div class="vp-auslage-actions">';
 		if ( 'ausstehend' === $r->status && function_exists( 'vp_auslage_entscheiden_ok' ) && ! vp_auslage_entscheiden_ok( $r ) ) {
 			echo '<span class="vp-muted">' . esc_html( vp_auslage_selbst_text() ) . '</span>';
+		} elseif ( 'ausstehend' === $r->status && function_exists( 'vp_bh_buchungsfelder_fuer_auslage' ) ) {
+			// Genehmigen: alle Buchungsfelder sehen und anpassen, dann buchen.
+			$offen = $meldung && ! $meldung['ok'] && (int) ( $_POST['auslage_id'] ?? 0 ) === (int) $r->id;
+			echo '<details class="vp-auslage-buchen" style="width:100%"' . ( $offen ? ' open' : '' ) . '><summary class="vp-btn vp-btn-primary">' . esc_html__( 'Prüfen & genehmigen …', 'vereinsplugin' ) . '</summary>';
+			echo '<form method="post" class="vp-form" style="margin-top:10px">' . wp_nonce_field( 'vp_auslage_buchen', 'vp_auslage_nonce', true, false );
+			echo '<input type="hidden" name="auslage_id" value="' . (int) $r->id . '">';
+			echo '<p class="vp-muted">' . esc_html__( 'So wird die Auslage gebucht – vorbelegt aus der Einreichung, alles änderbar. Geldkonto ist das Auslagen-Konto: es wird bei der Überweisung an die Person wieder ausgeglichen.', 'vereinsplugin' ) . '</p>';
+			echo vp_bh_buchungsfelder_fuer_auslage( (array) $r, $geld_auslage ); // phpcs:ignore
+			echo '<label>' . esc_html__( 'Notiz an die Person (optional)', 'vereinsplugin' ) . '<input type="text" name="notiz"></label>';
+			echo '<p><button class="vp-btn vp-btn-primary" name="vp_auslage_buchen" value="1">' . esc_html__( 'Genehmigen & buchen', 'vereinsplugin' ) . '</button></p>';
+			echo '</form></details>';
+			echo '<input type="text" class="vp-jb-notiz" placeholder="' . esc_attr__( 'Ablehnungsgrund (optional)', 'vereinsplugin' ) . '">';
+			echo '<button type="button" class="vp-btn vp-btn-danger vp-jb-decide" data-do="reject">' . esc_html__( 'Ablehnen', 'vereinsplugin' ) . '</button>';
 		} elseif ( 'ausstehend' === $r->status ) {
 			echo '<input type="text" class="vp-jb-notiz" placeholder="' . esc_attr__( 'Notiz / Ablehnungsgrund (optional)', 'vereinsplugin' ) . '">';
 			echo '<button type="button" class="vp-btn vp-btn-primary vp-jb-decide" data-do="approve">' . esc_html__( 'Genehmigen', 'vereinsplugin' ) . '</button> ';
@@ -1174,6 +1200,9 @@ function vp_render_auslagen_pruefen_section() {
 	// in reinem JS (kein jQuery, kein window.prompt): das inline-Script läuft,
 	// bevor jQuery im Footer geladen ist, und prompt() ist in installierten
 	// PWAs oft gesperrt. Genau daran scheiterte bisher das Ablehnen.
+	if ( function_exists( 'vp_bh_art_js' ) ) {
+		echo vp_bh_art_js(); // phpcs:ignore
+	}
 	$ajax  = admin_url( 'admin-ajax.php' );
 	$nonce = wp_create_nonce( 'jb_nonce' );
 	$t_ok   = esc_js( __( 'Erledigt.', 'vereinsplugin' ) );

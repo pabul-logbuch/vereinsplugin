@@ -228,17 +228,7 @@ function vp_bh_journal() {
 	$nonce_ok = function () {
 		return check_admin_referer( 'vp_bh_journal', 'vp_bh_nonce' );
 	};
-	$zuordnung = function ( array $d ) use ( $jcols ) {
-		foreach ( array( 'ruecklage_id', 'budget_id' ) as $k ) {
-			if ( isset( $_POST[ $k ] ) && in_array( $k, $jcols, true ) ) {
-				$d[ $k ] = (int) $_POST[ $k ] ?: null;
-			}
-		}
-		if ( isset( $_POST['kostenstelle'] ) && in_array( 'kostenstelle', $jcols, true ) ) {
-			$d['kostenstelle'] = sanitize_text_field( wp_unslash( $_POST['kostenstelle'] ) );
-		}
-		return $d;
-	};
+	$zuordnung = 'vp_bh_zuordnung_aus_post';
 
 	if ( $can_edit && isset( $_POST['vp_bh_add'] ) && $nonce_ok() ) {
 		$d = vp_bh_buchung_aus_post();
@@ -311,34 +301,17 @@ function vp_bh_journal() {
 		}
 	}
 
+	// Bearbeiten-Karte: ?bearbeiten=<id>. Nach Speichern/Löschen wieder zu,
+	// die Zeile bleibt markiert.
+	$bearbeiten = isset( $_GET['bearbeiten'] ) ? (int) $_GET['bearbeiten'] : 0;
+	$markiert   = $bearbeiten;
+	if ( ! $fehler && ( isset( $_POST['vp_bh_edit'] ) || isset( $_POST['vp_bh_del'] ) ) ) {
+		$bearbeiten = 0;
+	}
+
 	$rows       = function_exists( 'jb_journal_get' ) ? jb_journal_get( array( 'year' => $jahr ) ) : array();
-	$ruecklagen = function_exists( 'jb_ruecklagen_get_all' ) ? jb_ruecklagen_get_all() : array();
-	$budgets    = function_exists( 'jb_budgets_get_all' ) ? jb_budgets_get_all() : array();
 	$ks_liste   = function_exists( 'jb_kostenstellen' ) ? jb_kostenstellen() : array();
-	$extras     = function ( array $r = array() ) use ( $ruecklagen, $budgets ) {
-		$h = '<div class="vp-form-grid">';
-		if ( $ruecklagen ) {
-			$h .= '<label>' . esc_html__( 'Für Rücklage (optional)', 'vereinsplugin' ) . '<select name="ruecklage_id"><option value="0">' . esc_html__( '– keine –', 'vereinsplugin' ) . '</option>';
-			foreach ( $ruecklagen as $rr ) {
-				$rr = (object) $rr;
-				$h .= '<option value="' . (int) $rr->id . '"' . selected( (int) ( $r['ruecklage_id'] ?? 0 ), (int) $rr->id, false ) . '>' . esc_html( $rr->bezeichnung ) . '</option>';
-			}
-			$h .= '</select></label>';
-		}
-		if ( $budgets ) {
-			$h .= '<label>' . esc_html__( 'Budget belasten (optional)', 'vereinsplugin' ) . '<select name="budget_id"><option value="0">' . esc_html__( '– kein Budget –', 'vereinsplugin' ) . '</option>';
-			foreach ( $budgets as $bb ) {
-				$bb = (object) $bb;
-				$h .= '<option value="' . (int) $bb->id . '"' . selected( (int) ( $r['budget_id'] ?? 0 ), (int) $bb->id, false ) . '>'
-					. esc_html( $bb->zweck . ( $bb->kostenstelle ? ' · ' . $bb->kostenstelle : '' ) . ' (' . number_format( (float) ( $bb->rest ?? 0 ), 2, ',', '.' ) . ' € frei)' ) . '</option>';
-			}
-			$h .= '</select></label>';
-		}
-		$h .= '<label>' . esc_html__( 'Kostenstelle', 'vereinsplugin' ) . '<input type="text" name="kostenstelle" list="vp_ks_liste" value="' . esc_attr( $r['kostenstelle'] ?? '' ) . '"></label>';
-		// z. B. Projekt-Kalkulationsposten (includes/projekt-kasse.php).
-		$h .= (string) apply_filters( 'vp_bh_buchung_extra_felder', '', $r );
-		return $h . '</div>';
-	};
+	$extras     = 'vp_bh_zuordnung_felder';
 
 	ob_start();
 	if ( $ks_liste ) {
@@ -377,16 +350,21 @@ function vp_bh_journal() {
 	}
 
 	$has_nc = function_exists( 'jb_nc' );
+	if ( $can_edit && $bearbeiten ) {
+		echo vp_bh_bearbeiten_karte( $bearbeiten, $jahr, $methode, $extras, $has_nc ); // phpcs:ignore
+	}
 	$num    = function ( $v ) {
 		return esc_html( number_format( (float) $v, 2, ',', '.' ) );
 	};
-	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Beleg-Nr.', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th>';
+	// Bearbeiten-Spalte vorne, damit der Stift auch auf schmalen Bildschirmen
+	// ohne seitliches Scrollen zu sehen ist.
+	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr>' . ( $can_edit ? '<th></th>' : '' ) . '<th>' . esc_html__( 'Beleg-Nr.', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th>';
 	if ( 'euer' === $methode ) {
 		echo '<th>' . esc_html__( 'Wofür / Konto', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Gegenpartei / Zweck', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Einnahme', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Ausgabe', 'vereinsplugin' ) . '</th>';
 	} else {
 		echo '<th>' . esc_html__( 'Soll', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Haben', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Betrag', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Text', 'vereinsplugin' ) . '</th>';
 	}
-	echo '<th>' . esc_html__( 'Beleg', 'vereinsplugin' ) . '</th>' . ( $can_edit ? '<th></th>' : '' ) . '</tr></thead><tbody>';
+	echo '<th>' . esc_html__( 'Beleg', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
 
 	foreach ( $rows as $r ) {
 		$rid = (int) $r['id'];
@@ -406,28 +384,11 @@ function vp_bh_journal() {
 
 		$edit_cell = '';
 		if ( $can_edit ) {
-			$edit_cell = '<td><details class="vp-inline-edit"><summary class="vp-btn">✎</summary>'
-				. '<form method="post" class="vp-form" style="margin-top:8px;min-width:300px">'
-				. wp_nonce_field( 'vp_bh_journal', 'vp_bh_nonce', true, false )
-				. '<input type="hidden" name="id" value="' . $rid . '">'
-				. vp_bh_buchung_felder( $methode, $r ) . $extras( $r )
-				. '<p><button class="vp-btn vp-btn-primary" name="vp_bh_edit" value="1">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button> '
-				. '<button class="vp-btn vp-btn-danger" name="vp_bh_del" value="1" onclick="return confirm(\'' . esc_js( __( 'Buchung löschen?', 'vereinsplugin' ) ) . '\')">' . esc_html__( 'Löschen', 'vereinsplugin' ) . '</button></p>'
-				. '</form>'
-				. '<form method="post" class="vp-form" style="margin-top:8px;border-top:1px solid #e2e5ea;padding-top:8px">'
-				. wp_nonce_field( 'vp_bh_journal', 'vp_bh_nonce', true, false )
-				. '<input type="hidden" name="id" value="' . $rid . '">'
-				. '<strong>' . esc_html__( 'Teil abspalten', 'vereinsplugin' ) . '</strong>'
-				. '<label>' . esc_html__( 'Teilbetrag (€)', 'vereinsplugin' ) . '<input type="text" name="split_betrag" inputmode="decimal" placeholder="3,00"></label>'
-				. '<label>' . esc_html__( 'SKR-Konto des Teils', 'vereinsplugin' ) . '<select name="split_konto">' . vp_bh_konto_options( '5190', 'alle', '–' ) . '</select></label>'
-				. '<label>' . esc_html__( 'Zweck', 'vereinsplugin' ) . '<input type="text" name="split_zweck" value="' . esc_attr__( 'Bankgebühr', 'vereinsplugin' ) . '"></label>'
-				. '<p><button class="vp-btn" name="vp_bh_split" value="1">' . esc_html__( 'Abspalten', 'vereinsplugin' ) . '</button> '
-				. '<span class="vp-muted">' . esc_html__( 'Wird von dieser Buchung abgezogen und als eigene Buchung auf demselben Geldkonto angelegt.', 'vereinsplugin' ) . '</span></p>'
-				. '</form></details></td>';
+			$edit_cell = '<td><a class="vp-btn" title="' . esc_attr__( 'Bearbeiten, Beleg, aufteilen, löschen', 'vereinsplugin' ) . '" href="' . esc_url( vp_bh_url( array( 'vp_bh' => 'journal', 'jahr' => $jahr, 'bearbeiten' => $rid ) ) . '#vp-bearbeiten' ) . '">✎</a></td>';
 		}
 
 		$text = '<br><span class="vp-muted">' . esc_html( wp_trim_words( (string) $r['beschreibung'], 14 ) ) . '</span>';
-		echo '<tr><td>' . esc_html( $r['beleg_nr'] ?? '' ) . '</td><td>' . esc_html( $r['buchung_datum'] ) . '</td>';
+		echo '<tr id="vp-b-' . $rid . '"' . ( $rid === $markiert ? ' style="background:rgba(250,204,21,.15)"' : '' ) . '>' . $edit_cell . '<td>' . esc_html( $r['beleg_nr'] ?? '' ) . '</td><td>' . esc_html( $r['buchung_datum'] ) . '</td>'; // phpcs:ignore
 		if ( 'euer' === $methode ) {
 			if ( $v && 'umbuchung' === $v['art'] ) {
 				echo '<td>' . esc_html__( 'Umbuchung', 'vereinsplugin' ) . '<br><span class="vp-muted">' . esc_html( vp_bh_konto_label( $v['von'] ) . ' → ' . vp_bh_konto_label( $v['nach'] ) ) . '</span></td>';
@@ -450,17 +411,219 @@ function vp_bh_journal() {
 			echo '<td style="text-align:right">' . $num( $s['betrag'] ) . ' €</td>'; // phpcs:ignore
 			echo '<td>' . esc_html( $r['gegenpartei'] ?? '' ) . $text . '</td>'; // phpcs:ignore
 		}
-		echo '<td>' . $beleg_cell . '</td>' . $edit_cell . '</tr>'; // phpcs:ignore
+		echo '<td>' . $beleg_cell . '</td></tr>'; // phpcs:ignore
 	}
 	if ( ! $rows ) {
 		echo '<tr><td colspan="8" class="vp-muted">' . esc_html__( 'Keine Buchungen in diesem Jahr.', 'vereinsplugin' ) . '</td></tr>';
 	} elseif ( 'euer' === $methode ) {
 		$e = vp_bh_euer( $jahr );
-		echo '<tr style="font-weight:700"><td colspan="4">' . esc_html__( 'Summe', 'vereinsplugin' ) . '</td><td style="text-align:right">' . $num( $e['einnahmen'] ) . ' €</td><td style="text-align:right">' . $num( $e['ausgaben'] ) . ' €</td><td colspan="2"></td></tr>'; // phpcs:ignore
+		echo '<tr style="font-weight:700"><td colspan="' . ( $can_edit ? 5 : 4 ) . '">' . esc_html__( 'Summe', 'vereinsplugin' ) . '</td><td style="text-align:right">' . $num( $e['einnahmen'] ) . ' €</td><td style="text-align:right">' . $num( $e['ausgaben'] ) . ' €</td><td></td></tr>'; // phpcs:ignore
 	}
 	echo '</tbody></table></div>';
 	echo vp_bh_art_js(); // phpcs:ignore
 	return ob_get_clean();
+}
+
+/** Felder „Rücklage / Budget / Kostenstelle“ einer Buchung (Journal, Auslagen, Belege). */
+function vp_bh_zuordnung_felder( array $r = array() ) {
+	static $ruecklagen = null, $budgets = null;
+	if ( null === $ruecklagen ) {
+		$ruecklagen = function_exists( 'jb_ruecklagen_get_all' ) ? jb_ruecklagen_get_all() : array();
+		$budgets    = function_exists( 'jb_budgets_get_all' ) ? jb_budgets_get_all() : array();
+	}
+	$h = '<div class="vp-form-grid">';
+	if ( $ruecklagen ) {
+		$h .= '<label>' . esc_html__( 'Für Rücklage (optional)', 'vereinsplugin' ) . '<select name="ruecklage_id"><option value="0">' . esc_html__( '– keine –', 'vereinsplugin' ) . '</option>';
+		foreach ( $ruecklagen as $rr ) {
+			$rr = (object) $rr;
+			$h .= '<option value="' . (int) $rr->id . '"' . selected( (int) ( $r['ruecklage_id'] ?? 0 ), (int) $rr->id, false ) . '>' . esc_html( $rr->bezeichnung ) . '</option>';
+		}
+		$h .= '</select></label>';
+	}
+	if ( $budgets ) {
+		$h .= '<label>' . esc_html__( 'Budget belasten (optional)', 'vereinsplugin' ) . '<select name="budget_id"><option value="0">' . esc_html__( '– kein Budget –', 'vereinsplugin' ) . '</option>';
+		foreach ( $budgets as $bb ) {
+			$bb = (object) $bb;
+			$h .= '<option value="' . (int) $bb->id . '"' . selected( (int) ( $r['budget_id'] ?? 0 ), (int) $bb->id, false ) . '>'
+				. esc_html( $bb->zweck . ( $bb->kostenstelle ? ' · ' . $bb->kostenstelle : '' ) . ' (' . number_format( (float) ( $bb->rest ?? 0 ), 2, ',', '.' ) . ' € frei)' ) . '</option>';
+		}
+		$h .= '</select></label>';
+	}
+	$h .= '<label>' . esc_html__( 'Kostenstelle', 'vereinsplugin' ) . '<input type="text" name="kostenstelle" list="vp_ks_liste" value="' . esc_attr( $r['kostenstelle'] ?? '' ) . '"></label>';
+	// z. B. Projekt-Kalkulationsposten (includes/projekt-kasse.php).
+	$h .= (string) apply_filters( 'vp_bh_buchung_extra_felder', '', $r );
+	return $h . '</div>';
+}
+
+/** Rücklage / Budget / Kostenstelle aus dem Formular in die Buchungsdaten übernehmen. */
+function vp_bh_zuordnung_aus_post( array $d ) {
+	static $jcols = null;
+	if ( null === $jcols ) {
+		global $wpdb;
+		$jcols = (array) $wpdb->get_col( 'SHOW COLUMNS FROM ' . jb_table_journal() );
+	}
+	foreach ( array( 'ruecklage_id', 'budget_id' ) as $k ) {
+		if ( isset( $_POST[ $k ] ) && in_array( $k, $jcols, true ) ) {
+			$d[ $k ] = (int) $_POST[ $k ] ?: null;
+		}
+	}
+	if ( isset( $_POST['kostenstelle'] ) && in_array( 'kostenstelle', $jcols, true ) ) {
+		$d['kostenstelle'] = sanitize_text_field( wp_unslash( $_POST['kostenstelle'] ) );
+	}
+	return $d;
+}
+
+/** Datalist der Kostenstellen für das Feld „Kostenstelle“. */
+function vp_bh_kostenstellen_datalist() {
+	$ks = function_exists( 'jb_kostenstellen' ) ? jb_kostenstellen() : array();
+	if ( ! $ks ) {
+		return '';
+	}
+	$h = '<datalist id="vp_ks_liste">';
+	foreach ( $ks as $k ) {
+		$h .= '<option value="' . esc_attr( $k ) . '">';
+	}
+	return $h . '</datalist>';
+}
+
+/**
+ * Buchungsfelder für eine Auslage oder einen eingereichten Beleg – vorbelegt
+ * aus der Einreichung, alle Felder änderbar (wie im Journal).
+ *
+ * @param array  $a          Auslage (jb_auslagen-Zeile, mit user_name)
+ * @param string $geldkonto  vorgeschlagenes Geldkonto
+ */
+function vp_bh_buchungsfelder_fuer_auslage( array $a, $geldkonto ) {
+	$jahr = (int) substr( (string) $a['ausgabe_datum'], 0, 4 ) ?: (int) current_time( 'Y' );
+	$text = trim( ( ! empty( $a['haendler'] ) ? $a['haendler'] . ': ' : '' ) . (string) $a['beschreibung'] );
+	$r    = array(
+		'buchung_datum' => $a['ausgabe_datum'],
+		'betrag'        => -abs( (float) $a['betrag'] ),
+		'geldkonto'     => (string) $geldkonto,
+		'konto'         => (string) ( $a['konto'] ?? '' ),
+		'gegenpartei'   => ( $a['status'] ?? '' ) === 'beleg' ? (string) ( $a['haendler'] ?? '' ) : (string) ( $a['user_name'] ?? '' ),
+		'beschreibung'  => ( ( $a['status'] ?? '' ) === 'beleg' ? 'Beleg #' : 'Auslage #' ) . (int) $a['id'] . ': ' . $text,
+		'beleg_nr'      => '',
+		'budget_id'     => $a['budget_id'] ?? 0,
+		'quelle'        => 'Manuell',
+	);
+	return vp_bh_buchung_felder( vp_bh_methode( $jahr ), $r )
+		. '<h4 style="margin:10px 0 4px">' . esc_html__( 'Zuordnung', 'vereinsplugin' ) . '</h4>'
+		. vp_bh_zuordnung_felder( $r );
+}
+
+/**
+ * Auslage mit den Werten aus dem Formular genehmigen und buchen.
+ * Konto, Betrag und Budget gehen vorher an die Auslage (Budget-Abbuchung und
+ * Erstattungsbetrag stimmen so), die übrigen Felder an die Journalbuchung.
+ * @return array{ok:bool,text:string}
+ */
+function vp_auslage_genehmigen_und_buchen( $id ) {
+	global $wpdb;
+	$a = function_exists( 'jb_get_auslage' ) ? jb_get_auslage( (int) $id ) : null;
+	if ( ! $a || 'ausstehend' !== $a['status'] ) {
+		return array( 'ok' => false, 'text' => __( 'Diese Auslage ist nicht mehr offen.', 'vereinsplugin' ) );
+	}
+	if ( function_exists( 'vp_auslage_entscheiden_ok' ) && ! vp_auslage_entscheiden_ok( $a ) ) {
+		return array( 'ok' => false, 'text' => vp_auslage_selbst_text() );
+	}
+	$d = vp_bh_buchung_aus_post();
+	if ( is_wp_error( $d ) ) {
+		return array( 'ok' => false, 'text' => $d->get_error_message() );
+	}
+	$d    = vp_bh_zuordnung_aus_post( $d );
+	$at   = jb_table_auslagen();
+	$acol = (array) $wpdb->get_col( "SHOW COLUMNS FROM `{$at}`" );
+	$upd  = array( 'betrag' => abs( (float) $d['betrag'] ) );
+	if ( in_array( 'konto', $acol, true ) ) {
+		$upd['konto'] = (string) $d['konto'];
+	}
+	if ( array_key_exists( 'budget_id', $d ) ) {
+		$upd['budget_id'] = $d['budget_id'];
+	}
+	$wpdb->update( $at, $upd, array( 'id' => (int) $id ) );
+
+	$notiz = sanitize_textarea_field( wp_unslash( $_POST['notiz'] ?? '' ) );
+	if ( ! jb_approve_auslage( (int) $id, true, $notiz ) ) {
+		return array( 'ok' => false, 'text' => __( 'Genehmigen nicht möglich (Recht oder Status prüfen).', 'vereinsplugin' ) );
+	}
+	$bid = (int) ( jb_get_auslage( (int) $id )['buchung_id'] ?? 0 );
+	if ( $bid ) {
+		$jcols = (array) $wpdb->get_col( 'SHOW COLUMNS FROM ' . jb_table_journal() );
+		if ( '' === (string) ( $d['beleg_nr'] ?? '' ) ) {
+			unset( $d['beleg_nr'] ); // automatisch vergebene Nummer behalten
+		}
+		$wpdb->update( jb_table_journal(), array_intersect_key( $d, array_flip( $jcols ) ), array( 'id' => $bid ) );
+	}
+	vp_bh_cache_leeren();
+	return array( 'ok' => true, 'text' => sprintf( __( 'Auslage #%d genehmigt und gebucht – jetzt überweisen (GiroCode unten) und danach als ausgezahlt markieren.', 'vereinsplugin' ), (int) $id ) );
+}
+
+/**
+ * Breite Bearbeiten-Ansicht einer Buchung (statt des schmalen Formulars in
+ * der Tabellenzelle): Buchung, Zuordnung, Beleg, Aufteilen, Löschen.
+ */
+function vp_bh_bearbeiten_karte( $id, $jahr, $methode, $extras, $has_nc ) {
+	global $wpdb;
+	$r = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . jb_table_journal() . ' WHERE id = %d', (int) $id ), ARRAY_A );
+	if ( ! $r ) {
+		return '<div class="vp-note vp-note-warn">' . esc_html__( 'Buchung nicht gefunden.', 'vereinsplugin' ) . '</div>';
+	}
+	$nonce  = wp_nonce_field( 'vp_bh_journal', 'vp_bh_nonce', true, false );
+	$zurueck = vp_bh_url( array( 'vp_bh' => 'journal', 'jahr' => $jahr ) ) . '#vp-b-' . (int) $id;
+	$herkunft = array_filter( array(
+		$r['quelle'] ?? '',
+		! empty( $r['beleg_referenz'] ) ? $r['beleg_referenz'] : '',
+		! empty( $r['auslage_id'] ) ? sprintf( __( 'Auslage #%d', 'vereinsplugin' ), (int) $r['auslage_id'] ) : '',
+		! empty( $r['erstellt_am'] ) ? sprintf( __( 'angelegt %s', 'vereinsplugin' ), mysql2date( 'd.m.Y H:i', $r['erstellt_am'] ) ) : '',
+	) );
+
+	$h  = '<div class="vp-card vp-buchung-edit" id="vp-bearbeiten" style="border:2px solid #facc15">';
+	$h .= '<h3 style="margin-top:0">' . esc_html( sprintf( __( 'Buchung bearbeiten – %s', 'vereinsplugin' ), ( $r['beleg_nr'] ?? '' ) ?: '#' . (int) $id ) ) . '</h3>';
+	if ( $herkunft ) {
+		$h .= '<p class="vp-muted" style="margin-top:-6px">' . esc_html( implode( ' · ', $herkunft ) ) . '</p>';
+	}
+
+	// Buchung + Zuordnung
+	$h .= '<form method="post" class="vp-form">' . $nonce . '<input type="hidden" name="id" value="' . (int) $id . '">';
+	$h .= '<h4>' . esc_html__( 'Buchung', 'vereinsplugin' ) . '</h4>' . vp_bh_buchung_felder( $methode, $r );
+	$h .= '<h4>' . esc_html__( 'Zuordnung', 'vereinsplugin' ) . '</h4>' . $extras( $r );
+	$h .= '<p style="display:flex;gap:8px;flex-wrap:wrap"><button class="vp-btn vp-btn-primary" name="vp_bh_edit" value="1">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button>'
+		. '<a class="vp-btn" href="' . esc_url( $zurueck ) . '">' . esc_html__( 'Abbrechen', 'vereinsplugin' ) . '</a></p></form>';
+
+	$h .= '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:8px">';
+
+	// Beleg
+	$h .= '<div><h4>' . esc_html__( 'Beleg', 'vereinsplugin' ) . '</h4>';
+	if ( ! empty( $r['beleg_pfad'] ) && $has_nc ) {
+		$h .= '<p><a class="vp-btn" target="_blank" rel="noopener" href="' . esc_url( jb_nc()->get_download_url( $r['beleg_pfad'] ) ) . '">' . esc_html__( 'Beleg ansehen', 'vereinsplugin' ) . '</a> <span class="vp-muted">' . esc_html( basename( (string) $r['beleg_pfad'] ) ) . '</span></p>';
+	} else {
+		$h .= '<p class="vp-muted">' . esc_html__( 'Noch kein Beleg.', 'vereinsplugin' ) . '</p>';
+	}
+	if ( $has_nc ) {
+		$h .= '<form method="post" enctype="multipart/form-data" class="vp-form">' . $nonce . '<input type="hidden" name="id" value="' . (int) $id . '">'
+			. '<label>' . esc_html( ! empty( $r['beleg_pfad'] ) ? __( 'Anderen Beleg hochladen (der alte bleibt in Nextcloud erhalten)', 'vereinsplugin' ) : __( 'Beleg hochladen (PDF oder Foto)', 'vereinsplugin' ) )
+			. '<input type="file" name="beleg_file" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" required></label>'
+			. '<p><button class="vp-btn" name="vp_bh_beleg_up" value="1">' . esc_html__( 'Hochladen', 'vereinsplugin' ) . '</button></p></form>';
+	}
+	$h .= '</div>';
+
+	// Teil abspalten
+	$h .= '<div><h4>' . esc_html__( 'Teil abspalten', 'vereinsplugin' ) . '</h4>'
+		. '<form method="post" class="vp-form">' . $nonce . '<input type="hidden" name="id" value="' . (int) $id . '">'
+		. '<p class="vp-muted">' . esc_html__( 'Z. B. eine Bankgebühr aus einer Sammelbuchung herauslösen: wird von dieser Buchung abgezogen und als eigene Buchung auf demselben Geldkonto angelegt.', 'vereinsplugin' ) . '</p>'
+		. '<label>' . esc_html__( 'Teilbetrag (€)', 'vereinsplugin' ) . '<input type="text" name="split_betrag" inputmode="decimal" placeholder="3,00"></label>'
+		. '<label>' . esc_html__( 'SKR-Konto des Teils', 'vereinsplugin' ) . '<select name="split_konto">' . vp_bh_konto_options( '5190', 'alle', '–' ) . '</select></label>'
+		. '<label>' . esc_html__( 'Zweck', 'vereinsplugin' ) . '<input type="text" name="split_zweck" value="' . esc_attr__( 'Bankgebühr', 'vereinsplugin' ) . '"></label>'
+		. '<p><button class="vp-btn" name="vp_bh_split" value="1">' . esc_html__( 'Abspalten', 'vereinsplugin' ) . '</button></p></form></div>';
+
+	$h .= '</div>';
+
+	// Löschen
+	$h .= '<form method="post" style="margin-top:12px;border-top:1px solid rgba(127,127,127,.25);padding-top:10px">' . $nonce . '<input type="hidden" name="id" value="' . (int) $id . '">'
+		. '<button class="vp-btn vp-btn-danger" name="vp_bh_del" value="1" onclick="return confirm(\'' . esc_js( __( 'Buchung wirklich löschen?', 'vereinsplugin' ) ) . '\')">' . esc_html__( 'Buchung löschen', 'vereinsplugin' ) . '</button></form>';
+
+	return $h . '</div>';
 }
 
 /* =========================================================================
@@ -487,15 +650,20 @@ function vp_bh_auswertung() {
 		echo '<p><a class="vp-btn" href="' . esc_url( vp_bh_url( array( 'vp_bh' => 'auswertung', 'jahr' => $jahr ) ) ) . '">‹ ' . esc_html__( 'Zur Übersicht', 'vereinsplugin' ) . '</a></p>';
 		/* translators: 1: account, 2: year */
 		echo '<h3>' . esc_html( sprintf( $euer ? __( 'Kontoauszug %1$s – %2$d', 'vereinsplugin' ) : __( 'Kontenblatt %1$s – %2$d', 'vereinsplugin' ), vp_bh_konto_label( $kb ), $jahr ) ) . '</h3>';
-		echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Text', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Gegenkonto', 'vereinsplugin' ) . '</th>'
+		$kann = current_user_can( 'jb_edit_journal' ) || current_user_can( 'manage_options' );
+		$sp   = $kann ? '<td></td>' : '';
+		echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr>' . ( $kann ? '<th></th>' : '' ) . '<th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Text', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Gegenkonto', 'vereinsplugin' ) . '</th>'
 			. '<th style="text-align:right">' . esc_html( $euer ? __( 'Zugang', 'vereinsplugin' ) : __( 'Soll', 'vereinsplugin' ) ) . '</th><th style="text-align:right">' . esc_html( $euer ? __( 'Abgang', 'vereinsplugin' ) : __( 'Haben', 'vereinsplugin' ) ) . '</th><th style="text-align:right">' . esc_html__( 'Stand', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
-		echo '<tr class="vp-muted"><td></td><td>' . esc_html__( 'Stand am 1.1.', 'vereinsplugin' ) . '</td><td></td><td></td><td></td><td style="text-align:right">' . $num( $blatt['anfang'] ) . '</td></tr>'; // phpcs:ignore
+		echo '<tr class="vp-muted">' . $sp . '<td></td><td>' . esc_html__( 'Stand am 1.1.', 'vereinsplugin' ) . '</td><td></td><td></td><td></td><td style="text-align:right">' . $num( $blatt['anfang'] ) . '</td></tr>'; // phpcs:ignore
 		foreach ( $blatt['zeilen'] as $z ) {
-			echo '<tr><td>' . esc_html( $z['datum'] ) . '</td><td>' . esc_html( $z['text'] ?: '—' ) . '</td><td>' . $kb_link( $z['gegen'] ) . '</td>' // phpcs:ignore
+			$stift = $kann && ! empty( $z['id'] )
+				? '<td><a class="vp-btn" title="' . esc_attr__( 'Im Journal bearbeiten', 'vereinsplugin' ) . '" href="' . esc_url( vp_bh_url( array( 'vp_bh' => 'journal', 'jahr' => $jahr, 'bearbeiten' => (int) $z['id'] ) ) . '#vp-b-' . (int) $z['id'] ) . '">✎</a></td>'
+				: $sp;
+			echo '<tr>' . $stift . '<td>' . esc_html( $z['datum'] ) . '</td><td>' . esc_html( $z['text'] ?: '—' ) . '</td><td>' . $kb_link( $z['gegen'] ) . '</td>' // phpcs:ignore
 				. '<td style="text-align:right">' . ( $z['soll'] ? $num( $z['soll'] ) : '' ) . '</td><td style="text-align:right">' . ( $z['haben'] ? $num( $z['haben'] ) : '' ) . '</td>' // phpcs:ignore
 				. '<td style="text-align:right">' . $num( $z['saldo'] ) . '</td></tr>'; // phpcs:ignore
 		}
-		echo '<tr style="font-weight:700"><td colspan="5">' . esc_html__( 'Stand am Jahresende', 'vereinsplugin' ) . '</td><td style="text-align:right">' . $num( $blatt['endsaldo'] ) . '</td></tr></tbody></table></div>'; // phpcs:ignore
+		echo '<tr style="font-weight:700"><td colspan="' . ( $kann ? 6 : 5 ) . '">' . esc_html__( 'Stand am Jahresende', 'vereinsplugin' ) . '</td><td style="text-align:right">' . $num( $blatt['endsaldo'] ) . '</td></tr></tbody></table></div>'; // phpcs:ignore
 		if ( vp_bh_ist_erfolg( $kb ) ) {
 			echo '<p class="vp-muted">' . esc_html__( 'Bei Einnahmekonten steht der Stand im Minus (Haben-Saldo) – das ist in der Buchhaltung so üblich und kein Fehler.', 'vereinsplugin' ) . '</p>';
 		}
