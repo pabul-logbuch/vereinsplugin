@@ -380,13 +380,17 @@ function vp_bh_journal() {
 	$num    = function ( $v ) {
 		return esc_html( number_format( (float) $v, 2, ',', '.' ) );
 	};
-	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Beleg-Nr.', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th>';
+	// Bearbeiten-Spalte vorne, damit der Stift auch auf schmalen Bildschirmen
+	// ohne seitliches Scrollen zu sehen ist.
+	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr>' . ( $can_edit ? '<th></th>' : '' ) . '<th>' . esc_html__( 'Beleg-Nr.', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th>';
 	if ( 'euer' === $methode ) {
 		echo '<th>' . esc_html__( 'Wofür / Konto', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Gegenpartei / Zweck', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Einnahme', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Ausgabe', 'vereinsplugin' ) . '</th>';
 	} else {
 		echo '<th>' . esc_html__( 'Soll', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Haben', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Betrag', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Text', 'vereinsplugin' ) . '</th>';
 	}
-	echo '<th>' . esc_html__( 'Beleg', 'vereinsplugin' ) . '</th>' . ( $can_edit ? '<th></th>' : '' ) . '</tr></thead><tbody>';
+	echo '<th>' . esc_html__( 'Beleg', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
+	// Aus dem Kontoauszug verlinkt: diese Buchung gleich zum Bearbeiten öffnen.
+	$bearbeiten = isset( $_GET['bearbeiten'] ) ? (int) $_GET['bearbeiten'] : 0;
 
 	foreach ( $rows as $r ) {
 		$rid = (int) $r['id'];
@@ -406,7 +410,7 @@ function vp_bh_journal() {
 
 		$edit_cell = '';
 		if ( $can_edit ) {
-			$edit_cell = '<td><details class="vp-inline-edit"><summary class="vp-btn">✎</summary>'
+			$edit_cell = '<td><details class="vp-inline-edit"' . ( $rid === $bearbeiten ? ' open' : '' ) . '><summary class="vp-btn" title="' . esc_attr__( 'Bearbeiten, löschen, aufteilen', 'vereinsplugin' ) . '">✎</summary>'
 				. '<form method="post" class="vp-form" style="margin-top:8px;min-width:300px">'
 				. wp_nonce_field( 'vp_bh_journal', 'vp_bh_nonce', true, false )
 				. '<input type="hidden" name="id" value="' . $rid . '">'
@@ -427,7 +431,7 @@ function vp_bh_journal() {
 		}
 
 		$text = '<br><span class="vp-muted">' . esc_html( wp_trim_words( (string) $r['beschreibung'], 14 ) ) . '</span>';
-		echo '<tr><td>' . esc_html( $r['beleg_nr'] ?? '' ) . '</td><td>' . esc_html( $r['buchung_datum'] ) . '</td>';
+		echo '<tr id="vp-b-' . $rid . '"' . ( $rid === $bearbeiten ? ' style="background:rgba(250,204,21,.15)"' : '' ) . '>' . $edit_cell . '<td>' . esc_html( $r['beleg_nr'] ?? '' ) . '</td><td>' . esc_html( $r['buchung_datum'] ) . '</td>'; // phpcs:ignore
 		if ( 'euer' === $methode ) {
 			if ( $v && 'umbuchung' === $v['art'] ) {
 				echo '<td>' . esc_html__( 'Umbuchung', 'vereinsplugin' ) . '<br><span class="vp-muted">' . esc_html( vp_bh_konto_label( $v['von'] ) . ' → ' . vp_bh_konto_label( $v['nach'] ) ) . '</span></td>';
@@ -450,13 +454,13 @@ function vp_bh_journal() {
 			echo '<td style="text-align:right">' . $num( $s['betrag'] ) . ' €</td>'; // phpcs:ignore
 			echo '<td>' . esc_html( $r['gegenpartei'] ?? '' ) . $text . '</td>'; // phpcs:ignore
 		}
-		echo '<td>' . $beleg_cell . '</td>' . $edit_cell . '</tr>'; // phpcs:ignore
+		echo '<td>' . $beleg_cell . '</td></tr>'; // phpcs:ignore
 	}
 	if ( ! $rows ) {
 		echo '<tr><td colspan="8" class="vp-muted">' . esc_html__( 'Keine Buchungen in diesem Jahr.', 'vereinsplugin' ) . '</td></tr>';
 	} elseif ( 'euer' === $methode ) {
 		$e = vp_bh_euer( $jahr );
-		echo '<tr style="font-weight:700"><td colspan="4">' . esc_html__( 'Summe', 'vereinsplugin' ) . '</td><td style="text-align:right">' . $num( $e['einnahmen'] ) . ' €</td><td style="text-align:right">' . $num( $e['ausgaben'] ) . ' €</td><td colspan="2"></td></tr>'; // phpcs:ignore
+		echo '<tr style="font-weight:700"><td colspan="' . ( $can_edit ? 5 : 4 ) . '">' . esc_html__( 'Summe', 'vereinsplugin' ) . '</td><td style="text-align:right">' . $num( $e['einnahmen'] ) . ' €</td><td style="text-align:right">' . $num( $e['ausgaben'] ) . ' €</td><td></td></tr>'; // phpcs:ignore
 	}
 	echo '</tbody></table></div>';
 	echo vp_bh_art_js(); // phpcs:ignore
@@ -487,15 +491,20 @@ function vp_bh_auswertung() {
 		echo '<p><a class="vp-btn" href="' . esc_url( vp_bh_url( array( 'vp_bh' => 'auswertung', 'jahr' => $jahr ) ) ) . '">‹ ' . esc_html__( 'Zur Übersicht', 'vereinsplugin' ) . '</a></p>';
 		/* translators: 1: account, 2: year */
 		echo '<h3>' . esc_html( sprintf( $euer ? __( 'Kontoauszug %1$s – %2$d', 'vereinsplugin' ) : __( 'Kontenblatt %1$s – %2$d', 'vereinsplugin' ), vp_bh_konto_label( $kb ), $jahr ) ) . '</h3>';
-		echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Text', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Gegenkonto', 'vereinsplugin' ) . '</th>'
+		$kann = current_user_can( 'jb_edit_journal' ) || current_user_can( 'manage_options' );
+		$sp   = $kann ? '<td></td>' : '';
+		echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr>' . ( $kann ? '<th></th>' : '' ) . '<th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Text', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Gegenkonto', 'vereinsplugin' ) . '</th>'
 			. '<th style="text-align:right">' . esc_html( $euer ? __( 'Zugang', 'vereinsplugin' ) : __( 'Soll', 'vereinsplugin' ) ) . '</th><th style="text-align:right">' . esc_html( $euer ? __( 'Abgang', 'vereinsplugin' ) : __( 'Haben', 'vereinsplugin' ) ) . '</th><th style="text-align:right">' . esc_html__( 'Stand', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
-		echo '<tr class="vp-muted"><td></td><td>' . esc_html__( 'Stand am 1.1.', 'vereinsplugin' ) . '</td><td></td><td></td><td></td><td style="text-align:right">' . $num( $blatt['anfang'] ) . '</td></tr>'; // phpcs:ignore
+		echo '<tr class="vp-muted">' . $sp . '<td></td><td>' . esc_html__( 'Stand am 1.1.', 'vereinsplugin' ) . '</td><td></td><td></td><td></td><td style="text-align:right">' . $num( $blatt['anfang'] ) . '</td></tr>'; // phpcs:ignore
 		foreach ( $blatt['zeilen'] as $z ) {
-			echo '<tr><td>' . esc_html( $z['datum'] ) . '</td><td>' . esc_html( $z['text'] ?: '—' ) . '</td><td>' . $kb_link( $z['gegen'] ) . '</td>' // phpcs:ignore
+			$stift = $kann && ! empty( $z['id'] )
+				? '<td><a class="vp-btn" title="' . esc_attr__( 'Im Journal bearbeiten', 'vereinsplugin' ) . '" href="' . esc_url( vp_bh_url( array( 'vp_bh' => 'journal', 'jahr' => $jahr, 'bearbeiten' => (int) $z['id'] ) ) . '#vp-b-' . (int) $z['id'] ) . '">✎</a></td>'
+				: $sp;
+			echo '<tr>' . $stift . '<td>' . esc_html( $z['datum'] ) . '</td><td>' . esc_html( $z['text'] ?: '—' ) . '</td><td>' . $kb_link( $z['gegen'] ) . '</td>' // phpcs:ignore
 				. '<td style="text-align:right">' . ( $z['soll'] ? $num( $z['soll'] ) : '' ) . '</td><td style="text-align:right">' . ( $z['haben'] ? $num( $z['haben'] ) : '' ) . '</td>' // phpcs:ignore
 				. '<td style="text-align:right">' . $num( $z['saldo'] ) . '</td></tr>'; // phpcs:ignore
 		}
-		echo '<tr style="font-weight:700"><td colspan="5">' . esc_html__( 'Stand am Jahresende', 'vereinsplugin' ) . '</td><td style="text-align:right">' . $num( $blatt['endsaldo'] ) . '</td></tr></tbody></table></div>'; // phpcs:ignore
+		echo '<tr style="font-weight:700"><td colspan="' . ( $kann ? 6 : 5 ) . '">' . esc_html__( 'Stand am Jahresende', 'vereinsplugin' ) . '</td><td style="text-align:right">' . $num( $blatt['endsaldo'] ) . '</td></tr></tbody></table></div>'; // phpcs:ignore
 		if ( vp_bh_ist_erfolg( $kb ) ) {
 			echo '<p class="vp-muted">' . esc_html__( 'Bei Einnahmekonten steht der Stand im Minus (Haben-Saldo) – das ist in der Buchhaltung so üblich und kein Fehler.', 'vereinsplugin' ) . '</p>';
 		}
