@@ -31,6 +31,7 @@ require_once WL_PATH . 'includes/shifts-admin.php';
 require_once WL_PATH . 'includes/shifts-ics.php';
 require_once WL_PATH . 'includes/shifts-reminders.php';
 require_once WL_PATH . 'includes/shifts-print.php';
+require_once WL_PATH . 'includes/shifts-vorlagen.php';
 
 // Bei jedem Plugin-Update (auch ohne Re-Aktivierung) DB-Schema prüfen/nachrüsten
 add_action('plugins_loaded', 'wl_maybe_run_upgrade');

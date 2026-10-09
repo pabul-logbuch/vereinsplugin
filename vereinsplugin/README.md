@@ -8,6 +8,12 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
 
 - **Wunschliste & Spenden** – öffentliche Wunschliste mit Spenden-Modal,
   Abstimmung, Schichtpläne für Veranstaltungen, Mitglieder-Import.
+  Schichtplanverwaltung: Veranstaltungen **kopieren** (neues Datum, Zeiten
+  wandern mit), als **Vorlage** speichern und daraus neue Veranstaltungen
+  anlegen oder Stationen in bestehende einfügen; einzelne **Stationen und
+  Schichten kopieren & einfügen** (persönliche Zwischenablage, auch in andere
+  Veranstaltungen, Zeiten um n Tage verschiebbar). Eintragungen werden nie
+  mitkopiert.
 - **Sitzungen & Protokolle** – Gremien, Konsent-Protokolle, TOPs, Themenspeicher,
   Aufgaben, Termine, Organigramm, PWA/App.
 - **Buchhaltung & Auslagen** – EÜR, Auslagen-Erstattung mit Beleg, Budgets,
