@@ -30,6 +30,8 @@ function wl_render_event_liste() {
             <button type="button" class="wl-btn wl-btn-primary" id="wls-neu-event-btn">+ Neue Veranstaltung</button>
         </div>
 
+        <?php echo function_exists('wls_liste_leiste_html') ? wls_liste_leiste_html() : ''; ?>
+
         <!-- Neues Event Formular -->
         <div class="wl-form-panel" id="wls-event-form-panel" style="display:none;">
             <h3>Neue Veranstaltung</h3>
@@ -99,6 +101,7 @@ function wl_render_event_liste() {
                         <td><code>[schichtplan event="<?php echo esc_html($e->slug); ?>"]</code></td>
                         <td class="wl-actions">
                             <a href="<?php echo esc_url(add_query_arg('wls_event', $e->id)); ?>" class="wl-btn wl-btn-sm wl-btn-edit">✏️ Bearbeiten</a>
+                            <?php echo function_exists('wls_event_aktionen_html') ? wls_event_aktionen_html($e) : ''; ?>
                             <button type="button" class="wl-btn wl-btn-sm wls-toggle-event-btn" data-id="<?php echo $e->id; ?>" data-aktiv="<?php echo $e->aktiv; ?>">
                                 <?php echo $e->aktiv ? '⏸ Deaktivieren' : '▶ Aktivieren'; ?>
                             </button>
@@ -144,6 +147,8 @@ function wl_render_event_editor($event_id) {
                 <button type="button" class="wl-btn wl-btn-primary" id="wls-neu-station-btn">+ Neue Station</button>
             </div>
         </div>
+
+        <?php echo function_exists('wls_editor_leiste_html') ? wls_editor_leiste_html($event) : ''; ?>
 
         <!-- Event-Einstellungen bearbeiten (Tagesgrenze etc.) -->
         <div class="wl-form-panel" id="wls-event-settings-panel" style="display:none;">
@@ -258,6 +263,7 @@ function wl_render_event_editor($event_id) {
                             data-ap2-kontakt="<?php echo esc_attr($station->ansprechperson2_kontakt); ?>">
                             ✏️ Bearbeiten
                         </button>
+                        <?php echo function_exists('wls_kopieren_knopf') ? wls_kopieren_knopf('station', $station->id) : ''; ?>
                         <button type="button" class="wl-btn wl-btn-sm wl-btn-delete wls-delete-station-btn" data-id="<?php echo $station->id; ?>">🗑️ Löschen</button>
                     </div>
                 </div>
@@ -323,6 +329,7 @@ function wl_render_event_editor($event_id) {
                                         + Person
                                     </button>
                                 <?php endif; ?>
+                                <?php echo function_exists('wls_kopieren_knopf') ? wls_kopieren_knopf('schicht', $schicht->id, '📋') : ''; ?>
                                 <button type="button" class="wl-btn wl-btn-sm wl-btn-delete wls-delete-schicht-btn" data-id="<?php echo $schicht->id; ?>">🗑️</button>
                             </td>
                         </tr>
@@ -330,6 +337,7 @@ function wl_render_event_editor($event_id) {
                     </tbody>
                 </table>
                 <button type="button" class="wl-btn wl-btn-secondary wl-btn-sm wls-neu-schicht-btn" data-station="<?php echo $station->id; ?>" style="margin-top:8px;">+ Schicht hinzufügen</button>
+                <?php echo function_exists('wls_schicht_einfuegen_html') ? wls_schicht_einfuegen_html($station, $event) : ''; ?>
             </div>
             <?php endforeach; ?>
 
