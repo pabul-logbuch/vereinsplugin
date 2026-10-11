@@ -37,7 +37,11 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
   je Voranmeldungszeitraum, wahlweise mit pauschaler Vorsteuer nach § 23a
   UStG. Abzüglich der Zahlungen ans Finanzamt (Steuerkonto, Vorgabe 7600)
   steht der offene Betrag als eigene Zeile im Rücklagenbedarf. Steuersatz je
-  Konto einstellbar (0 % für steuerfreie Umsätze).
+  Konto einstellbar (0 % für steuerfreie Umsätze). Im **Journal** steht bei
+  jeder betroffenen Buchung, wie viel USt darin steckt (ans Finanzamt zu
+  zahlen), wie viel Vorsteuer erstattet bzw. verrechnet wird, ob das Konto
+  steuerfrei ist oder ob es eine Zahlung an / Erstattung vom Finanzamt ist –
+  mit Voranmeldungszeitraum, auch in der Bearbeiten-Ansicht.
   **Bank-Import mit Abgleich** (Buchhaltung → „Bank-Import“, auch in der
   Desktop-App): Zeilen, die schon im Journal stehen, werden übersprungen.
   Erstattungen genehmigter Auslagen werden erkannt (Kennung `AUSLAGE-12` im
