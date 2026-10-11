@@ -29,7 +29,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_PROJEKT_DB_VERSION', '2' );
+define( 'VP_PROJEKT_DB_VERSION', '3' );
 
 function vp_projekt_table()          { global $wpdb; return $wpdb->prefix . 'vp_projekte'; }
 function vp_projekt_punkte_table()   { global $wpdb; return $wpdb->prefix . 'vp_projekt_punkte'; }
@@ -58,6 +58,7 @@ function vp_projekte_maybe_upgrade() {
 		ende DATETIME NULL,
 		helfende_bedarf SMALLINT UNSIGNED DEFAULT NULL,
 		teilnehmende_erwartet INT UNSIGNED DEFAULT NULL,
+		tn_szenarien VARCHAR(100) NOT NULL DEFAULT '',
 		verantwortlich_user_id BIGINT UNSIGNED DEFAULT NULL,
 		budget_id BIGINT UNSIGNED DEFAULT NULL,
 		termin_id BIGINT UNSIGNED DEFAULT NULL,
@@ -90,6 +91,10 @@ function vp_projekte_maybe_upgrade() {
 		status VARCHAR(20) NOT NULL DEFAULT 'offen',
 		verantwortlich_user_id BIGINT UNSIGNED DEFAULT NULL,
 		quelle VARCHAR(40) NOT NULL DEFAULT '',
+		posten_art VARCHAR(20) NOT NULL DEFAULT '',
+		einheit VARCHAR(10) NOT NULL DEFAULT '',
+		einzelbetrag DECIMAL(10,2) DEFAULT NULL,
+		menge DECIMAL(10,2) DEFAULT NULL,
 		sortierung INT NOT NULL DEFAULT 0,
 		erstellt_am DATETIME NULL,
 		PRIMARY KEY  (id),
@@ -543,6 +548,9 @@ function vp_render_view_projekt() {
 		'oeffentlichkeit' => __( 'Öffentlichkeitsarbeit', 'vereinsplugin' ),
 		'finanzen'        => __( 'Finanzen', 'vereinsplugin' ),
 	);
+	if ( function_exists( 'vp_sponsoring_darf' ) && vp_sponsoring_darf() ) {
+		$tabs['sponsoring'] = __( 'Sponsoring', 'vereinsplugin' );
+	}
 	$tab = isset( $_GET['p_tab'] ) ? sanitize_key( wp_unslash( $_GET['p_tab'] ) ) : 'uebersicht';
 	if ( ! isset( $tabs[ $tab ] ) ) {
 		$tab = 'uebersicht';
@@ -582,6 +590,9 @@ function vp_render_view_projekt() {
 			break;
 		case 'finanzen':
 			vp_projekt_tab_finanzen( $p, $k );
+			break;
+		case 'sponsoring':
+			vp_sponsoring_projekt_tab( $p );
 			break;
 		default:
 			vp_projekt_tab_uebersicht( $p, $k );
@@ -796,7 +807,11 @@ function vp_projekt_punkt_formular( $p, $bereich, $punkt = null ) {
 				<option value="ausgabe" <?php selected( $richtung, 'ausgabe' ); ?>><?php esc_html_e( 'Ausgabe', 'vereinsplugin' ); ?></option>
 				<option value="einnahme" <?php selected( $richtung, 'einnahme' ); ?>><?php esc_html_e( 'Einnahme', 'vereinsplugin' ); ?></option>
 			</select></label>
-			<label><?php esc_html_e( 'Betrag (€)', 'vereinsplugin' ); ?><input type="text" inputmode="decimal" name="betrag" placeholder="<?php esc_attr_e( 'noch offen', 'vereinsplugin' ); ?>" value="<?php echo ( isset( $punkt->betrag ) && null !== $punkt->betrag ) ? esc_attr( number_format( abs( (float) $punkt->betrag ), 2, ',', '' ) ) : ''; ?>"></label>
+			<?php
+			$einzel = ( in_array( (string) ( $punkt->einheit ?? '' ), array( 'tn', 'stueck' ), true ) && null !== ( $punkt->einzelbetrag ?? null ) ) ? $punkt->einzelbetrag : ( $punkt->betrag ?? null );
+			?>
+			<label><span data-vp-betrag-label><?php esc_html_e( 'Betrag (€)', 'vereinsplugin' ); ?></span><input type="text" inputmode="decimal" name="betrag" placeholder="<?php esc_attr_e( 'noch offen', 'vereinsplugin' ); ?>" value="<?php echo null !== $einzel ? esc_attr( number_format( abs( (float) $einzel ), 2, ',', '' ) ) : ''; ?>"></label>
+			<?php if ( function_exists( 'vp_projekt_posten_zusatzfelder' ) ) { vp_projekt_posten_zusatzfelder( $punkt ); } ?>
 		<?php endif; ?>
 		<label class="pp-span-2"><?php echo 'kalkulation' === $bereich ? esc_html__( 'Posten *', 'vereinsplugin' ) : esc_html__( 'Was *', 'vereinsplugin' ); ?><input type="text" name="titel" required value="<?php echo esc_attr( $punkt->titel ?? '' ); ?>"></label>
 		<?php if ( 'kalkulation' !== $bereich ) : ?>
@@ -806,6 +821,9 @@ function vp_projekt_punkt_formular( $p, $bereich, $punkt = null ) {
 		<div class="pp-form-actions"><button type="submit" class="pp-btn pp-btn-primary pp-btn-small"><?php echo $punkt ? esc_html__( 'Speichern', 'vereinsplugin' ) : esc_html__( 'Hinzufügen', 'vereinsplugin' ); ?></button></div>
 	</form>
 	<?php
+	if ( 'kalkulation' === $bereich && function_exists( 'vp_projekt_posten_js' ) ) {
+		vp_projekt_posten_js();
+	}
 }
 
 /** Kleiner Status-Knopf + Löschen für eine Punkt-Zeile. */
@@ -1154,24 +1172,30 @@ function vp_projekt_tab_finanzen( $p, $k ) {
 	$edit      = isset( $_GET['p_punkt'] ) ? (int) $_GET['p_punkt'] : 0;
 	$kasse     = function_exists( 'vp_kreis_kasse_verfuegbar' ) && vp_kreis_kasse_verfuegbar() && function_exists( 'vp_projekt_soll_ist' );
 	$si        = $kasse ? vp_projekt_soll_ist( $p, $posten ) : null;
-	$ausgaben  = 0.0;
-	$einnahmen = 0.0;
-	$offen     = 0;
-	foreach ( $posten as $x ) {
-		if ( null === $x->betrag ) {
-			$offen++;
-		} elseif ( (float) $x->betrag < 0 ) {
-			$ausgaben += abs( (float) $x->betrag );
-		} else {
-			$einnahmen += (float) $x->betrag;
+	$plan      = function_exists( 'vp_projekt_rechnung' );
+	$offen     = count( array_filter( $posten, function ( $x ) { return null === $x->betrag && null === ( $x->einzelbetrag ?? null ); } ) );
+	if ( $kasse ) {
+		vp_projekt_ks_formular( $p );
+	}
+	?>
+	<h3><?php esc_html_e( 'Kalkulation', 'vereinsplugin' ); ?></h3>
+	<?php
+	$tn  = $plan ? vp_projekt_finanzplan_kopf( $p, $posten ) : 0;
+	$r   = $plan ? vp_projekt_rechnung( $p, $posten, $tn ) : null;
+	$ausgaben  = $plan ? $r['aus'] : 0.0;
+	$einnahmen = $plan ? $r['ein_erwartet'] : 0.0;
+	if ( ! $plan ) {
+		foreach ( $posten as $x ) {
+			if ( null !== $x->betrag ) {
+				(float) $x->betrag < 0 ? $ausgaben += abs( (float) $x->betrag ) : $einnahmen += (float) $x->betrag;
+			}
 		}
 	}
 	$ergebnis = $einnahmen - $ausgaben;
 	$spalten  = $kasse ? 6 : 4;
+	// Budget-Vorschlag: Ausgaben bei der erwarteten Teilnehmendenzahl.
+	$ausgaben_basis = $plan ? vp_projekt_rechnung( $p, $posten, vp_projekt_tn_basis( $p ) )['aus'] : $ausgaben;
 	?>
-	<?php if ( $kasse ) { vp_projekt_ks_formular( $p ); } ?>
-
-	<h3><?php esc_html_e( 'Kalkulation', 'vereinsplugin' ); ?></h3>
 	<p class="pp-meta"><?php echo $kasse
 		? esc_html__( 'Plan gegen Ist: Was tatsächlich gebucht wurde (unten), ordnet ihr den Posten zu – dann seht ihr je Posten, ob ihr im Rahmen liegt.', 'vereinsplugin' )
 		: esc_html__( 'Womit rechnet ihr? Die Summe der geplanten Ausgaben ist der Vorschlag fürs Budget.', 'vereinsplugin' ); ?></p>
@@ -1189,17 +1213,19 @@ function vp_projekt_tab_finanzen( $p, $k ) {
 		<tbody>
 		<?php foreach ( $posten as $x ) :
 			$richtung = vp_projekt_posten_richtung( $x );
-			$leer     = null === $x->betrag ? '<span class="pp-meta">' . esc_html__( 'offen', 'vereinsplugin' ) . '</span>' : '';
+			$wert     = $plan ? $r['werte'][ (int) $x->id ] : ( null === $x->betrag ? null : (float) $x->betrag );
+			$leer     = null === $wert ? '<span class="pp-meta">' . esc_html__( 'offen', 'vereinsplugin' ) . '</span>' : '';
 			$ist      = $kasse ? ( $si['je_posten'][ (int) $x->id ] ?? 0.0 ) : 0.0;
-			$abw      = $ist - (float) $x->betrag;
+			$abw      = $ist - (float) $wert;
+			$zaehlt   = ! $plan || vp_projekt_posten_zaehlt( $x, 'erwartet' );
 			?>
-			<tr>
-				<td><?php echo esc_html( $x->titel ); ?><?php if ( $x->beschreibung ) : ?><div class="pp-meta"><?php echo esc_html( $x->beschreibung ); ?></div><?php endif; ?></td>
-				<td style="text-align:right"><?php echo (float) $x->betrag > 0 ? esc_html( vp_kreis_eur( $x->betrag ) ) : ( 'einnahme' === $richtung ? $leer : '' ); // phpcs:ignore ?></td>
-				<td style="text-align:right"><?php echo (float) $x->betrag < 0 ? esc_html( vp_kreis_eur( abs( (float) $x->betrag ) ) ) : ( 'ausgabe' === $richtung ? $leer : '' ); // phpcs:ignore ?></td>
+			<tr<?php echo $zaehlt ? '' : ' style="opacity:.55"'; ?>>
+				<td><?php echo esc_html( $x->titel ); ?><?php echo $plan ? vp_projekt_posten_badges( $x, $tn ) : ''; // phpcs:ignore ?><?php if ( $x->beschreibung ) : ?><div class="pp-meta"><?php echo esc_html( $x->beschreibung ); ?></div><?php endif; ?></td>
+				<td style="text-align:right"><?php echo (float) $wert > 0 ? ( $zaehlt ? '' : '<s>' ) . esc_html( vp_kreis_eur( $wert ) ) . ( $zaehlt ? '' : '</s>' ) : ( 'einnahme' === $richtung ? $leer : '' ); // phpcs:ignore ?></td>
+				<td style="text-align:right"><?php echo (float) $wert < 0 ? esc_html( vp_kreis_eur( abs( (float) $wert ) ) ) : ( 'ausgabe' === $richtung ? $leer : '' ); // phpcs:ignore ?></td>
 				<?php if ( $kasse ) : ?>
 					<td style="text-align:right"><?php echo $ist ? esc_html( vp_kreis_eur( $ist ) ) : '<span class="pp-meta">–</span>'; // phpcs:ignore ?></td>
-					<td style="text-align:right;<?php echo $abw < 0 ? 'color:#b91c1c' : 'color:#15803d'; ?>"><?php echo ( $ist && null !== $x->betrag ) ? esc_html( vp_kreis_eur( $abw ) ) : ''; ?></td>
+					<td style="text-align:right;<?php echo $abw < 0 ? 'color:#b91c1c' : 'color:#15803d'; ?>"><?php echo ( $ist && null !== $wert ) ? esc_html( vp_kreis_eur( $abw ) ) : ''; ?></td>
 				<?php endif; ?>
 				<td class="pp-ablauf-aktionen">
 					<a class="pp-meta" href="<?php echo esc_url( vp_projekt_url( $p->id, 'finanzen', array( 'p_punkt' => (int) $x->id ) ) . '#vp-punkt-form' ); ?>"><?php esc_html_e( 'bearbeiten', 'vereinsplugin' ); ?></a>
@@ -1212,7 +1238,11 @@ function vp_projekt_tab_finanzen( $p, $k ) {
 		<?php endforeach; ?>
 		<?php if ( $posten ) : ?>
 			<tr class="pp-summenzeile">
-				<td><strong><?php esc_html_e( 'Summe', 'vereinsplugin' ); ?></strong><div class="pp-meta"><?php echo esc_html( sprintf( __( 'Ergebnis Plan: %s', 'vereinsplugin' ), vp_kreis_eur( $ergebnis ) ) ); ?></div></td>
+				<td><strong><?php echo $plan && $tn ? esc_html( sprintf( __( 'Summe bei %d Teilnehmenden', 'vereinsplugin' ), $tn ) ) : esc_html__( 'Summe', 'vereinsplugin' ); ?></strong>
+					<div class="pp-meta"><?php echo esc_html( $plan
+						? sprintf( __( 'Ergebnis erwartet: %1$s · sicher: %2$s', 'vereinsplugin' ), vp_kreis_eur( $r['erg_erwartet'] ), vp_kreis_eur( $r['erg_sicher'] ) )
+						: sprintf( __( 'Ergebnis Plan: %s', 'vereinsplugin' ), vp_kreis_eur( $ergebnis ) ) ); ?></div>
+					<?php if ( $plan && ( $r['foerder_offen'] || $r['sponsoring_plan'] > $r['sponsoring_sicher'] ) ) : ?><div class="pp-meta"><?php esc_html_e( '„Sicher“ zählt nur genehmigte Förderungen und zugesagtes Sponsoring.', 'vereinsplugin' ); ?></div><?php endif; ?></td>
 				<td style="text-align:right"><strong><?php echo esc_html( vp_kreis_eur( $einnahmen ) ); ?></strong></td>
 				<td style="text-align:right"><strong><?php echo esc_html( vp_kreis_eur( $ausgaben ) ); ?></strong></td>
 				<?php if ( $kasse ) :
@@ -1276,7 +1306,7 @@ function vp_projekt_tab_finanzen( $p, $k ) {
 			echo '<p class="pp-hint">' . esc_html__( 'Noch kein Budget. Ein Budget legt an, wer die Kasse des Kreises führt (bzw. die Kassier:in des Vorstands) – die Kalkulation oben ist die Grundlage dafür.', 'vereinsplugin' ) . '</p>';
 			return;
 		}
-		$felder = '<input type="text" inputmode="decimal" name="betrag" required value="' . esc_attr( number_format( $ausgaben, 2, ',', '' ) ) . '" title="' . esc_attr__( 'Betrag in €', 'vereinsplugin' ) . '"> €';
+		$felder = '<input type="text" inputmode="decimal" name="betrag" required value="' . esc_attr( number_format( $ausgaben_basis, 2, ',', '' ) ) . '" title="' . esc_attr__( 'Betrag in €', 'vereinsplugin' ) . '"> €';
 		vp_projekt_verknuepfen_knopf( $p, 'budget', __( 'Budget für dieses Projekt anlegen', 'vereinsplugin' ), $felder );
 		$kreis_budgets = vp_kreis_budgets( $p->gremium_id );
 		if ( $kreis_budgets ) {
@@ -1292,7 +1322,7 @@ function vp_projekt_tab_finanzen( $p, $k ) {
 	?>
 	<div class="pp-kpis">
 		<div class="pp-kpi"><strong><?php echo esc_html( vp_kreis_eur( $b->betrag ) ); ?></strong><span><?php esc_html_e( 'Budget', 'vereinsplugin' ); ?></span></div>
-		<div class="pp-kpi"><strong><?php echo esc_html( vp_kreis_eur( $ausgaben ) ); ?></strong><span><?php esc_html_e( 'kalkuliert', 'vereinsplugin' ); ?></span></div>
+		<div class="pp-kpi"><strong><?php echo esc_html( vp_kreis_eur( $ausgaben_basis ) ); ?></strong><span><?php esc_html_e( 'kalkuliert', 'vereinsplugin' ); ?></span></div>
 		<div class="pp-kpi"><strong><?php echo esc_html( vp_kreis_eur( $si['ist_aus'] ) ); ?></strong><span><?php esc_html_e( 'tatsächlich ausgegeben', 'vereinsplugin' ); ?></span></div>
 		<div class="pp-kpi<?php echo ( (float) $b->betrag - $si['ist_aus'] ) < 0 ? ' is-neg' : ''; ?>"><strong><?php echo esc_html( vp_kreis_eur( (float) $b->betrag - $si['ist_aus'] ) ); ?></strong><span><?php esc_html_e( 'übrig', 'vereinsplugin' ); ?></span></div>
 	</div>
@@ -1354,6 +1384,9 @@ function vp_projekt_handle_save() {
 	if ( $id ) {
 		$alt = vp_projekt_oder_fehler( $id );
 		$wpdb->update( vp_projekt_table(), $row, array( 'id' => $id ) );
+		if ( function_exists( 'vp_projekt_betraege_aktualisieren' ) ) {
+			vp_projekt_betraege_aktualisieren( vp_projekt_get( $id ) );
+		}
 		// Verknüpften Kalendertermin mitziehen.
 		if ( $alt->termin_id && $row['beginn'] ) {
 			$wpdb->update( $wpdb->prefix . 'pp_termine', array( 'titel' => $titel, 'datum' => $row['beginn'], 'ort' => $row['ort'], 'gremium_id' => $row['gremium_id'] ), array( 'id' => (int) $alt->termin_id ) );
@@ -1445,6 +1478,28 @@ function vp_projekt_handle_punkt_save() {
 		$wert          = function_exists( 'vp_projekt_betrag_parsen' ) ? vp_projekt_betrag_parsen( $roh ) : (float) str_replace( ',', '.', $roh );
 		$row['kanal']  = $richtung;
 		$row['betrag'] = '' === $roh ? null : ( 'einnahme' === $richtung ? 1 : -1 ) * abs( $wert );
+		// Finanzplan: Art (Förderung/Sponsoring), Berechnung je TN / × Anzahl.
+		if ( function_exists( 'vp_projekt_posten_arten' ) ) {
+			$art                = sanitize_key( $_POST['posten_art'] ?? '' );
+			$row['posten_art']  = isset( vp_projekt_posten_arten()[ $art ] ) ? $art : '';
+			$einheit            = sanitize_key( $_POST['einheit'] ?? '' );
+			$row['einheit']     = isset( vp_projekt_einheiten()[ $einheit ] ) ? $einheit : '';
+			$row['einzelbetrag'] = null;
+			$row['menge']       = null;
+			if ( 'foerderung' === $row['posten_art'] ) {
+				$st            = sanitize_key( $_POST['foerder_status'] ?? 'idee' );
+				$row['status'] = isset( vp_projekt_foerder_status()[ $st ] ) ? $st : 'idee';
+			} else {
+				$row['status'] = 'offen';
+			}
+			if ( '' !== $row['einheit'] && null !== $row['betrag'] ) {
+				$row['einzelbetrag'] = $row['betrag'];
+				if ( 'stueck' === $row['einheit'] ) {
+					$row['menge'] = vp_projekt_betrag_parsen( sanitize_text_field( wp_unslash( $_POST['menge'] ?? '' ) ) );
+				}
+				$row['betrag'] = vp_projekt_posten_wert( (object) $row, vp_projekt_tn_basis( $p ) );
+			}
+		}
 	}
 	$pid = (int) ( $_POST['punkt_id'] ?? 0 );
 	if ( $pid ) {

@@ -259,6 +259,29 @@ Weitere Quellen können sich über den Filter `vp_kalender_termine` anhängen.
   Für bestehende Projekte oder nach einer Datumsänderung: „Zeitplan ab heute
   neu verteilen“ im Reiter Bausteine (nur offene Baustein-Einträge).
 
+## Projekte: Teilnehmenden-Szenarien, Förderungen, Sponsoring
+
+- **Berechnung je Posten** (Reiter Finanzen): fester Betrag, **je
+  Teilnehmende:r** (Eintritt, Verpflegung, Material) oder **× Anzahl**.
+- **Szenarien**: erwartete Teilnehmende plus weitere Zahlen (z. B. „50, 150“).
+  Ein Vergleich zeigt je Szenario Einnahmen, Ausgaben und Ergebnis, dazu den
+  **Break-even** (ab wie vielen Teilnehmenden es sich trägt). Per Chip lässt
+  sich die Kalkulation für jede Zahl anzeigen; Budget und Plan/Ist rechnen
+  mit der erwarteten Zahl.
+- **Förderungen** als Einnahme-Posten mit Status *noch nicht beantragt /
+  Antrag gestellt / genehmigt / abgelehnt*. **Ergebnis sicher** zählt nur
+  genehmigte Förderungen und zugesagtes Sponsoring, **erwartet** auch
+  beantragte; abgelehnte zählen nie (durchgestrichen).
+- **Sponsoring** als Posten mit Annahme „X Unternehmen × Betrag“.
+- **Sponsoring & Mailingliste** (Projekte & Veranstaltungen → Unterpunkt, nur
+  wer Kreise/Projekte verwaltet): Unternehmen mit Ansprechperson, Kontakt,
+  Branche, Notiz und Haken „Mailingliste“; Anfragen je Projekt mit Status
+  (ansprechen, angefragt, zugesagt, erhalten, abgesagt), Betrag und
+  Sachleistung. Im Projekt-Reiter **Sponsoring**: angenommen / angefragt /
+  zugesagt / fehlt noch. **Mailingliste**: Empfänger filtern (Liste, alle,
+  je Projekt und Status), Adressen kopieren, BCC im eigenen Mailprogramm oder
+  Rundmail von der Website – einzeln an jede:n, mit {name} und {firma}.
+
 ## „Als TOP vorschlagen“ (Themenspeicher)
 
 In Kasse/Budgets, Kreiskassen, Wunschliste, Kreisen (inkl. neuer Kreis /
