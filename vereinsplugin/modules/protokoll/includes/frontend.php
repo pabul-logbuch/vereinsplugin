@@ -3884,6 +3884,8 @@ function pp_render_view_kreis_detail() {
 
     <?php if (empty($vorlagen)) : ?><p class="pp-empty">Noch keine Rollen definiert.</p><?php endif; ?>
 
+    <?php if (function_exists('pp_render_rollen_katalog')) pp_render_rollen_katalog($kreis); ?>
+
     <h3>Neue Rolle definieren</h3>
     <?php pp_render_rolle_formular($kreis, null); ?>
     <?php

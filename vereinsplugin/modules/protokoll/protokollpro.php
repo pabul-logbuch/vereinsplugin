@@ -29,6 +29,7 @@ require_once PP_PATH . 'includes/organigramm.php';
 require_once PP_PATH . 'includes/kalender.php';
 require_once PP_PATH . 'includes/pwa.php';
 require_once PP_PATH . 'includes/frontend.php';
+require_once PP_PATH . 'includes/rollen-katalog.php';
 require_once PP_PATH . 'includes/ajax.php';
 require_once PP_PATH . 'includes/shortcodes.php';
 

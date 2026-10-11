@@ -173,6 +173,13 @@ wieder einblenden“** reaktivieren.
   Entscheide, Themenspeicher.
 - **Kreise & Rollen**, **Projekte & Veranstaltungen**, **Dokumente & Vorlagen**
   (Dokumente + Ablauf-Vorlagen) – eigene Einträge in der Hauptleiste.
+- **Rollen-Vorlagen** (Kreise & Rollen → Kreis → Mitglieder & Rollen →
+  „Rolle aus Vorlage anlegen“): Kassier:in (führt die Kreiskasse),
+  Sprecher:in, Amt für Inneres (Einkäufe, Lager, Material), Hausmeister:in und
+  Amt für Öffentlichkeitsarbeit – je mit Aufgaben, Skills sowie regelmäßigen
+  und veranstaltungsbezogenen Rollen-Aufgaben. Mehrere auf einmal wählbar,
+  vorhandene Rollen werden nicht doppelt angelegt, danach frei änderbar.
+  Eigene Vorlagen per Filter `pp_rollen_katalog`.
 
 ## Kalender
 
