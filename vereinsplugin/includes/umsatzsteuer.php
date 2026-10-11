@@ -189,6 +189,114 @@ function vp_ust_berechnung( $jahr ) {
 }
 
 /**
+ * Umsatzsteuer einer einzelnen Buchung – nach denselben Regeln wie
+ * vp_ust_berechnung() (Steuersatz des Kontos, USt-pflichtiges Jahr,
+ * Regel- oder Pauschalverfahren, Steuerkonto).
+ *
+ * @param array $r Journalzeile
+ * @return array|null null = keine USt-Auswirkung (Jahr nicht pflichtig,
+ *   Konto außerhalb von Zweckbetrieb/wGB). Sonst:
+ *   art:      ust | vst | vst_pauschal | frei | zahlung | erstattung
+ *   satz:     Steuersatz in %
+ *   steuer:   Steueranteil in Euro (positiv; bei Minderung negativ)
+ *   vst_pauschal: pauschale Vorsteuer auf diese Einnahme (nur pauschal)
+ *   zeitraum: Name des Voranmeldungszeitraums
+ *   text:     fertiger Hinweistext
+ */
+function vp_ust_buchung( array $r ) {
+	static $konten = null, $einst = array();
+	$datum = (string) ( $r['buchung_datum'] ?? '' );
+	$jahr  = (int) substr( $datum, 0, 4 );
+	if ( ! $jahr || ! function_exists( 'vp_doppik_satz' ) ) {
+		return null;
+	}
+	if ( ! isset( $einst[ $jahr ] ) ) {
+		$einst[ $jahr ] = vp_ust_einstellungen( $jahr );
+	}
+	$e = $einst[ $jahr ];
+	if ( ! $e['pflichtig'] ) {
+		return null;
+	}
+	if ( null === $konten ) {
+		$konten = vp_ust_konten();
+	}
+	$s        = vp_doppik_satz( $r );
+	$zeitraum = vp_ust_zeitraum_name( vp_ust_zeitraum( $datum, $e['zeitraum'] ), $e['zeitraum'], $jahr );
+	$eur      = static function ( $v ) {
+		return number_format( abs( (float) $v ), 2, ',', '.' ) . ' €';
+	};
+
+	foreach ( array( 'soll', 'haben' ) as $seite ) {
+		$nr = (string) $s[ $seite ];
+		if ( $nr === $e['zahlkonto'] ) {
+			$zahlung = 'soll' === $seite;
+			return array(
+				'art'      => $zahlung ? 'zahlung' : 'erstattung',
+				'satz'     => 0,
+				'steuer'   => $s['betrag'],
+				'zeitraum' => $zeitraum,
+				'text'     => sprintf(
+					$zahlung ? __( 'Umsatzsteuer-Zahlung an das Finanzamt: %1$s (%2$s)', 'vereinsplugin' ) : __( 'Umsatzsteuer-Erstattung vom Finanzamt: %1$s (%2$s)', 'vereinsplugin' ),
+					$eur( $s['betrag'] ),
+					$zeitraum
+				),
+			);
+		}
+	}
+	foreach ( array( 'soll', 'haben' ) as $seite ) {
+		$nr = (string) $s[ $seite ];
+		if ( ! isset( $konten[ $nr ] ) ) {
+			continue;
+		}
+		$k    = $konten[ $nr ];
+		$satz = (int) $k['satz'];
+		if ( $satz <= 0 ) {
+			return array( 'art' => 'frei', 'satz' => 0, 'steuer' => 0.0, 'zeitraum' => $zeitraum, 'text' => __( 'umsatzsteuerfrei (Konto mit 0 %)', 'vereinsplugin' ) );
+		}
+		$steuer = round( $s['betrag'] * $satz / ( 100 + $satz ), 2 );
+		if ( 'einnahme' === $k['typ'] ) {
+			$vz     = 'haben' === $seite ? 1 : -1;
+			$steuer = $vz * $steuer;
+			$text   = $vz > 0
+				? sprintf( __( 'darin %1$d %% USt %2$s – ans Finanzamt zu zahlen (%3$s)', 'vereinsplugin' ), $satz, $eur( $steuer ), $zeitraum )
+				: sprintf( __( 'darin %1$d %% USt %2$s – mindert die Zahllast (%3$s)', 'vereinsplugin' ), $satz, $eur( $steuer ), $zeitraum );
+			$out    = array( 'art' => 'ust', 'satz' => $satz, 'steuer' => $steuer, 'zeitraum' => $zeitraum, 'text' => $text );
+			if ( 'pauschal' === $e['verfahren'] ) {
+				$netto               = $vz * $s['betrag'] - $steuer;
+				$out['vst_pauschal'] = round( $netto * 0.07, 2 );
+				$out['text']        .= ' · ' . sprintf( $vz > 0 ? __( 'pauschale Vorsteuer (§ 23a UStG) %s', 'vereinsplugin' ) : __( 'pauschale Vorsteuer (§ 23a UStG) mindert sich um %s', 'vereinsplugin' ), $eur( $out['vst_pauschal'] ) );
+			}
+			return $out;
+		}
+		$vz = 'soll' === $seite ? 1 : -1;
+		if ( 'pauschal' === $e['verfahren'] ) {
+			return array( 'art' => 'vst_pauschal', 'satz' => $satz, 'steuer' => 0.0, 'zeitraum' => $zeitraum, 'text' => __( 'keine Vorsteuer nach Beleg – Vorsteuer wird pauschal (§ 23a UStG) aus den Einnahmen gerechnet', 'vereinsplugin' ) );
+		}
+		$steuer = $vz * $steuer;
+		return array(
+			'art'      => 'vst',
+			'satz'     => $satz,
+			'steuer'   => $steuer,
+			'zeitraum' => $zeitraum,
+			'text'     => $vz > 0
+				? sprintf( __( 'darin %1$d %% Vorsteuer %2$s – vom Finanzamt erstattet bzw. verrechnet (%3$s)', 'vereinsplugin' ), $satz, $eur( $steuer ), $zeitraum )
+				: sprintf( __( 'darin %1$d %% Vorsteuer %2$s – Gutschrift mindert die Vorsteuer (%3$s)', 'vereinsplugin' ), $satz, $eur( $steuer ), $zeitraum ),
+		);
+	}
+	return null;
+}
+
+/** Kurzer Hinweis für Journalzeilen (leer = keine USt-Auswirkung). */
+function vp_ust_buchung_html( array $r ) {
+	$u = vp_ust_buchung( $r );
+	if ( ! $u ) {
+		return '';
+	}
+	$farbe = array( 'ust' => '#fee2e2', 'vst' => '#dcfce7', 'zahlung' => '#e0f2fe', 'erstattung' => '#e0f2fe' )[ $u['art'] ] ?? '#f1f5f9';
+	return '<br><span class="vp-badge" style="background:' . esc_attr( $farbe ) . ';white-space:normal" title="' . esc_attr__( 'nach Buchhaltung → Rücklagen → Umsatzsteuer', 'vereinsplugin' ) . '">' . esc_html( $u['text'] ) . '</span>';
+}
+
+/**
  * Offene Umsatzsteuer für die Rücklagen-Übersicht: laufendes Jahr und
  * Vorjahr (dessen Jahreserklärung meist erst später abgerechnet wird).
  * @return array<int,float> Jahr => offener Betrag (nur USt-pflichtige Jahre)

@@ -387,7 +387,8 @@ function vp_bh_journal() {
 			$edit_cell = '<td><a class="vp-btn" title="' . esc_attr__( 'Bearbeiten, Beleg, aufteilen, löschen', 'vereinsplugin' ) . '" href="' . esc_url( vp_bh_url( array( 'vp_bh' => 'journal', 'jahr' => $jahr, 'bearbeiten' => $rid ) ) . '#vp-bearbeiten' ) . '">✎</a></td>';
 		}
 
-		$text = '<br><span class="vp-muted">' . esc_html( wp_trim_words( (string) $r['beschreibung'], 14 ) ) . '</span>';
+		$text = '<br><span class="vp-muted">' . esc_html( wp_trim_words( (string) $r['beschreibung'], 14 ) ) . '</span>'
+			. ( function_exists( 'vp_ust_buchung_html' ) ? vp_ust_buchung_html( $r ) : '' );
 		echo '<tr id="vp-b-' . $rid . '"' . ( $rid === $markiert ? ' style="background:rgba(250,204,21,.15)"' : '' ) . '>' . $edit_cell . '<td>' . esc_html( $r['beleg_nr'] ?? '' ) . '</td><td>' . esc_html( $r['buchung_datum'] ) . '</td>'; // phpcs:ignore
 		if ( 'euer' === $methode ) {
 			if ( $v && 'umbuchung' === $v['art'] ) {
@@ -587,6 +588,11 @@ function vp_bh_bearbeiten_karte( $id, $jahr, $methode, $extras, $has_nc ) {
 	// Buchung + Zuordnung
 	$h .= '<form method="post" class="vp-form">' . $nonce . '<input type="hidden" name="id" value="' . (int) $id . '">';
 	$h .= '<h4>' . esc_html__( 'Buchung', 'vereinsplugin' ) . '</h4>' . vp_bh_buchung_felder( $methode, $r );
+	$ust = function_exists( 'vp_ust_buchung' ) ? vp_ust_buchung( $r ) : null;
+	if ( $ust ) {
+		$h .= '<p class="vp-note" style="margin:6px 0">' . esc_html__( 'Umsatzsteuer:', 'vereinsplugin' ) . ' ' . esc_html( $ust['text'] )
+			. ' <span class="vp-muted">' . esc_html__( '(Stand vor dem Speichern; Steuersätze unter Rücklagen → Umsatzsteuer)', 'vereinsplugin' ) . '</span></p>';
+	}
 	$h .= '<h4>' . esc_html__( 'Zuordnung', 'vereinsplugin' ) . '</h4>' . $extras( $r );
 	$h .= '<p style="display:flex;gap:8px;flex-wrap:wrap"><button class="vp-btn vp-btn-primary" name="vp_bh_edit" value="1">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button>'
 		. '<a class="vp-btn" href="' . esc_url( $zurueck ) . '">' . esc_html__( 'Abbrechen', 'vereinsplugin' ) . '</a></p></form>';
