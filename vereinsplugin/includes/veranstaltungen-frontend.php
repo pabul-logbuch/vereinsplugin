@@ -319,7 +319,10 @@ function vp_ev_aktionen() {
 	check_admin_referer( 'vp_ev', 'vp_ev_nonce' );
 	$aktion = sanitize_key( wp_unslash( $_POST['vp_ev_aktion'] ) );
 	$id     = (int) ( $_POST['post_id'] ?? 0 );
-	$back   = remove_query_arg( array( 'vp_ev_msg', 'vp_ev_err' ), wp_get_referer() ?: home_url( '/' ) );
+	// Rücksprung: die Seite, von der das Formular kam (mitgeschickt, weil
+	// wp_get_referer() bei Formularen an dieselbe URL nichts liefert).
+	$zurueck = wp_validate_redirect( esc_url_raw( wp_unslash( (string) ( $_POST['vp_ev_zurueck'] ?? '' ) ) ), '' );
+	$back    = remove_query_arg( array( 'vp_ev_msg', 'vp_ev_err' ), $zurueck ?: ( wp_get_referer() ?: home_url( '/' ) ) );
 	$msg    = '';
 	$err    = '';
 
@@ -660,7 +663,17 @@ function vp_ev_versanddaten( $id, $termin = null ) {
  * ====================================================================== */
 
 function vp_ev_kopf( $aktion, $post_id = 0 ) {
-	return wp_nonce_field( 'vp_ev', 'vp_ev_nonce', true, false ) . '<input type="hidden" name="vp_ev_aktion" value="' . esc_attr( $aktion ) . '"><input type="hidden" name="post_id" value="' . (int) $post_id . '">';
+	return wp_nonce_field( 'vp_ev', 'vp_ev_nonce', true, false ) . '<input type="hidden" name="vp_ev_aktion" value="' . esc_attr( $aktion ) . '"><input type="hidden" name="post_id" value="' . (int) $post_id . '">'
+		. '<input type="hidden" name="vp_ev_zurueck" value="' . esc_url( vp_ev_aktuelle_url() ) . '">';
+}
+
+/** Vollständige URL der aktuellen Seite (mit Parametern). */
+function vp_ev_aktuelle_url() {
+	$host = (string) ( $_SERVER['HTTP_HOST'] ?? '' );
+	if ( '' === $host ) {
+		return vp_ev_url();
+	}
+	return remove_query_arg( array( 'vp_ev_msg', 'vp_ev_err' ), set_url_scheme( 'http://' . $host . wp_unslash( (string) ( $_SERVER['REQUEST_URI'] ?? '/' ) ) ) );
 }
 
 function vp_render_veranstaltungen_section() {
@@ -905,8 +918,8 @@ function vp_ev_editor( $id ) {
 	echo '<p><label><input type="checkbox" name="sichtbar" value="1" ' . checked( ! $post || 'publish' === $post->post_status, true, false ) . '> ' . esc_html__( 'Auf der Website veröffentlichen (Veranstaltungsseite)', 'vereinsplugin' ) . '</label></p>';
 	echo '<fieldset style="border:0;padding:0"><legend><strong>' . esc_html__( 'Über welche Kanäle wird verbreitet?', 'vereinsplugin' ) . '</strong></legend><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:4px 16px;margin-top:6px">';
 	foreach ( $kanaele as $k => $label ) {
-		echo '<label style="font-weight:normal"><input type="checkbox" name="kanaele[]" value="' . esc_attr( $k ) . '" ' . checked( in_array( $k, $gew, true ), true, false ) . '> ' . esc_html( $label )
-			. ' <span class="vp-muted">' . esc_html( in_array( $k, $auto, true ) ? __( '(automatisch)', 'vereinsplugin' ) : __( '(von Hand)', 'vereinsplugin' ) ) . '</span></label>';
+		echo '<label class="vp-check" style="margin:0"><input type="checkbox" name="kanaele[]" value="' . esc_attr( $k ) . '" ' . checked( in_array( $k, $gew, true ), true, false ) . '> <span>' . esc_html( $label )
+			. ' <span class="vp-muted">' . esc_html( in_array( $k, $auto, true ) ? __( '(automatisch)', 'vereinsplugin' ) : __( '(von Hand)', 'vereinsplugin' ) ) . '</span></span></label>';
 	}
 	echo '</div></fieldset>';
 	echo '<p><button class="vp-btn vp-btn-primary">' . esc_html( $id ? __( 'Speichern', 'vereinsplugin' ) : __( 'Anlegen und weiter', 'vereinsplugin' ) ) . '</button></p></form></div>';
