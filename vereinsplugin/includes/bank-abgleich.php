@@ -11,6 +11,13 @@
  *     gleich, Datum nah: der Beleg wird an die neue Buchung gehängt.
  *  3. Dublette – Datum, Betrag und Gegenpartei stehen auf demselben
  *     Geldkonto schon im Journal (Kontoauszug doppelt hochgeladen).
+ *  4. Schon gebucht – eine Buchung mit gleichem Betrag auf demselben
+ *     Geldkonto, von Hand oder beim Einbuchen eines Belegs angelegt. Die
+ *     Bankzeile wird ihr nur zugeordnet (vp_bank_zuordnungen), es entsteht
+ *     keine zweite Buchung.
+ *
+ * Jede Zeile bekommt außerdem eine Kandidatenliste (offene Auslagen, Belege,
+ * schon gebuchte Buchungen), aus der sich im Import frei wählen lässt.
  *
  * Genutzt vom Bank-Import im Mitgliederbereich (vp_bh_import) und von der
  * Desktop-App (REST /actions/bank-csv).
@@ -104,6 +111,61 @@ function vp_bank_offene_belege() {
 	);
 }
 
+/* =========================================================================
+ * Zuordnungen: Bankzeile ↔ schon vorhandene Buchung
+ * ====================================================================== */
+
+/** Schlüssel einer Bankzeile (bleibt bei überlappenden Exporten gleich). */
+function vp_bank_zeilen_schluessel( $geldkonto, array $r ) {
+	return md5( implode( '|', array(
+		(string) $geldkonto,
+		(string) ( $r['datum'] ?? '' ),
+		number_format( round( (float) ( $r['betrag'] ?? 0 ), 2 ), 2, '.', '' ),
+		trim( (string) ( $r['name'] ?? '' ) ),
+		trim( mb_substr( (string) ( $r['zweck'] ?? '' ), 0, 80 ) ),
+	) ) );
+}
+
+/** @return array Schlüssel => Journal-ID */
+function vp_bank_zuordnungen() {
+	return (array) get_option( 'vp_bank_zuordnungen', array() );
+}
+
+function vp_bank_zuordnung_merken( $geldkonto, array $r, $journal_id ) {
+	$z = vp_bank_zuordnungen();
+	$z[ vp_bank_zeilen_schluessel( $geldkonto, $r ) ] = (int) $journal_id;
+	if ( count( $z ) > 5000 ) {
+		$z = array_slice( $z, -5000, null, true );
+	}
+	update_option( 'vp_bank_zuordnungen', $z, false );
+}
+
+/** Kurztext einer Journalbuchung für Auswahllisten. */
+function vp_bank_buchung_text( array $j ) {
+	$teile = array_filter( array(
+		mysql2date( 'd.m.Y', $j['buchung_datum'] ),
+		(string) ( $j['konto'] ?? '' ),
+		(string) ( $j['gegenpartei'] ?? '' ),
+		wp_trim_words( (string) $j['beschreibung'], 8 ),
+	) );
+	return sprintf( __( 'Buchung #%d', 'vereinsplugin' ), (int) $j['id'] ) . ' · ' . implode( ' · ', $teile );
+}
+
+/** Kurztext einer Auslage / eines Belegs für Auswahllisten. */
+function vp_bank_auslage_text( array $a ) {
+	$beleg = 'beleg' === ( $a['status'] ?? '' );
+	return sprintf(
+		/* translators: 1: Beleg/Auslage, 2: id, 3: amount, 4: date, 5: person, 6: text */
+		__( '%1$s #%2$d · %3$s € · %4$s · %5$s · %6$s', 'vereinsplugin' ),
+		$beleg ? __( 'Beleg', 'vereinsplugin' ) : __( 'Auslage', 'vereinsplugin' ),
+		(int) $a['id'],
+		number_format( abs( (float) $a['betrag'] ), 2, ',', '.' ),
+		mysql2date( 'd.m.Y', $a['ausgabe_datum'] ),
+		(string) ( $a['user_name'] ?? '' ),
+		wp_trim_words( trim( ( ! empty( $a['haendler'] ) ? $a['haendler'] . ': ' : '' ) . (string) $a['beschreibung'] ), 8 )
+	);
+}
+
 /**
  * Kontoauszugs-Zeilen abgleichen.
  *
@@ -114,6 +176,10 @@ function vp_bank_offene_belege() {
  *   vorgemerkt: true, wenn die Bank den Umsatz nur vorgemerkt hat,
  *   auslage:  null | { id, text, grund },
  *   beleg:    null | { id, text, konto }
+ *   gebucht:  null | { id, text } – schon gebuchte Buchung (nur zuordnen),
+ *   wahl:     Vorschlag für die Verknüpfung: '' | 'a:ID' | 'b:ID' | 'j:ID',
+ *   kandidaten: [ { v, g, t } ] alle wählbaren Verknüpfungen
+ *              (g = auslage | beleg | gebucht)
  *   Bei einer erkannten Auslage wird konto auf das Auslagen-Konto gesetzt.
  */
 function vp_bank_abgleich( array $rows, $geldkonto = '' ) {
@@ -124,15 +190,29 @@ function vp_bank_abgleich( array $rows, $geldkonto = '' ) {
 	$auslagen = vp_bank_offene_auslagen();
 	$belege   = vp_bank_offene_belege();
 	$k_ausl   = function_exists( 'vp_bh_vorgabe_geldkonto' ) ? vp_bh_vorgabe_geldkonto( 'Auslage' ) : '1600';
-	$vergeben = array( 'j' => array(), 'a' => array(), 'b' => array() );
+	$vergeben = array( 'j' => array(), 'a' => array(), 'b' => array(), 'g' => array() );
+	$zuord    = vp_bank_zuordnungen();
+	$zugeord  = array_flip( array_map( 'intval', array_values( $zuord ) ) );
 
 	foreach ( $rows as &$r ) {
 		$betrag       = round( (float) $r['betrag'], 2 );
 		$r['dublette'] = 0;
 		$r['auslage']  = null;
 		$r['beleg']    = null;
+		$r['gebucht']  = null;
+		$r['wahl']     = '';
+		$r['kandidaten'] = array();
+		$r['zugeordnet'] = false;
 		// Vorgemerkte Umsätze können sich noch ändern – erst nach der Buchung importieren.
 		$r['vorgemerkt'] = false !== stripos( (string) ( $r['info'] ?? '' ), 'vorgemerkt' );
+
+		// 0. Schon einmal einer Buchung zugeordnet (früherer Import).
+		$schl = vp_bank_zeilen_schluessel( $geldkonto, $r );
+		if ( ! empty( $zuord[ $schl ] ) && $wpdb->get_var( $wpdb->prepare( "SELECT id FROM `{$jt}` WHERE id = %d", (int) $zuord[ $schl ] ) ) ) {
+			$r['dublette']   = (int) $zuord[ $schl ];
+			$r['zugeordnet'] = true;
+			continue;
+		}
 
 		// 1. Dublette: gleiches Datum, gleicher Betrag, gleiche Gegenpartei.
 		$sql  = "SELECT id, gegenpartei, beschreibung FROM `{$jt}` WHERE buchung_datum = %s AND ABS(betrag - %f) < 0.005";
@@ -156,7 +236,54 @@ function vp_bank_abgleich( array $rows, $geldkonto = '' ) {
 				break;
 			}
 		}
-		if ( $r['dublette'] || $r['vorgemerkt'] || $betrag >= 0 ) {
+		if ( $r['dublette'] || $r['vorgemerkt'] ) {
+			continue;
+		}
+
+		// Kandidaten: schon gebuchte Buchungen (gleicher Betrag, ±45 Tage,
+		// nicht aus einem Bank-Import, noch keiner Bankzeile zugeordnet).
+		$sql  = "SELECT * FROM `{$jt}` WHERE ABS(betrag - %f) < 0.005 AND buchung_datum BETWEEN DATE_SUB(%s, INTERVAL 45 DAY) AND DATE_ADD(%s, INTERVAL 45 DAY) AND quelle <> 'Bank KSK'";
+		$args = array( $betrag, $r['datum'], $r['datum'] );
+		if ( $mit_gk ) {
+			$sql   .= ' AND geldkonto = %s';
+			$args[] = (string) $geldkonto;
+		} else {
+			$sql .= " AND quelle <> 'Auslage'";
+		}
+		$sql   .= ' ORDER BY ABS(DATEDIFF(buchung_datum, %s)) LIMIT 15';
+		$args[] = $r['datum'];
+		$gebuchte = array();
+		foreach ( (array) $wpdb->get_results( $wpdb->prepare( $sql, $args ), ARRAY_A ) as $j ) {
+			if ( isset( $zugeord[ (int) $j['id'] ] ) ) {
+				continue;
+			}
+			$gebuchte[]        = $j;
+			$r['kandidaten'][] = array( 'v' => 'j:' . (int) $j['id'], 'g' => 'gebucht', 't' => vp_bank_buchung_text( $j ) );
+		}
+		if ( $betrag < 0 ) {
+			foreach ( $auslagen as $a ) {
+				if ( abs( abs( (float) $a['betrag'] ) - abs( $betrag ) ) < 0.005 ) {
+					$r['kandidaten'][] = array( 'v' => 'a:' . (int) $a['id'], 'g' => 'auslage', 't' => sprintf( __( 'Erstattung: %s', 'vereinsplugin' ), vp_bank_auslage_text( $a ) ) );
+				}
+			}
+			// Belege: gleicher Betrag zuerst, dann nach Datumsabstand.
+			$bank_ts = strtotime( $r['datum'] );
+			$liste   = $belege;
+			usort( $liste, static function ( $x, $y ) use ( $betrag, $bank_ts ) {
+				$gx = abs( abs( (float) $x['betrag'] ) - abs( $betrag ) ) < 0.005 ? 0 : 1;
+				$gy = abs( abs( (float) $y['betrag'] ) - abs( $betrag ) ) < 0.005 ? 0 : 1;
+				if ( $gx !== $gy ) {
+					return $gx - $gy;
+				}
+				return abs( $bank_ts - strtotime( $x['ausgabe_datum'] ) ) - abs( $bank_ts - strtotime( $y['ausgabe_datum'] ) );
+			} );
+			foreach ( array_slice( $liste, 0, 40 ) as $b ) {
+				$r['kandidaten'][] = array( 'v' => 'b:' . (int) $b['id'], 'g' => 'beleg', 't' => sprintf( __( 'Beleg anhängen: %s', 'vereinsplugin' ), vp_bank_auslage_text( $b ) ) );
+			}
+		}
+
+		if ( $betrag >= 0 ) {
+			vp_bank_gebucht_vorschlagen( $r, $gebuchte, $vergeben );
 			continue;
 		}
 
@@ -205,6 +332,7 @@ function vp_bank_abgleich( array $rows, $geldkonto = '' ) {
 		if ( $beste ) {
 			$r['auslage']                   = $beste;
 			$r['konto']                     = $k_ausl;
+			$r['wahl']                      = 'a:' . $beste['id'];
 			$vergeben['a'][ $beste['id'] ] = true;
 			continue;
 		}
@@ -239,24 +367,56 @@ function vp_bank_abgleich( array $rows, $geldkonto = '' ) {
 			if ( '' === (string) $r['konto'] && '' !== $r['beleg']['konto'] ) {
 				$r['konto'] = $r['beleg']['konto'];
 			}
+			$r['wahl']                         = 'b:' . (int) $nah['id'];
 			$vergeben['b'][ (int) $nah['id'] ] = true;
+			continue;
 		}
+
+		// 4. Schon gebucht (z. B. eingebuchter Beleg oder von Hand erfasst).
+		vp_bank_gebucht_vorschlagen( $r, $gebuchte, $vergeben );
 	}
+	unset( $r );
 	return $rows;
+}
+
+/**
+ * Schon gebuchte Buchung vorschlagen: gleicher Betrag, höchstens 14 Tage
+ * entfernt, die nächste gewinnt.
+ */
+function vp_bank_gebucht_vorschlagen( array &$r, array $gebuchte, array &$vergeben ) {
+	$bank_ts = strtotime( $r['datum'] );
+	foreach ( $gebuchte as $j ) {
+		if ( isset( $vergeben['g'][ (int) $j['id'] ] ) ) {
+			continue;
+		}
+		if ( abs( $bank_ts - strtotime( $j['buchung_datum'] ) ) / DAY_IN_SECONDS > 14 ) {
+			break; // nach Abstand sortiert
+		}
+		$r['gebucht']                     = array( 'id' => (int) $j['id'], 'text' => vp_bank_buchung_text( $j ) );
+		$r['wahl']                        = 'j:' . (int) $j['id'];
+		$vergeben['g'][ (int) $j['id'] ] = true;
+		return;
+	}
 }
 
 /**
  * Eine Zeile des Kontoauszugs buchen.
  *
- * @param array  $r         datum, betrag, name, zweck, konto
+ * @param array  $r         datum, betrag, name, zweck, konto; optional
+ *                          ruecklage_id, budget_id, kostenstelle
  * @param string $geldkonto Geldkonto des Kontoauszugs
  * @param int    $auslage_id  > 0: als Erstattung dieser Auslage buchen
  * @param int    $beleg_id    > 0: diesen Beleg (status „beleg“) anhängen
  * @param string $beschreibung Text für die Buchung (Vorgabe: Verwendungszweck)
- * @return array{id:int,art:string} art = auslage | beleg | normal; id 0 = nicht gebucht
+ * @param int    $journal_id  > 0: nicht buchen, nur dieser schon gebuchten
+ *                            Buchung zuordnen
+ * @return array{id:int,art:string} art = auslage | beleg | zugeordnet | normal; id 0 = nicht gebucht
  */
-function vp_bank_zeile_buchen( array $r, $geldkonto, $auslage_id = 0, $beleg_id = 0, $beschreibung = null ) {
+function vp_bank_zeile_buchen( array $r, $geldkonto, $auslage_id = 0, $beleg_id = 0, $beschreibung = null, $journal_id = 0 ) {
 	global $wpdb;
+	if ( $journal_id > 0 ) {
+		return vp_bank_zeile_zuordnen( $r, $geldkonto, (int) $journal_id );
+	}
 	$betrag = round( (float) $r['betrag'], 2 );
 	$datum  = sanitize_text_field( (string) ( $r['datum'] ?? '' ) );
 	if ( ! $datum || 0.0 === $betrag || ! function_exists( 'jb_journal_add' ) ) {
@@ -317,6 +477,10 @@ function vp_bank_zeile_buchen( array $r, $geldkonto, $auslage_id = 0, $beleg_id 
 			$data['beschreibung'] = 'Beleg #' . (int) $beleg['id'] . ': ' . $beleg['beschreibung'];
 		}
 	}
+	$data = array_merge( $data, vp_bank_zuordnung_felder( $r ) );
+	if ( $beleg && empty( $data['budget_id'] ) && ! empty( $beleg['budget_id'] ) ) {
+		$data['budget_id'] = (int) $beleg['budget_id'];
+	}
 	$data['konto']     = $konto;
 	$data['sphaere']   = ( $konto && function_exists( 'jb_konto_sphaere' ) ) ? jb_konto_sphaere( $konto ) : '';
 	$data['kategorie'] = $konto ? trim( $konto . ' ' . ( function_exists( 'jb_konto_get' ) ? ( jb_konto_get( $konto )->bezeichnung ?? '' ) : '' ) ) : 'Import';
@@ -326,6 +490,66 @@ function vp_bank_zeile_buchen( array $r, $geldkonto, $auslage_id = 0, $beleg_id 
 		return array( 'id' => $id, 'art' => 'beleg' );
 	}
 	return array( 'id' => $id, 'art' => 'normal' );
+}
+
+/** Rücklage / Budget / Kostenstelle aus einer Importzeile (nur gesetzte Werte). */
+function vp_bank_zuordnung_felder( array $r ) {
+	$d = array();
+	foreach ( array( 'ruecklage_id', 'budget_id' ) as $k ) {
+		if ( ! empty( $r[ $k ] ) ) {
+			$d[ $k ] = (int) $r[ $k ];
+		}
+	}
+	if ( isset( $r['kostenstelle'] ) && '' !== trim( (string) $r['kostenstelle'] ) ) {
+		$d['kostenstelle'] = sanitize_text_field( (string) $r['kostenstelle'] );
+	}
+	return $d;
+}
+
+/**
+ * Bankzeile einer schon gebuchten Buchung zuordnen – keine neue Buchung.
+ * Gesetzte Zuordnungsfelder (Rücklage, Budget, Kostenstelle) und eine
+ * fehlende Gegenpartei werden an der Buchung ergänzt.
+ *
+ * @return array{id:int,art:string}
+ */
+function vp_bank_zeile_zuordnen( array $r, $geldkonto, $journal_id ) {
+	global $wpdb;
+	$jt = jb_table_journal();
+	$j  = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM `{$jt}` WHERE id = %d", (int) $journal_id ), ARRAY_A );
+	if ( ! $j || abs( (float) $j['betrag'] - round( (float) $r['betrag'], 2 ) ) >= 0.005 ) {
+		return array( 'id' => 0, 'art' => 'zugeordnet' );
+	}
+	if ( in_array( (int) $j['id'], array_map( 'intval', vp_bank_zuordnungen() ), true ) ) {
+		return array( 'id' => 0, 'art' => 'zugeordnet' );
+	}
+	$cols = array_keys( $j );
+	$upd  = array_intersect_key( vp_bank_zuordnung_felder( $r ), array_flip( $cols ) );
+	if ( isset( $j['gegenpartei'] ) && '' === trim( (string) $j['gegenpartei'] ) && '' !== trim( (string) ( $r['name'] ?? '' ) ) ) {
+		$upd['gegenpartei'] = sanitize_text_field( (string) $r['name'] );
+	}
+	if ( $upd ) {
+		$wpdb->update( $jt, $upd, array( 'id' => (int) $j['id'] ) );
+		if ( ! empty( $upd['ruecklage_id'] ) && function_exists( 'jb_table_ruecklagen' ) ) {
+			$wpdb->update( jb_table_ruecklagen(), array( 'letzte_zahlung' => $j['buchung_datum'] ), array( 'id' => (int) $upd['ruecklage_id'] ) );
+		}
+	}
+	vp_bank_zuordnung_merken( $geldkonto, $r, (int) $j['id'] );
+	return array( 'id' => (int) $j['id'], 'art' => 'zugeordnet' );
+}
+
+/**
+ * Gewählte Verknüpfung ('a:12', 'b:5', 'j:88' oder '') in die Parameter von
+ * vp_bank_zeile_buchen() zerlegen.
+ *
+ * @return array{0:int,1:int,2:int} auslage_id, beleg_id, journal_id
+ */
+function vp_bank_wahl_zerlegen( $wahl ) {
+	$ids = array( 'a' => 0, 'b' => 0, 'j' => 0 );
+	if ( preg_match( '/^([abj]):(\d+)$/', (string) $wahl, $m ) ) {
+		$ids[ $m[1] ] = (int) $m[2];
+	}
+	return array( $ids['a'], $ids['b'], $ids['j'] );
 }
 
 /* =========================================================================

@@ -654,31 +654,54 @@ function bankCsvForm(d) {
       if (res.luecke) out.append(el('div', { class: 'note warn' }, res.luecke));
       // Abgleich vom Server: dublette (schon im Journal), auslage (Erstattung), beleg (passender Beleg),
       // vorgemerkt (bei der Bank noch nicht gebucht).
-      zeilen.forEach((z) => { z.nimm = !z.dublette && !z.vorgemerkt; z.nimmAuslage = !!z.auslage; z.nimmBeleg = !!z.beleg; });
+      zeilen.forEach((z) => { z.nimm = !z.dublette && !z.vorgemerkt; z.wahl = z.wahl || ''; z.text = z.zweck || ''; z.ruecklage_id = ''; z.budget_id = ''; z.kostenstelle = ''; });
       if (anzahlVorgemerkt(zeilen)) out.append(el('div', { class: 'note warn' }, `${anzahlVorgemerkt(zeilen)} Umsätze sind bei der Bank nur vorgemerkt und werden nicht importiert – sie kommen mit dem nächsten Export.`));
       const anz = (k) => zeilen.filter((z) => z[k]).length;
-      if (anz('dublette') || anz('auslage') || anz('beleg')) {
-        out.append(el('div', { class: 'note' }, `Abgleich: ${anz('dublette')} schon im Journal (werden übersprungen), ${anz('auslage')} Auslagen-Erstattungen, ${anz('beleg')} passende Belege. Bitte prüfen – Haken lassen sich ändern.`));
+      if (anz('dublette') || anz('auslage') || anz('beleg') || anz('gebucht')) {
+        out.append(el('div', { class: 'note' }, `Abgleich: ${anz('dublette')} schon im Journal (werden übersprungen), ${anz('auslage')} Auslagen-Erstattungen, ${anz('beleg')} passende Belege, ${anz('gebucht')} schon gebuchte Buchungen (werden nur zugeordnet). Unter „Verknüpfung" lässt sich jede Zeile frei zuordnen.`));
       }
-      const haken = (an, onchange, label) => el('label', {}, el('input', { type: 'checkbox', checked: an ? '' : null, onchange }), ' ', label);
+      const gruppen = [['gebucht', 'Schon gebucht – nur zuordnen, nicht neu buchen'], ['auslage', 'Erstattung einer genehmigten Auslage'], ['beleg', 'Eingereichten Beleg anhängen (neue Buchung)']];
       const t = el('table');
-      t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Buchen'), el('th', {}, 'Datum'), el('th', {}, 'Betrag'), el('th', {}, 'Name / Zweck'), el('th', {}, 'SKR-Konto'))));
+      t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Buchen'), el('th', {}, 'Datum'), el('th', {}, 'Betrag'), el('th', {}, 'Name / Zweck · Verknüpfung'), el('th', {}, 'SKR-Konto'))));
       const tb = el('tbody');
       zeilen.forEach((z, i) => {
         const info = el('td', {}, `${z.name || ''} — ${z.zweck || ''}`);
-        if (z.dublette) info.append(el('div', { class: 'muted' }, `schon im Journal (Buchung #${z.dublette})`));
+        if (z.dublette) info.append(el('div', { class: 'muted' }, `${z.zugeordnet ? 'schon zugeordnet' : 'schon im Journal'} (Buchung #${z.dublette})`));
         if (z.vorgemerkt) info.append(el('div', { class: 'muted' }, 'nur vorgemerkt'));
-        if (z.auslage) {
-          info.append(el('div', {}, haken(true, (e) => { zeilen[i].nimmAuslage = e.target.checked; }, `${z.auslage.text} (erkannt an: ${z.auslage.grund})`)));
-          info.append(el('div', { class: 'muted' }, 'Ausgabe ist schon gebucht – diese Zeile gleicht nur das Auslagen-Konto aus.'));
+        const kontoSel = kontoSelect(d.konten, z.konto || '', 'alle', '– noch nicht zugeordnet –', { onchange: (e) => { zeilen[i].konto = e.target.value; } });
+        const kontoFix = el('span', { class: 'muted' });
+        if (!z.dublette && !z.vorgemerkt) {
+          if (z.auslage) info.append(el('div', { class: 'muted' }, `Erkannt: ${z.auslage.text} (an: ${z.auslage.grund})`));
+          else if (z.beleg) info.append(el('div', { class: 'muted' }, `Erkannt: ${z.beleg.text}`));
+          else if (z.gebucht) info.append(el('div', { class: 'muted' }, `Erkannt: schon gebucht als ${z.gebucht.text}`));
+          const wahl = el('select', { style: 'max-width:100%' }, el('option', { value: '' }, 'Neue Buchung'));
+          gruppen.forEach(([g, label]) => {
+            const opts = (z.kandidaten || []).filter((k) => k.g === g);
+            if (opts.length) wahl.append(el('optgroup', { label }, ...opts.map((k) => el('option', { value: k.v }, k.t))));
+          });
+          wahl.value = z.wahl;
+          const fest = () => {
+            const art = wahl.value.charAt(0);
+            kontoSel.hidden = art === 'a' || art === 'j';
+            kontoFix.textContent = art === 'a' ? 'Auslagen-Konto (fest)' : art === 'j' ? 'wie gebucht' : '';
+          };
+          wahl.addEventListener('change', () => { zeilen[i].wahl = wahl.value; fest(); });
+          fest();
+          info.append(el('div', {}, el('span', { class: 'muted' }, 'Verknüpfung '), wahl));
+          const felder = el('div', { class: 'detail' });
+          const txt = el('input', { type: 'text', value: z.text, oninput: (e) => { zeilen[i].text = e.target.value; } });
+          felder.append('Buchungstext', txt);
+          if (d.ruecklagen.length) felder.append('Für Rücklage', selectEl([['', '— keine —'], ...d.ruecklagen.map((x) => [String(x.id), x.bezeichnung])], '', { onchange: (e) => { zeilen[i].ruecklage_id = e.target.value; } }));
+          if (d.budgets.length) felder.append('Budget belasten', selectEl([['', '— kein Budget —'], ...d.budgets.map((b) => [String(b.id), `${b.zweck}${b.kostenstelle ? ' · ' + b.kostenstelle : ''}`])], '', { onchange: (e) => { zeilen[i].budget_id = e.target.value; } }));
+          felder.append('Kostenstelle', el('input', { type: 'text', oninput: (e) => { zeilen[i].kostenstelle = e.target.value; } }));
+          info.append(el('details', {}, el('summary', {}, 'Text, Rücklage, Budget, Kostenstelle'), felder));
         }
-        if (z.beleg) info.append(el('div', {}, haken(true, (e) => { zeilen[i].nimmBeleg = e.target.checked; }, `${z.beleg.text} anhängen`)));
         tb.append(el('tr', z.dublette || z.vorgemerkt ? { style: 'opacity:.6' } : {},
           el('td', {}, el('input', { type: 'checkbox', checked: z.nimm ? '' : null, onchange: (e) => { zeilen[i].nimm = e.target.checked; } })),
           el('td', {}, z.datum),
           el('td', { style: 'text-align:right;color:' + (z.betrag < 0 ? 'var(--err-ink)' : 'var(--accent)') }, eur(z.betrag)),
           info,
-          el('td', {}, kontoSelect(d.konten, z.konto || '', 'alle', '– noch nicht zugeordnet –', { onchange: (e) => { zeilen[i].konto = e.target.value; } }))));
+          el('td', {}, kontoSel, kontoFix)));
       });
       t.append(tb);
       out.append(t);
@@ -689,10 +712,12 @@ function bankCsvForm(d) {
           const rows = zeilen.map((z) => ({
             datum: z.datum, betrag: z.betrag, name: z.name, zweck: z.zweck, konto: z.konto, geldkonto: geld.value,
             skip: !z.nimm, vorgemerkt: !!z.vorgemerkt,
-            auslage_id: z.auslage && z.nimmAuslage ? z.auslage.id : 0,
-            beleg_id: z.beleg && z.nimmBeleg ? z.beleg.id : 0,
+            auslage_id: z.wahl.startsWith('a:') ? Number(z.wahl.slice(2)) : 0,
+            beleg_id: z.wahl.startsWith('b:') ? Number(z.wahl.slice(2)) : 0,
+            journal_id: z.wahl.startsWith('j:') ? Number(z.wahl.slice(2)) : 0,
+            text: z.text, ruecklage_id: Number(z.ruecklage_id) || 0, budget_id: Number(z.budget_id) || 0, kostenstelle: z.kostenstelle,
           }));
-          await bhAktion('bank-csv', { import: true, rows }, (r) => `${r.imported} Buchung(en) importiert${r.erstattungen ? `, davon ${r.erstattungen} Auslagen-Erstattungen` : ''}${r.belege ? `, ${r.belege} Belege angehängt` : ''}.`);
+          await bhAktion('bank-csv', { import: true, rows }, (r) => `${r.imported} Buchung(en) importiert${r.erstattungen ? `, davon ${r.erstattungen} Auslagen-Erstattungen` : ''}${r.belege ? `, ${r.belege} Belege angehängt` : ''}${r.zugeordnet ? `, ${r.zugeordnet} schon gebuchten Buchungen zugeordnet` : ''}.`);
           showJournal();
         } catch (e) { toast(e.message, true); imp.disabled = false; }
       });

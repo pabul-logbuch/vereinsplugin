@@ -724,17 +724,25 @@ function vp_bh_import() {
 		$rows      = json_decode( (string) wp_unslash( $_POST['rows'] ?? '[]' ), true );
 		$konto_map = (array) ( $_POST['konto'] ?? array() );
 		$nimm      = (array) ( $_POST['nimm'] ?? array() );
-		$ausl      = (array) ( $_POST['auslage'] ?? array() );
-		$bel       = (array) ( $_POST['beleg'] ?? array() );
-		$n         = array( 'normal' => 0, 'auslage' => 0, 'beleg' => 0, 'weg' => 0 );
+		$wahl      = (array) ( $_POST['wahl'] ?? array() );
+		$texte     = (array) ( $_POST['text'] ?? array() );
+		$rl        = (array) ( $_POST['rl'] ?? array() );
+		$bu        = (array) ( $_POST['bu'] ?? array() );
+		$ks        = (array) ( $_POST['ks'] ?? array() );
+		$n         = array( 'normal' => 0, 'auslage' => 0, 'beleg' => 0, 'zugeordnet' => 0, 'weg' => 0 );
 		$gebucht   = array();
 		foreach ( (array) $rows as $i => $r ) {
 			if ( empty( $nimm[ $i ] ) ) {
 				$n['weg']++;
 				continue;
 			}
-			$r['konto'] = sanitize_text_field( wp_unslash( $konto_map[ $i ] ?? ( $r['konto'] ?? '' ) ) );
-			$res        = vp_bank_zeile_buchen( $r, $geldkonto, (int) ( $ausl[ $i ] ?? 0 ), (int) ( $bel[ $i ] ?? 0 ) );
+			$r['konto']        = sanitize_text_field( wp_unslash( $konto_map[ $i ] ?? ( $r['konto'] ?? '' ) ) );
+			$r['ruecklage_id'] = (int) ( $rl[ $i ] ?? 0 );
+			$r['budget_id']    = (int) ( $bu[ $i ] ?? 0 );
+			$r['kostenstelle'] = sanitize_text_field( wp_unslash( $ks[ $i ] ?? '' ) );
+			$text              = isset( $texte[ $i ] ) ? sanitize_textarea_field( wp_unslash( $texte[ $i ] ) ) : null;
+			list( $a_id, $b_id, $j_id ) = vp_bank_wahl_zerlegen( sanitize_text_field( wp_unslash( $wahl[ $i ] ?? '' ) ) );
+			$res = vp_bank_zeile_buchen( $r, $geldkonto, $a_id, $b_id, $text, $j_id );
 			if ( $res['id'] ) {
 				$n[ $res['art'] ]++;
 				$gebucht[] = $r;
@@ -757,6 +765,9 @@ function vp_bh_import() {
 		if ( $n['beleg'] ) {
 			$teile[] = sprintf( __( '%d Belege angehängt', 'vereinsplugin' ), $n['beleg'] );
 		}
+		if ( $n['zugeordnet'] ) {
+			$teile[] = sprintf( __( '%d Zeilen schon gebuchten Buchungen zugeordnet (nicht doppelt gebucht)', 'vereinsplugin' ), $n['zugeordnet'] );
+		}
 		if ( $n['weg'] ) {
 			$teile[] = sprintf( __( '%d Zeilen übersprungen', 'vereinsplugin' ), $n['weg'] );
 		}
@@ -767,15 +778,16 @@ function vp_bh_import() {
 	$konten = jb_konten_all();
 
 	if ( 'preview' === $step ) {
-		$zahl = array( 'dublette' => 0, 'auslage' => 0, 'beleg' => 0, 'vorgemerkt' => 0 );
+		$zahl = array( 'dublette' => 0, 'auslage' => 0, 'beleg' => 0, 'gebucht' => 0, 'vorgemerkt' => 0 );
 		foreach ( $parsed as $r ) {
 			$zahl['dublette']   += $r['dublette'] ? 1 : 0;
-			$zahl['auslage']    += $r['auslage'] ? 1 : 0;
-			$zahl['beleg']      += $r['beleg'] ? 1 : 0;
+			$zahl['auslage']    += ! empty( $r['auslage'] ) ? 1 : 0;
+			$zahl['beleg']      += ! empty( $r['beleg'] ) ? 1 : 0;
+			$zahl['gebucht']    += ! empty( $r['gebucht'] ) ? 1 : 0;
 			$zahl['vorgemerkt'] += ! empty( $r['vorgemerkt'] ) ? 1 : 0;
 		}
 		$daten = array_column( $parsed, 'datum' );
-		$out  .= '<form method="post"><h3>' . esc_html__( 'Vorschau – Konten prüfen, dann importieren', 'vereinsplugin' ) . '</h3>';
+		$out  .= '<form method="post" id="vp-imp-form"><h3>' . esc_html__( 'Vorschau – zuordnen, Konten prüfen, dann importieren', 'vereinsplugin' ) . '</h3>';
 		$out  .= '<p class="vp-muted">' . esc_html( sprintf(
 			/* translators: 1: rows, 2: from, 3: to */
 			__( '%1$d Zeilen vom %2$s bis %3$s.', 'vereinsplugin' ),
@@ -792,19 +804,42 @@ function vp_bh_import() {
 		}
 		if ( array_sum( $zahl ) ) {
 			$out .= '<div class="vp-note">' . esc_html( sprintf(
-				/* translators: 1: duplicates, 2: reimbursements, 3: receipts */
-				__( 'Abgleich: %1$d schon im Journal (werden übersprungen), %2$d Auslagen-Erstattungen, %3$d passende Belege. Bitte prüfen – Haken lassen sich ändern.', 'vereinsplugin' ),
+				/* translators: 1: duplicates, 2: reimbursements, 3: receipts, 4: already booked */
+				__( 'Abgleich: %1$d schon im Journal (werden übersprungen), %2$d Auslagen-Erstattungen, %3$d passende Belege, %4$d schon gebuchte Buchungen (werden nur zugeordnet). Bitte prüfen – unter „Verknüpfung“ lässt sich jede Zeile frei zuordnen.', 'vereinsplugin' ),
 				$zahl['dublette'],
 				$zahl['auslage'],
-				$zahl['beleg']
+				$zahl['beleg'],
+				$zahl['gebucht']
 			) ) . '</div>';
 		}
+		$ruecklagen = function_exists( 'jb_ruecklagen_get_all' ) ? jb_ruecklagen_get_all() : array();
+		$budgets    = function_exists( 'jb_budgets_get_all' ) ? jb_budgets_get_all() : array();
+		$rl_opt     = '<option value="0">' . esc_html__( '– keine –', 'vereinsplugin' ) . '</option>';
+		foreach ( $ruecklagen as $rr ) {
+			$rl_opt .= '<option value="' . (int) $rr['id'] . '">' . esc_html( $rr['bezeichnung'] ) . '</option>';
+		}
+		$bu_opt = '<option value="0">' . esc_html__( '– kein Budget –', 'vereinsplugin' ) . '</option>';
+		foreach ( $budgets as $bb ) {
+			$bu_opt .= '<option value="' . (int) $bb['id'] . '">' . esc_html( $bb['zweck'] . ( $bb['kostenstelle'] ? ' · ' . $bb['kostenstelle'] : '' ) . ' (' . number_format( (float) ( $bb['rest'] ?? 0 ), 2, ',', '.' ) . ' € frei)' ) . '</option>';
+		}
+		$gruppen = array(
+			'gebucht' => __( 'Schon gebucht – nur zuordnen, nicht neu buchen', 'vereinsplugin' ),
+			'auslage' => __( 'Erstattung einer genehmigten Auslage', 'vereinsplugin' ),
+			'beleg'   => __( 'Eingereichten Beleg anhängen (neue Buchung)', 'vereinsplugin' ),
+		);
+
 		$out .= wp_nonce_field( 'vp_bh_import', 'vp_imp_nonce', true, false );
 		$out .= '<input type="hidden" name="geldkonto" value="' . esc_attr( $geldkonto ) . '">';
-		$out .= '<input type="hidden" name="rows" value="' . esc_attr( wp_json_encode( $parsed ) ) . '">';
-		$out .= '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Buchen', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Gegenpartei / Zweck', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Betrag', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Konto', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
+		$schlank = array_map( static function ( $r ) {
+			unset( $r['kandidaten'] );
+			return $r;
+		}, $parsed );
+		$out .= '<input type="hidden" name="rows" value="' . esc_attr( wp_json_encode( $schlank ) ) . '">';
+		$out .= function_exists( 'vp_bh_kostenstellen_datalist' ) ? vp_bh_kostenstellen_datalist() : '';
+		$out .= '<div class="vp-table-wrap"><table class="vp-table vp-imp-tabelle"><thead><tr><th>' . esc_html__( 'Buchen', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Gegenpartei / Zweck · Verknüpfung', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Betrag', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Konto', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
 		foreach ( $parsed as $i => $r ) {
-			$sel = '<select name="konto[' . (int) $i . ']"><option value="">–</option>';
+			$i   = (int) $i;
+			$sel = '<select name="konto[' . $i . ']" class="vp-imp-konto"><option value="">–</option>';
 			$hat = false;
 			foreach ( $konten as $k ) {
 				$hat  = $hat || (string) $r['konto'] === (string) $k->nummer;
@@ -813,29 +848,52 @@ function vp_bh_import() {
 			if ( ! $hat && '' !== (string) $r['konto'] ) {
 				$sel .= '<option value="' . esc_attr( $r['konto'] ) . '" selected>' . esc_html( $r['konto'] ) . '</option>';
 			}
-			$sel .= '</select>';
+			$sel .= '</select><span class="vp-muted vp-imp-konto-fix" hidden></span>';
 
 			$hinweis = '';
-			$aus = $r['dublette'] || ! empty( $r['vorgemerkt'] );
+			$aus     = $r['dublette'] || ! empty( $r['vorgemerkt'] );
 			if ( $r['dublette'] ) {
-				$hinweis .= '<br><span class="vp-badge">' . esc_html( sprintf( __( 'schon im Journal (Buchung #%d)', 'vereinsplugin' ), $r['dublette'] ) ) . '</span>';
+				$hinweis .= '<br><span class="vp-badge">' . esc_html( sprintf(
+					! empty( $r['zugeordnet'] ) ? __( 'schon zugeordnet (Buchung #%d)', 'vereinsplugin' ) : __( 'schon im Journal (Buchung #%d)', 'vereinsplugin' ),
+					$r['dublette']
+				) ) . '</span>';
 			}
 			if ( ! empty( $r['vorgemerkt'] ) ) {
 				$hinweis .= '<br><span class="vp-badge">' . esc_html__( 'nur vorgemerkt', 'vereinsplugin' ) . '</span>';
 			}
-			if ( $r['auslage'] ) {
-				$hinweis .= '<br><label><input type="checkbox" name="auslage[' . (int) $i . ']" value="' . (int) $r['auslage']['id'] . '" checked> '
-					. esc_html( $r['auslage']['text'] ) . ' <span class="vp-muted">(' . esc_html( sprintf( __( 'erkannt an: %s', 'vereinsplugin' ), $r['auslage']['grund'] ) ) . ')</span></label>'
-					. '<br><span class="vp-muted">' . esc_html__( 'Ausgabe ist schon gebucht – diese Zeile gleicht nur das Auslagen-Konto aus.', 'vereinsplugin' ) . '</span>';
-			}
-			if ( $r['beleg'] ) {
-				$hinweis .= '<br><label><input type="checkbox" name="beleg[' . (int) $i . ']" value="' . (int) $r['beleg']['id'] . '" checked> '
-					. esc_html( sprintf( __( '%s anhängen', 'vereinsplugin' ), $r['beleg']['text'] ) ) . '</label>';
+			if ( ! $aus ) {
+				if ( ! empty( $r['auslage'] ) ) {
+					$hinweis .= '<br><span class="vp-muted">' . esc_html( sprintf( __( 'Erkannt: %1$s (an: %2$s)', 'vereinsplugin' ), $r['auslage']['text'], $r['auslage']['grund'] ) ) . '</span>';
+				} elseif ( ! empty( $r['beleg'] ) ) {
+					$hinweis .= '<br><span class="vp-muted">' . esc_html( sprintf( __( 'Erkannt: %s', 'vereinsplugin' ), $r['beleg']['text'] ) ) . '</span>';
+				} elseif ( ! empty( $r['gebucht'] ) ) {
+					$hinweis .= '<br><span class="vp-muted">' . esc_html( sprintf( __( 'Erkannt: schon gebucht als %s', 'vereinsplugin' ), $r['gebucht']['text'] ) ) . '</span>';
+				}
+				$w  = '<select name="wahl[' . $i . ']" class="vp-imp-wahl" style="max-width:100%"><option value="">' . esc_html__( 'Neue Buchung', 'vereinsplugin' ) . '</option>';
+				foreach ( $gruppen as $g => $label ) {
+					$opt = '';
+					foreach ( (array) ( $r['kandidaten'] ?? array() ) as $kd ) {
+						if ( $kd['g'] === $g ) {
+							$opt .= '<option value="' . esc_attr( $kd['v'] ) . '"' . selected( $r['wahl'] ?? '', $kd['v'], false ) . '>' . esc_html( $kd['t'] ) . '</option>';
+						}
+					}
+					if ( '' !== $opt ) {
+						$w .= '<optgroup label="' . esc_attr( $label ) . '">' . $opt . '</optgroup>';
+					}
+				}
+				$w .= '</select>';
+				$hinweis .= '<br><label class="vp-muted">' . esc_html__( 'Verknüpfung', 'vereinsplugin' ) . '<br>' . $w . '</label>';
+				$hinweis .= '<details class="vp-imp-details"><summary>' . esc_html__( 'Text, Rücklage, Budget, Kostenstelle', 'vereinsplugin' ) . '</summary><div class="vp-form-grid">'
+					. '<label>' . esc_html__( 'Buchungstext', 'vereinsplugin' ) . '<input type="text" name="text[' . $i . ']" value="' . esc_attr( (string) $r['zweck'] ) . '"></label>'
+					. ( $ruecklagen ? '<label>' . esc_html__( 'Für Rücklage', 'vereinsplugin' ) . '<select name="rl[' . $i . ']">' . $rl_opt . '</select></label>' : '' )
+					. ( $budgets ? '<label>' . esc_html__( 'Budget belasten', 'vereinsplugin' ) . '<select name="bu[' . $i . ']">' . $bu_opt . '</select></label>' : '' )
+					. '<label>' . esc_html__( 'Kostenstelle', 'vereinsplugin' ) . '<input type="text" name="ks[' . $i . ']" list="vp_ks_liste"></label>'
+					. '</div><p class="vp-muted vp-imp-zuord-hinweis" hidden>' . esc_html__( 'Bei „schon gebucht“ werden nur gesetzte Felder an der vorhandenen Buchung ergänzt.', 'vereinsplugin' ) . '</p></details>';
 			}
 			$out .= sprintf(
 				'<tr%s><td><input type="checkbox" name="nimm[%d]" value="1"%s aria-label="%s"></td><td>%s</td><td>%s<br><span class="vp-muted">%s</span>%s</td><td style="text-align:right;%s">%s €</td><td>%s</td></tr>',
 				$aus ? ' style="opacity:.6"' : '',
-				(int) $i,
+				$i,
 				$aus ? '' : ' checked',
 				esc_attr__( 'Diese Zeile buchen', 'vereinsplugin' ),
 				esc_html( $r['datum'] ),
@@ -850,6 +908,13 @@ function vp_bh_import() {
 		$out .= '</tbody></table></div>';
 		$out .= '<p class="vp-muted">' . esc_html( sprintf( __( 'Geldkonto des Kontoauszugs: %s', 'vereinsplugin' ), function_exists( 'vp_bh_konto_label' ) ? vp_bh_konto_label( $geldkonto ) : $geldkonto ) ) . '</p>';
 		$out .= '<p><button class="vp-btn vp-btn-primary" name="vp_imp_commit" value="1">' . esc_html__( 'Angehakte Zeilen importieren', 'vereinsplugin' ) . '</button></p></form>';
+		// Konto-Auswahl passend zur Verknüpfung: bei Erstattung fest das
+		// Auslagen-Konto, bei „schon gebucht“ bleibt die vorhandene Buchung.
+		$out .= '<script>(function(){var f=document.getElementById("vp-imp-form");if(!f)return;'
+			. 'var T={a:' . wp_json_encode( __( 'Auslagen-Konto (fest)', 'vereinsplugin' ) ) . ',j:' . wp_json_encode( __( 'wie gebucht', 'vereinsplugin' ) ) . '};'
+			. 'function upd(s){var tr=s.closest("tr"),k=tr.querySelector(".vp-imp-konto"),fx=tr.querySelector(".vp-imp-konto-fix"),h=tr.querySelector(".vp-imp-zuord-hinweis"),t=s.value.charAt(0);'
+			. 'var fest=t==="a"||t==="j";k.hidden=fest;k.disabled=fest;fx.hidden=!fest;fx.textContent=T[t]||"";if(h)h.hidden=t!=="j";}'
+			. 'f.querySelectorAll(".vp-imp-wahl").forEach(function(s){s.addEventListener("change",function(){upd(s);});upd(s);});})();</script>';
 		return $out;
 	}
 
@@ -857,7 +922,7 @@ function vp_bh_import() {
 	ob_start();
 	?>
 	<p class="vp-muted"><?php esc_html_e( 'CSV-Export aus dem Online-Banking (Sparkasse: „Umsätze → CSV-CAMT-Format“). Datei hochladen oder Inhalt einfügen. Konten werden automatisch per Stichwort-Regel vorgeschlagen und lassen sich vor dem Import ändern.', 'vereinsplugin' ); ?></p>
-	<p class="vp-muted"><?php esc_html_e( 'Beim Import wird abgeglichen: Zeilen, die schon im Journal stehen, werden übersprungen. Erstattungen genehmigter Auslagen werden erkannt und nicht noch einmal als Ausgabe gebucht. Passende Belege („nur Beleg“) werden angehängt.', 'vereinsplugin' ); ?></p>
+	<p class="vp-muted"><?php esc_html_e( 'Beim Import wird abgeglichen: Zeilen, die schon im Journal stehen, werden übersprungen. Erstattungen genehmigter Auslagen werden erkannt und nicht noch einmal als Ausgabe gebucht. Passende Belege („nur Beleg“) werden angehängt. Was schon gebucht ist (z. B. ein eingebuchter Beleg), wird nur zugeordnet. In der Vorschau lässt sich jede Zeile frei verknüpfen und mit Rücklage, Budget und Kostenstelle versehen.', 'vereinsplugin' ); ?></p>
 	<form method="post" enctype="multipart/form-data" class="vp-card">
 		<?php echo wp_nonce_field( 'vp_bh_import', 'vp_imp_nonce', true, false ); // phpcs:ignore ?>
 		<p><label><?php esc_html_e( 'CSV-Datei', 'vereinsplugin' ); ?><br><input type="file" name="csvfile" accept=".csv,text/csv"></label></p>

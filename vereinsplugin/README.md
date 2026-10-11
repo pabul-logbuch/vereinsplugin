@@ -50,6 +50,16 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
   bewusst mit einem Tag Überschneidung, die der Abgleich überspringt. Beginnt
   ein Kontoauszug später, warnt der Import vor einer Lücke. Bei der Bank nur
   **vorgemerkte** Umsätze (Sparkasse, Spalte „Info“) werden nicht importiert.
+  **Schon gebucht:** Steht eine Buchung mit gleichem Betrag auf demselben
+  Geldkonto schon im Journal (z. B. ein eingebuchter Beleg oder von Hand
+  erfasst, ±14 Tage), schlägt der Import vor, die Bankzeile ihr nur
+  **zuzuordnen** – es entsteht keine zweite Buchung, und spätere Importe mit
+  Überschneidung erkennen die Zeile wieder. In der Vorschau lässt sich jede
+  Zeile unter **Verknüpfung** frei wählen: neue Buchung, schon gebuchte
+  Buchung (±45 Tage), Erstattung einer offenen Auslage oder ein beliebiger
+  eingereichter Beleg. Dazu je Zeile **Buchungstext, Rücklage, Budget und
+  Kostenstelle** (bei „schon gebucht“ werden gesetzte Felder an der
+  vorhandenen Buchung ergänzt).
 - **Veranstaltungs-Publisher** – Veranstaltungen an Mastodon, Bluesky, Telegram,
   Presse, Signal u. a. verteilen. Im Mitgliederbereich unter
   **Veranstaltungen** in drei Schritten: (1) Daten (Titel, Beginn, Ort,
