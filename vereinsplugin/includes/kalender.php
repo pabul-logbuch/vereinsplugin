@@ -147,31 +147,41 @@ function vp_kal_quelle_veranstaltungen( $von, $bis, $user_id ) {
 		'posts_per_page'   => 300,
 		'suppress_filters' => true,
 		'meta_query'       => array(
-			array( 'key' => '_jbf_date_start', 'value' => $von, 'compare' => '>=' ),
 			// datetime-local ('2026-10-05T19:00') – exklusive Obergrenze = Folgetag.
+			// Keine Untergrenze: bei Reihen ist _jbf_date_start nur der erste Termin,
+			// spätere Termine können im Zeitraum liegen (Filter unten je Termin).
 			array( 'key' => '_jbf_date_start', 'value' => gmdate( 'Y-m-d', strtotime( $bis . ' +1 day' ) ), 'compare' => '<' ),
 		),
 	) );
+	$bis_excl = gmdate( 'Y-m-d', strtotime( $bis . ' +1 day' ) );
 
 	$out = array();
 	foreach ( $posts as $p ) {
-		$raw = (string) get_post_meta( $p->ID, '_jbf_date_start', true );
-		$ts  = strtotime( str_replace( 'T', ' ', $raw ) );
-		if ( ! $ts ) {
-			continue;
+		$termine = function_exists( 'vp_ev_termine' ) ? vp_ev_termine( $p->ID ) : array( array( 'beginn' => (string) get_post_meta( $p->ID, '_jbf_date_start', true ), 'ort' => '', 'notiz' => '' ) );
+		$reihe   = count( $termine ) > 1;
+		foreach ( $termine as $i => $t ) {
+			$raw = (string) $t['beginn'];
+			if ( '' === $raw || substr( $raw, 0, 10 ) < $von || substr( $raw, 0, 10 ) >= $bis_excl ) {
+				continue;
+			}
+			$ts = strtotime( str_replace( 'T', ' ', $raw ) );
+			if ( ! $ts ) {
+				continue;
+			}
+			$ganztags = strlen( $raw ) <= 10;
+			$titel    = get_the_title( $p ) . ( $reihe ? ' (' . ( $i + 1 ) . '/' . count( $termine ) . ')' : '' );
+			if ( 'publish' !== $p->post_status ) {
+				$titel .= ' (' . __( 'Entwurf', 'vereinsplugin' ) . ')';
+			}
+			$ort = trim( (string) ( $t['ort'] ?? '' ) ) ?: (string) get_post_meta( $p->ID, '_jbf_location', true );
+			$out[] = vp_kal_eintrag( 'veranstaltung', $titel, $ganztags ? gmdate( 'Y-m-d', $ts ) : gmdate( 'Y-m-d H:i', $ts ), array(
+				'id'       => 'veranstaltung-' . $p->ID . ( $reihe ? '-' . $i : '' ),
+				'ganztags' => $ganztags,
+				'ort'      => $ort,
+				'info'     => trim( ( ! empty( $t['notiz'] ) ? $t['notiz'] . ' · ' : '' ) . wp_trim_words( (string) get_post_meta( $p->ID, '_jbf_short_text', true ), 40 ) ),
+				'url'      => 'publish' === $p->post_status ? get_permalink( $p ) : ( $editor ? vp_kal_area_url( array( 'vp_tab' => 'veranstaltungen', 'vp_ev' => $p->ID ) ) : '' ),
+			) );
 		}
-		$ganztags = strlen( $raw ) <= 10;
-		$titel    = get_the_title( $p );
-		if ( 'publish' !== $p->post_status ) {
-			$titel .= ' (' . __( 'Entwurf', 'vereinsplugin' ) . ')';
-		}
-		$out[] = vp_kal_eintrag( 'veranstaltung', $titel, $ganztags ? gmdate( 'Y-m-d', $ts ) : gmdate( 'Y-m-d H:i', $ts ), array(
-			'id'       => 'veranstaltung-' . $p->ID,
-			'ganztags' => $ganztags,
-			'ort'      => (string) get_post_meta( $p->ID, '_jbf_location', true ),
-			'info'     => wp_trim_words( (string) get_post_meta( $p->ID, '_jbf_short_text', true ), 40 ),
-			'url'      => 'publish' === $p->post_status ? get_permalink( $p ) : ( $editor ? vp_kal_area_url( array( 'vp_tab' => 'veranstaltungen' ) ) : '' ),
-		) );
 	}
 	return $out;
 }

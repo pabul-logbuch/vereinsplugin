@@ -61,6 +61,12 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
   automatische Kanäle einzeln oder gesammelt senden (Vorstand), manuelle
   Kanäle (WhatsApp, Facebook-Veranstaltung, Website, Newsletter, Aushang)
   abhaken, mit Link und Versandprotokoll.
+  **Veranstaltungsreihen:** beliebig viele Termine (je mit eigenem Ort und
+  Hinweis, Serien-Generator wöchentlich / 14-tägig / monatlich). Die Reihe
+  wird entweder einmal beworben (Terminliste wird auf Wunsch an die Texte
+  angehängt) oder jeder Termin einzeln – mit eigener Kanal-Checkliste und
+  eigenem Versand, Text beginnt mit dem Termin. Mitglieder-Kalender und
+  Veranstaltungsseite zeigen alle Termine.
 
 ## Installation
 

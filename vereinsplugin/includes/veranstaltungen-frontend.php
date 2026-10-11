@@ -116,6 +116,94 @@ function vp_ev_kanal_setzen( $post_id, $kanal, $erledigt, $link = '', $text = ''
 	update_post_meta( $post_id, '_vp_ev_kanal_status', $s );
 }
 
+/* =========================================================================
+ * Veranstaltungsreihen: mehrere Termine je Veranstaltung
+ * Meta _vp_ev_termine = [ [beginn 'Y-m-dTH:i', ort, notiz], … ] (sortiert).
+ * _jbf_date_start bleibt der erste Termin (Kampagnen, ältere Auswertungen).
+ * ====================================================================== */
+
+/** Termine (bei Einzelterminen der eine Termin aus _jbf_date_start). */
+function vp_ev_termine( $post_id ) {
+	$t = get_post_meta( $post_id, '_vp_ev_termine', true );
+	if ( is_array( $t ) && $t ) {
+		return array_values( $t );
+	}
+	$d = (string) get_post_meta( $post_id, '_jbf_date_start', true );
+	return $d ? array( array( 'beginn' => $d, 'ort' => '', 'notiz' => '' ) ) : array();
+}
+
+function vp_ev_ist_reihe( $post_id ) {
+	$t = get_post_meta( $post_id, '_vp_ev_termine', true );
+	return is_array( $t ) && count( $t ) > 1;
+}
+
+/** Werbung je Termin (eigene Kanal-Checkliste und eigener Versand je Termin)? */
+function vp_ev_je_termin( $post_id ) {
+	return vp_ev_ist_reihe( $post_id ) && '1' === (string) get_post_meta( $post_id, '_vp_ev_je_termin', true );
+}
+
+/** „Fr, 17.07.2026, 19:00 Uhr · Jugendhaus · Hinweis“ */
+function vp_ev_termin_text( array $t, $post_id = 0 ) {
+	$ts = strtotime( str_replace( 'T', ' ', (string) $t['beginn'] ) );
+	if ( ! $ts ) {
+		return '';
+	}
+	$zeit = gmdate( 'H:i', $ts );
+	$text = date_i18n( 'D, d.m.Y', $ts ) . ( '00:00' !== $zeit ? ', ' . $zeit . ' Uhr' : '' );
+	$ort  = trim( (string) ( $t['ort'] ?? '' ) );
+	if ( '' === $ort && $post_id ) {
+		$ort = (string) get_post_meta( $post_id, '_jbf_location', true );
+	}
+	return $text . ( '' !== $ort ? ' · ' . $ort : '' ) . ( ! empty( $t['notiz'] ) ? ' · ' . $t['notiz'] : '' );
+}
+
+/** Terminliste als Text (eine Zeile je Termin). */
+function vp_ev_terminliste_text( $post_id, $nur_kommende = false ) {
+	$z = array();
+	foreach ( vp_ev_termine( $post_id ) as $t ) {
+		if ( $nur_kommende && strtotime( str_replace( 'T', ' ', $t['beginn'] ) ) < current_time( 'timestamp' ) - DAY_IN_SECONDS ) {
+			continue;
+		}
+		$z[] = '• ' . vp_ev_termin_text( $t, $post_id );
+	}
+	return implode( "\n", $z );
+}
+
+/** Schlüssel in der Kanal-Checkliste: „instagram“ oder je Termin „instagram@2“. */
+function vp_ev_status_key( $kanal, $termin = null ) {
+	return null === $termin ? $kanal : $kanal . '@' . (int) $termin;
+}
+
+/** Termine aus dem Formular lesen (Zeilen + Serien-Generator), sortiert. */
+function vp_ev_termine_aus_post( array $p ) {
+	$out = array();
+	foreach ( (array) ( $p['termine'] ?? array() ) as $t ) {
+		$b = sanitize_text_field( (string) ( $t['beginn'] ?? '' ) );
+		if ( preg_match( '/^\d{4}-\d{2}-\d{2}/', $b ) ) {
+			$out[] = array( 'beginn' => substr( $b, 0, 16 ), 'ort' => sanitize_text_field( (string) ( $t['ort'] ?? '' ) ), 'notiz' => sanitize_text_field( (string) ( $t['notiz'] ?? '' ) ) );
+		}
+	}
+	// Serie erzeugen: ab Datum, Rhythmus, Anzahl.
+	$ab  = sanitize_text_field( (string) ( $p['serie_ab'] ?? '' ) );
+	$anz = min( 52, max( 0, (int) ( $p['serie_anzahl'] ?? 0 ) ) );
+	$rh  = sanitize_key( (string) ( $p['serie_rhythmus'] ?? 'woche' ) );
+	if ( preg_match( '/^\d{4}-\d{2}-\d{2}/', $ab ) && $anz > 0 ) {
+		$d    = new DateTimeImmutable( str_replace( 'T', ' ', $ab ), new DateTimeZone( 'UTC' ) );
+		$step = array( 'woche' => '+1 week', '2wochen' => '+2 weeks', 'monat' => '+1 month' )[ $rh ] ?? '+1 week';
+		for ( $i = 0; $i < $anz; $i++ ) {
+			$out[] = array( 'beginn' => $d->format( 'Y-m-d\TH:i' ), 'ort' => '', 'notiz' => '' );
+			$d     = $d->modify( $step );
+		}
+	}
+	// Doppelte Zeitpunkte zusammenfassen, sortieren.
+	$u = array();
+	foreach ( $out as $t ) {
+		$u[ $t['beginn'] ] = isset( $u[ $t['beginn'] ] ) && '' === $t['ort'] ? $u[ $t['beginn'] ] : $t;
+	}
+	ksort( $u );
+	return array_values( $u );
+}
+
 /** Fortschritt: [material_fertig, material_gesamt, kanaele_fertig, kanaele_gesamt] (nur Pflichtmaterial). */
 function vp_ev_fortschritt( $post_id ) {
 	$mf = $mg = 0;
@@ -128,6 +216,15 @@ function vp_ev_fortschritt( $post_id ) {
 	}
 	$k  = vp_ev_gewaehlt( $post_id );
 	$st = vp_ev_kanal_status( $post_id );
+	if ( vp_ev_je_termin( $post_id ) ) {
+		$soll = array();
+		foreach ( array_keys( vp_ev_termine( $post_id ) ) as $i ) {
+			foreach ( $k as $kk ) {
+				$soll[] = vp_ev_status_key( $kk, $i );
+			}
+		}
+		return array( $mf, $mg, count( array_intersect( $soll, array_keys( $st ) ) ), count( $soll ) );
+	}
 	$kf = count( array_intersect( $k, array_keys( $st ) ) );
 	return array( $mf, $mg, $kf, count( $k ) );
 }
@@ -257,8 +354,19 @@ function vp_ev_aktionen() {
 			} else {
 				$id = (int) wp_insert_post( $post );
 			}
-			update_post_meta( $id, '_jbf_date_start', sanitize_text_field( (string) ( $p['beginn'] ?? '' ) ) );
 			update_post_meta( $id, '_jbf_location', sanitize_text_field( (string) ( $p['ort'] ?? '' ) ) );
+			if ( 'reihe' === ( $p['art'] ?? '' ) ) {
+				$termine = vp_ev_termine_aus_post( $p );
+				update_post_meta( $id, '_vp_ev_termine', $termine );
+				update_post_meta( $id, '_jbf_date_start', $termine ? $termine[0]['beginn'] : '' );
+				update_post_meta( $id, '_vp_ev_je_termin', ! empty( $p['je_termin'] ) ? '1' : '0' );
+				update_post_meta( $id, '_vp_ev_termine_anhaengen', ! empty( $p['anhaengen'] ) ? '1' : '0' );
+				update_post_meta( $id, '_vp_ev_art', 'reihe' );
+			} else {
+				delete_post_meta( $id, '_vp_ev_termine' );
+				update_post_meta( $id, '_vp_ev_art', 'einzeln' );
+				update_post_meta( $id, '_jbf_date_start', sanitize_text_field( (string) ( $p['beginn'] ?? '' ) ) );
+			}
 			$k = array_values( array_intersect( array_map( 'sanitize_key', (array) ( $p['kanaele'] ?? array() ) ), array_keys( vp_ev_kanaele() ) ) );
 			update_post_meta( $id, '_jbf_channels', $k );
 			$back = add_query_arg( 'vp_ev', $id, remove_query_arg( 'vp_ev', $back ) );
@@ -332,9 +440,10 @@ function vp_ev_aktionen() {
 			break;
 
 		case 'kanal':
-			$kanal = sanitize_key( (string) ( $p['kanal'] ?? '' ) );
+			$kanal  = sanitize_key( (string) ( $p['kanal'] ?? '' ) );
+			$termin = isset( $p['termin'] ) && '' !== (string) $p['termin'] ? (int) $p['termin'] : null;
 			if ( isset( vp_ev_kanaele()[ $kanal ] ) ) {
-				vp_ev_kanal_setzen( $id, $kanal, ! empty( $p['erledigt'] ), (string) ( $p['link'] ?? '' ) );
+				vp_ev_kanal_setzen( $id, vp_ev_status_key( $kanal, $termin ), ! empty( $p['erledigt'] ), (string) ( $p['link'] ?? '' ) );
 				$msg = __( 'Kanal aktualisiert.', 'vereinsplugin' );
 			}
 			break;
@@ -345,10 +454,14 @@ function vp_ev_aktionen() {
 				break;
 			}
 			$ziel   = sanitize_key( (string) ( $p['kanal'] ?? '' ) );
+			$termin = isset( $p['termin'] ) && '' !== (string) $p['termin'] ? (int) $p['termin'] : null;
 			$con    = Jbf_Publisher::connectors();
 			$status = vp_ev_kanal_status( $id );
-			$kanaele = '' !== $ziel ? array( $ziel ) : array_diff( vp_ev_gewaehlt( $id ), array_keys( $status ) );
-			$daten  = Jbf_Publisher::build_event_data( $id );
+			$offen  = array_filter( vp_ev_gewaehlt( $id ), static function ( $k ) use ( $status, $termin ) {
+				return ! isset( $status[ vp_ev_status_key( $k, $termin ) ] );
+			} );
+			$kanaele = '' !== $ziel ? array( $ziel ) : $offen;
+			$daten  = vp_ev_versanddaten( $id, $termin );
 			$cfg    = class_exists( 'Jbf_Settings' ) ? Jbf_Settings::get() : array();
 			$log    = (array) get_post_meta( $id, '_jbf_publish_log', true );
 			$ok = $fehl = array();
@@ -360,7 +473,7 @@ function vp_ev_aktionen() {
 				$res = $c->publish( $daten, $cfg );
 				$log[] = array( 'channel' => vp_ev_kanaele()[ $k ] ?? $k, 'success' => ! empty( $res['success'] ), 'message' => (string) ( $res['message'] ?? '' ), 'time' => current_time( 'mysql' ) );
 				if ( ! empty( $res['success'] ) ) {
-					vp_ev_kanal_setzen( $id, $k, true, '', __( 'automatisch gesendet', 'vereinsplugin' ) );
+					vp_ev_kanal_setzen( $id, vp_ev_status_key( $k, $termin ), true, '', __( 'automatisch gesendet', 'vereinsplugin' ) );
 					$ok[] = vp_ev_kanaele()[ $k ] ?? $k;
 				} else {
 					$fehl[] = ( vp_ev_kanaele()[ $k ] ?? $k ) . ': ' . (string) ( $res['message'] ?? '' );
@@ -394,6 +507,43 @@ function vp_ev_aktionen() {
 	}
 	wp_safe_redirect( $back );
 	exit;
+}
+
+/**
+ * Datenpaket für die Connectoren. Bei Reihen:
+ *  - je Termin: Datum/Ort dieses Termins, Text beginnt mit dem Termin;
+ *  - sonst (ganze Reihe): auf Wunsch Terminliste an die Texte angehängt,
+ *    für die Presse steht die Liste als „Termin“.
+ */
+function vp_ev_versanddaten( $id, $termin = null ) {
+	$d = Jbf_Publisher::build_event_data( $id );
+	if ( ! vp_ev_ist_reihe( $id ) ) {
+		return $d;
+	}
+	$felder  = array( 'short_text', 'telegram_text', 'instagram_caption', 'facebook_text', 'whatsapp_signal_text', 'fb_event_text' );
+	$termine = vp_ev_termine( $id );
+	if ( null !== $termin && isset( $termine[ $termin ] ) ) {
+		$t                = $termine[ $termin ];
+		$zeile            = '📅 ' . vp_ev_termin_text( $t, $id );
+		$d['date_start']  = $t['beginn'];
+		$d['location']    = '' !== trim( (string) $t['ort'] ) ? $t['ort'] : $d['location'];
+		foreach ( $felder as $f ) {
+			if ( '' !== trim( (string) ( $d[ $f ] ?? '' ) ) ) {
+				$d[ $f ] = $zeile . "\n\n" . $d[ $f ];
+			}
+		}
+		return $d;
+	}
+	if ( '1' === (string) get_post_meta( $id, '_vp_ev_termine_anhaengen', true ) ) {
+		$liste = vp_ev_terminliste_text( $id, true );
+		foreach ( $felder as $f ) {
+			if ( '' !== trim( (string) ( $d[ $f ] ?? '' ) ) ) {
+				$d[ $f ] .= "\n\n" . __( 'Termine:', 'vereinsplugin' ) . "\n" . $liste;
+			}
+		}
+	}
+	$d['date_start'] = "\n" . vp_ev_terminliste_text( $id );
+	return $d;
 }
 
 /* =========================================================================
@@ -450,7 +600,7 @@ function vp_ev_liste() {
 			esc_url( vp_ev_url( array( 'vp_ev' => $p->ID ) ) ),
 			esc_html( get_the_title( $p ) ),
 			'publish' !== $p->post_status ? ' <span class="vp-badge">' . esc_html__( 'Entwurf', 'vereinsplugin' ) . '</span>' : '',
-			esc_html( vp_ev_datum( $p->ID ) ),
+			esc_html( vp_ev_ist_reihe( $p->ID ) ? sprintf( __( 'Reihe · %1$d Termine ab %2$s', 'vereinsplugin' ), count( vp_ev_termine( $p->ID ) ), vp_ev_datum( $p->ID ) ) : vp_ev_datum( $p->ID ) ),
 			$balken( $mf, $mg ), // phpcs:ignore
 			$balken( $kf, $kg ) // phpcs:ignore
 		);
@@ -492,8 +642,34 @@ function vp_ev_editor( $id ) {
 	echo '<form method="post" class="vp-form">' . vp_ev_kopf( $id ? 'daten' : 'neu', $id ); // phpcs:ignore
 	echo '<div class="vp-form-grid">';
 	echo '<label class="vp-col-2">' . esc_html__( 'Titel', 'vereinsplugin' ) . '<input type="text" name="titel" required value="' . esc_attr( $post ? $post->post_title : '' ) . '"></label>';
-	echo '<label>' . esc_html__( 'Beginn (Datum & Uhrzeit)', 'vereinsplugin' ) . '<input type="datetime-local" name="beginn" value="' . esc_attr( $beginn ? substr( str_replace( ' ', 'T', $beginn ), 0, 16 ) : '' ) . '"></label>';
-	echo '<label>' . esc_html__( 'Ort', 'vereinsplugin' ) . '<input type="text" name="ort" value="' . esc_attr( $id ? (string) get_post_meta( $id, '_jbf_location', true ) : '' ) . '"></label>';
+	$reihe = $id && 'reihe' === get_post_meta( $id, '_vp_ev_art', true );
+	echo '<div class="vp-col-2" style="display:flex;gap:16px;flex-wrap:wrap">'
+		. '<label style="font-weight:normal"><input type="radio" name="art" value="einzeln" data-vp-ev-art ' . checked( ! $reihe, true, false ) . '> ' . esc_html__( 'Einzeltermin', 'vereinsplugin' ) . '</label>'
+		. '<label style="font-weight:normal"><input type="radio" name="art" value="reihe" data-vp-ev-art ' . checked( $reihe, true, false ) . '> ' . esc_html__( 'Veranstaltungsreihe (mehrere Termine)', 'vereinsplugin' ) . '</label></div>';
+	echo '<label data-vp-ev-nur="einzeln">' . esc_html__( 'Beginn (Datum & Uhrzeit)', 'vereinsplugin' ) . '<input type="datetime-local" name="beginn" value="' . esc_attr( $beginn ? substr( str_replace( ' ', 'T', $beginn ), 0, 16 ) : '' ) . '"></label>';
+	echo '<label>' . esc_html__( 'Ort (Standard für alle Termine)', 'vereinsplugin' ) . '<input type="text" name="ort" value="' . esc_attr( $id ? (string) get_post_meta( $id, '_jbf_location', true ) : '' ) . '"></label>';
+	// Termine der Reihe
+	$termine = $reihe ? vp_ev_termine( $id ) : array();
+	echo '<div class="vp-col-2" data-vp-ev-nur="reihe"><strong>' . esc_html__( 'Termine', 'vereinsplugin' ) . '</strong>'
+		. '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Datum & Uhrzeit', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Ort (leer = Standardort)', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Hinweis (z. B. „mit Gast“)', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
+	$zeilen = array_merge( $termine, array_fill( 0, 3, array( 'beginn' => '', 'ort' => '', 'notiz' => '' ) ) );
+	foreach ( $zeilen as $i => $t ) {
+		printf(
+			'<tr><td><input type="datetime-local" name="termine[%1$d][beginn]" value="%2$s"></td><td><input type="text" name="termine[%1$d][ort]" value="%3$s"></td><td><input type="text" name="termine[%1$d][notiz]" value="%4$s"></td></tr>',
+			(int) $i,
+			esc_attr( substr( str_replace( ' ', 'T', (string) $t['beginn'] ), 0, 16 ) ),
+			esc_attr( (string) $t['ort'] ),
+			esc_attr( (string) $t['notiz'] )
+		);
+	}
+	echo '</tbody></table></div><p class="vp-muted">' . esc_html__( 'Termin löschen: Datum leeren und speichern. Drei leere Zeilen für neue Termine – nach dem Speichern kommen neue dazu.', 'vereinsplugin' ) . '</p>';
+	echo '<details><summary>' . esc_html__( 'Serie erzeugen (z. B. jeden Freitag)', 'vereinsplugin' ) . '</summary><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:6px">'
+		. '<label>' . esc_html__( 'Erster Termin', 'vereinsplugin' ) . '<input type="datetime-local" name="serie_ab"></label>'
+		. '<label>' . esc_html__( 'Rhythmus', 'vereinsplugin' ) . '<select name="serie_rhythmus"><option value="woche">' . esc_html__( 'wöchentlich', 'vereinsplugin' ) . '</option><option value="2wochen">' . esc_html__( 'alle 14 Tage', 'vereinsplugin' ) . '</option><option value="monat">' . esc_html__( 'monatlich', 'vereinsplugin' ) . '</option></select></label>'
+		. '<label>' . esc_html__( 'Anzahl', 'vereinsplugin' ) . '<input type="number" name="serie_anzahl" min="0" max="52" value="0" style="width:80px"></label>'
+		. '</div><p class="vp-muted">' . esc_html__( 'Wird beim Speichern zu den Terminen oben hinzugefügt.', 'vereinsplugin' ) . '</p></details>';
+	echo '<p><label style="font-weight:normal"><input type="checkbox" name="anhaengen" value="1" ' . checked( ! $id || '1' === (string) get_post_meta( $id, '_vp_ev_termine_anhaengen', true ), true, false ) . '> ' . esc_html__( 'Beim Versand die Liste der kommenden Termine an die Texte anhängen', 'vereinsplugin' ) . '</label><br>'
+		. '<label style="font-weight:normal"><input type="checkbox" name="je_termin" value="1" ' . checked( $id && '1' === (string) get_post_meta( $id, '_vp_ev_je_termin', true ), true, false ) . '> ' . esc_html__( 'Jeden Termin einzeln bewerben (eigene Kanal-Checkliste je Termin, Text beginnt mit dem Termin)', 'vereinsplugin' ) . '</label></p></div>';
 	echo '<label class="vp-col-2">' . esc_html__( 'Beschreibung (Website, Presse-Standardtext)', 'vereinsplugin' ) . '<textarea name="beschreibung" rows="5">' . esc_textarea( $post ? $post->post_content : '' ) . '</textarea></label>';
 	echo '</div>';
 	echo '<p><label><input type="checkbox" name="sichtbar" value="1" ' . checked( ! $post || 'publish' === $post->post_status, true, false ) . '> ' . esc_html__( 'Auf der Website veröffentlichen (Veranstaltungsseite)', 'vereinsplugin' ) . '</label></p>';
@@ -504,6 +680,7 @@ function vp_ev_editor( $id ) {
 	}
 	echo '</div></fieldset>';
 	echo '<p><button class="vp-btn vp-btn-primary">' . esc_html( $id ? __( 'Speichern', 'vereinsplugin' ) : __( 'Anlegen und weiter', 'vereinsplugin' ) ) . '</button></p></form></div>';
+	echo '<script>(function(){var r=document.querySelectorAll("[data-vp-ev-art]");function u(){var v="einzeln";r.forEach(function(x){if(x.checked)v=x.value;});document.querySelectorAll("[data-vp-ev-nur]").forEach(function(e){e.hidden=e.getAttribute("data-vp-ev-nur")!==v;});}r.forEach(function(x){x.addEventListener("change",u);});u();})();</script>';
 
 	if ( ! $id ) {
 		return ob_get_clean();
@@ -527,6 +704,11 @@ function vp_ev_editor( $id ) {
 		}
 		echo '</p>';
 
+		if ( vp_ev_ist_reihe( $id ) ) {
+			echo '<details open style="margin:6px 0 10px"><summary><strong>' . esc_html( sprintf( __( 'Terminliste (%d Termine) – zum Kopieren', 'vereinsplugin' ), count( vp_ev_termine( $id ) ) ) ) . '</strong></summary>'
+				. '<textarea readonly rows="' . min( 12, count( vp_ev_termine( $id ) ) + 1 ) . '" style="width:100%;margin-top:6px" onclick="this.select()">' . esc_textarea( vp_ev_terminliste_text( $id ) ) . '</textarea>'
+				. '<p class="vp-muted">' . esc_html( '1' === (string) get_post_meta( $id, '_vp_ev_termine_anhaengen', true ) ? __( 'Wird beim automatischen Versand an die Texte angehängt (nur kommende Termine).', 'vereinsplugin' ) : __( 'Für Plakat, Newsletter und manuelle Kanäle.', 'vereinsplugin' ) ) . '</p></details>';
+		}
 		// Texte + Canva-Links in einem Formular
 		$haupt = array_filter( $material, static function ( $m ) {
 			return empty( $m['extra'] );
@@ -553,45 +735,19 @@ function vp_ev_editor( $id ) {
 	if ( ! $gew ) {
 		echo '<p class="vp-muted">' . esc_html__( 'Noch keine Kanäle gewählt.', 'vereinsplugin' ) . '</p>';
 	} else {
-		$offen_auto = array_diff( array_intersect( $gew, $auto ), array_keys( $status ) );
-		if ( $offen_auto ) {
-			if ( $senden ) {
-				echo '<form method="post" style="margin-bottom:10px">' . vp_ev_kopf( 'senden', $id ) . '<button class="vp-btn vp-btn-primary" onclick="return confirm(\'' . esc_js( __( 'Jetzt an alle offenen automatischen Kanäle senden?', 'vereinsplugin' ) ) . '\')">🚀 ' . esc_html( sprintf( __( 'Alle %d automatischen Kanäle senden', 'vereinsplugin' ), count( $offen_auto ) ) ) . '</button></form>'; // phpcs:ignore
-			} else {
-				$rs = (string) get_post_meta( $id, '_jbf_review_status', true );
-				echo '<form method="post" style="margin-bottom:10px">' . vp_ev_kopf( 'freigabe', $id ) . '<button class="vp-btn vp-btn-primary"' . ( 'ready' === $rs ? ' disabled' : '' ) . '>' . esc_html( 'ready' === $rs ? __( 'Zur Freigabe eingereicht', 'vereinsplugin' ) : __( 'Zur Freigabe einreichen', 'vereinsplugin' ) ) . '</button> <span class="vp-muted">' . esc_html__( 'Automatische Kanäle sendet der Vorstand.', 'vereinsplugin' ) . '</span></form>'; // phpcs:ignore
+		if ( vp_ev_je_termin( $id ) ) {
+			foreach ( vp_ev_termine( $id ) as $i => $t ) {
+				$vorbei = strtotime( str_replace( 'T', ' ', $t['beginn'] ) ) < current_time( 'timestamp' ) - DAY_IN_SECONDS;
+				echo '<details' . ( $vorbei ? '' : ' open' ) . ' style="margin:6px 0"><summary><strong>' . esc_html( vp_ev_termin_text( $t, $id ) ) . '</strong>' . ( $vorbei ? ' <span class="vp-muted">(' . esc_html__( 'vorbei', 'vereinsplugin' ) . ')</span>' : '' ) . '</summary>';
+				echo vp_ev_kanal_tabelle( $id, $gew, $status, $senden, $i ); // phpcs:ignore
+				echo '</details>';
 			}
+		} else {
+			if ( vp_ev_ist_reihe( $id ) ) {
+				echo '<p class="vp-muted">' . esc_html( sprintf( __( 'Die ganze Reihe (%d Termine) wird einmal beworben. Für Werbung je Termin oben „Jeden Termin einzeln bewerben“ anhaken.', 'vereinsplugin' ), count( vp_ev_termine( $id ) ) ) ) . '</p>';
+			}
+			echo vp_ev_kanal_tabelle( $id, $gew, $status, $senden, null ); // phpcs:ignore
 		}
-		echo '<div class="vp-table-wrap"><table class="vp-table"><tbody>';
-		foreach ( $gew as $k ) {
-			if ( ! isset( $kanaele[ $k ] ) ) {
-				continue;
-			}
-			$s       = $status[ $k ] ?? null;
-			$ist_auto = in_array( $k, $auto, true );
-			echo '<tr><td style="width:32px;font-size:1.2em">' . ( $s ? '✅' : '⬜' ) . '</td><td><strong>' . esc_html( $kanaele[ $k ] ) . '</strong><br><span class="vp-muted">';
-			if ( $s ) {
-				$u = get_userdata( (int) $s['von'] );
-				echo esc_html( trim( ( $s['text'] ?: __( 'erledigt', 'vereinsplugin' ) ) . ' · ' . mysql2date( 'd.m.Y H:i', $s['am'] ) . ( $u ? ' · ' . $u->display_name : '' ) ) );
-				if ( $s['link'] ) {
-					echo ' · <a href="' . esc_url( $s['link'] ) . '" target="_blank" rel="noopener">' . esc_html__( 'Link', 'vereinsplugin' ) . '</a>';
-				}
-			} else {
-				echo esc_html( $ist_auto ? __( 'automatisch – wird beim Senden veröffentlicht', 'vereinsplugin' ) : vp_ev_kanal_hinweis( $k, $id ) );
-			}
-			echo '</span></td><td style="text-align:right;white-space:nowrap">';
-			if ( ! $s && $ist_auto && $senden ) {
-				echo '<form method="post" style="display:inline">' . vp_ev_kopf( 'senden', $id ) . '<input type="hidden" name="kanal" value="' . esc_attr( $k ) . '"><button class="vp-btn">' . esc_html__( 'Senden', 'vereinsplugin' ) . '</button></form> '; // phpcs:ignore
-			}
-			echo '<form method="post" style="display:inline-flex;gap:4px;align-items:center">' . vp_ev_kopf( 'kanal', $id ) . '<input type="hidden" name="kanal" value="' . esc_attr( $k ) . '">'; // phpcs:ignore
-			if ( $s ) {
-				echo '<button class="vp-btn" title="' . esc_attr__( 'Als offen markieren', 'vereinsplugin' ) . '">↺</button>';
-			} else {
-				echo '<input type="url" name="link" placeholder="' . esc_attr__( 'Link (optional)', 'vereinsplugin' ) . '" style="width:150px"><input type="hidden" name="erledigt" value="1"><button class="vp-btn">' . esc_html__( '✓ erledigt', 'vereinsplugin' ) . '</button>';
-			}
-			echo '</form></td></tr>';
-		}
-		echo '</tbody></table></div>';
 		$log = (array) get_post_meta( $id, '_jbf_publish_log', true );
 		if ( array_filter( $log ) ) {
 			echo '<details style="margin-top:8px"><summary>' . esc_html__( 'Versandprotokoll', 'vereinsplugin' ) . '</summary><ul>';
@@ -604,6 +760,55 @@ function vp_ev_editor( $id ) {
 	echo '<p class="vp-muted" style="margin-top:10px"><a href="' . esc_url( get_edit_post_link( $id, '' ) ) . '">' . esc_html__( 'Erweitert: zeitversetzte Kampagne im WP-Backend', 'vereinsplugin' ) . '</a></p>';
 	echo '</div>';
 	return ob_get_clean();
+}
+
+/** Kanal-Checkliste (ganze Veranstaltung oder ein Termin der Reihe). */
+function vp_ev_kanal_tabelle( $id, array $gew, array $status, $senden, $termin ) {
+	$kanaele = vp_ev_kanaele();
+	$auto    = vp_ev_auto_kanaele();
+	$tfeld   = null === $termin ? '' : '<input type="hidden" name="termin" value="' . (int) $termin . '">';
+	$h       = '';
+	$offen_auto = array_filter( array_intersect( $gew, $auto ), static function ( $k ) use ( $status, $termin ) {
+		return ! isset( $status[ vp_ev_status_key( $k, $termin ) ] );
+	} );
+	if ( $offen_auto ) {
+		if ( $senden ) {
+			$h .= '<form method="post" style="margin:6px 0 10px">' . vp_ev_kopf( 'senden', $id ) . $tfeld . '<button class="vp-btn vp-btn-primary" onclick="return confirm(\'' . esc_js( __( 'Jetzt an alle offenen automatischen Kanäle senden?', 'vereinsplugin' ) ) . '\')">🚀 ' . esc_html( sprintf( __( 'Alle %d automatischen Kanäle senden', 'vereinsplugin' ), count( $offen_auto ) ) ) . '</button></form>';
+		} elseif ( null === $termin || 0 === (int) $termin ) {
+			$rs = (string) get_post_meta( $id, '_jbf_review_status', true );
+			$h .= '<form method="post" style="margin:6px 0 10px">' . vp_ev_kopf( 'freigabe', $id ) . '<button class="vp-btn vp-btn-primary"' . ( 'ready' === $rs ? ' disabled' : '' ) . '>' . esc_html( 'ready' === $rs ? __( 'Zur Freigabe eingereicht', 'vereinsplugin' ) : __( 'Zur Freigabe einreichen', 'vereinsplugin' ) ) . '</button> <span class="vp-muted">' . esc_html__( 'Automatische Kanäle sendet der Vorstand.', 'vereinsplugin' ) . '</span></form>';
+		}
+	}
+	$h .= '<div class="vp-table-wrap"><table class="vp-table"><tbody>';
+	foreach ( $gew as $k ) {
+		if ( ! isset( $kanaele[ $k ] ) ) {
+			continue;
+		}
+		$s        = $status[ vp_ev_status_key( $k, $termin ) ] ?? null;
+		$ist_auto = in_array( $k, $auto, true );
+		$h       .= '<tr><td style="width:32px;font-size:1.2em">' . ( $s ? '✅' : '⬜' ) . '</td><td><strong>' . esc_html( $kanaele[ $k ] ) . '</strong><br><span class="vp-muted">';
+		if ( $s ) {
+			$u  = get_userdata( (int) $s['von'] );
+			$h .= esc_html( trim( ( $s['text'] ?: __( 'erledigt', 'vereinsplugin' ) ) . ' · ' . mysql2date( 'd.m.Y H:i', $s['am'] ) . ( $u ? ' · ' . $u->display_name : '' ) ) );
+			if ( $s['link'] ) {
+				$h .= ' · <a href="' . esc_url( $s['link'] ) . '" target="_blank" rel="noopener">' . esc_html__( 'Link', 'vereinsplugin' ) . '</a>';
+			}
+		} else {
+			$h .= esc_html( $ist_auto ? __( 'automatisch – wird beim Senden veröffentlicht', 'vereinsplugin' ) : vp_ev_kanal_hinweis( $k, $id ) );
+		}
+		$h .= '</span></td><td style="text-align:right;white-space:nowrap">';
+		if ( ! $s && $ist_auto && $senden ) {
+			$h .= '<form method="post" style="display:inline">' . vp_ev_kopf( 'senden', $id ) . $tfeld . '<input type="hidden" name="kanal" value="' . esc_attr( $k ) . '"><button class="vp-btn">' . esc_html__( 'Senden', 'vereinsplugin' ) . '</button></form> ';
+		}
+		$h .= '<form method="post" style="display:inline-flex;gap:4px;align-items:center">' . vp_ev_kopf( 'kanal', $id ) . $tfeld . '<input type="hidden" name="kanal" value="' . esc_attr( $k ) . '">';
+		if ( $s ) {
+			$h .= '<button class="vp-btn" title="' . esc_attr__( 'Als offen markieren', 'vereinsplugin' ) . '">↺</button>';
+		} else {
+			$h .= '<input type="url" name="link" placeholder="' . esc_attr__( 'Link (optional)', 'vereinsplugin' ) . '" style="width:150px"><input type="hidden" name="erledigt" value="1"><button class="vp-btn">' . esc_html__( '✓ erledigt', 'vereinsplugin' ) . '</button>';
+		}
+		$h .= '</form></td></tr>';
+	}
+	return $h . '</tbody></table></div>';
 }
 
 /** Hinweis für manuelle Kanäle. */
@@ -674,4 +879,19 @@ function vp_ev_material_zeile( $id, $mid, array $m ) {
 		}
 	}
 	return $h . '</div></div>';
+}
+
+
+/** Veranstaltungsseite: bei Reihen die Termine unter dem Text zeigen. */
+add_filter( 'the_content', 'vp_ev_termine_auf_seite', 20 );
+function vp_ev_termine_auf_seite( $content ) {
+	if ( ! is_singular( 'veranstaltung' ) || ! in_the_loop() || ! vp_ev_ist_reihe( get_the_ID() ) ) {
+		return $content;
+	}
+	$li = '';
+	foreach ( vp_ev_termine( get_the_ID() ) as $t ) {
+		$vorbei = strtotime( str_replace( 'T', ' ', $t['beginn'] ) ) < current_time( 'timestamp' ) - DAY_IN_SECONDS;
+		$li    .= '<li' . ( $vorbei ? ' style="opacity:.55"' : '' ) . '>' . esc_html( vp_ev_termin_text( $t, get_the_ID() ) ) . '</li>';
+	}
+	return $content . '<h3>' . esc_html__( 'Termine', 'vereinsplugin' ) . '</h3><ul class="vp-ev-termine">' . $li . '</ul>';
 }
