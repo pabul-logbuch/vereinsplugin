@@ -81,6 +81,12 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
   angehängt) oder jeder Termin einzeln – mit eigener Kanal-Checkliste und
   eigenem Versand, Text beginnt mit dem Termin. Mitglieder-Kalender und
   Veranstaltungsseite zeigen alle Termine.
+  **Bilder je Termin:** Bei Reihen steht in der Material-Checkliste erst
+  „Allgemein (ganze Reihe)“ (Texte, Reel, Plakat, Bilder für die
+  Reihen-Werbung), darunter je Termin Feed-Bild, Story und
+  Facebook-Veranstaltungsbild. Beim Versand je Termin gehen dessen Bilder
+  raus, sonst die allgemeinen. Der Canva-Link gilt je Format für alle
+  Termine (ein Design, eine Seite je Termin).
   **Alles im Mitgliederbereich, ohne WP-Backend:** (4) **Zeitplan** –
   zeitversetzte Kampagne mit Schritten relativ zum (ersten) Termin, Vorlage
   −14/−3/−1/+2 Tage, einplanen und stoppen (Vorstand), Versandprotokoll je

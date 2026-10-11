@@ -58,10 +58,10 @@ function vp_ev_material() {
 	return apply_filters( 'vp_ev_material', array(
 		'text'      => array( 'titel' => __( 'Text für Social Media & Gruppen', 'vereinsplugin' ), 'typ' => 'textarea', 'meta' => '_jbf_short_text', 'kanaele' => array_merge( $feeds, array( 'facebook_event' ) ), 'pflicht' => true,
 			'hinweis' => __( 'Ein gemeinsamer Text für alle Kanäle. Der Hashtag aus den Einstellungen wird automatisch angehängt.', 'vereinsplugin' ) ),
-		'social'    => array( 'titel' => __( 'Bild Social-Feed (Hochformat 4:5)', 'vereinsplugin' ), 'typ' => 'bild', 'meta' => '_jbf_img_social', 'w' => 1080, 'h' => 1350, 'kanaele' => $feeds, 'pflicht' => true,
+		'social'    => array( 'titel' => __( 'Bild Social-Feed (Hochformat 4:5)', 'vereinsplugin' ), 'typ' => 'bild', 'je_termin' => true, 'meta' => '_jbf_img_social', 'w' => 1080, 'h' => 1350, 'kanaele' => $feeds, 'pflicht' => true,
 			'hinweis' => __( 'Für alle Feed-Kanäle inkl. Instagram; wird auch an die Presse angehängt.', 'vereinsplugin' ) ),
-		'story'     => array( 'titel' => __( 'Bild Instagram-Story (9:16)', 'vereinsplugin' ), 'typ' => 'bild', 'meta' => '_jbf_img_story', 'w' => 1080, 'h' => 1920, 'kanaele' => array( 'instagram' ), 'pflicht' => false ),
-		'fb_event'  => array( 'titel' => __( 'Bild Facebook-Veranstaltung (Querformat)', 'vereinsplugin' ), 'typ' => 'bild', 'meta' => '_jbf_img_fb_event', 'w' => 1200, 'h' => 628, 'kanaele' => array( 'facebook_event' ), 'pflicht' => true ),
+		'story'     => array( 'titel' => __( 'Bild Instagram-Story (9:16)', 'vereinsplugin' ), 'typ' => 'bild', 'je_termin' => true, 'meta' => '_jbf_img_story', 'w' => 1080, 'h' => 1920, 'kanaele' => array( 'instagram' ), 'pflicht' => false ),
+		'fb_event'  => array( 'titel' => __( 'Bild Facebook-Veranstaltung (Querformat)', 'vereinsplugin' ), 'typ' => 'bild', 'je_termin' => true, 'meta' => '_jbf_img_fb_event', 'w' => 1200, 'h' => 628, 'kanaele' => array( 'facebook_event' ), 'pflicht' => true ),
 		'reel'      => array( 'titel' => __( 'Instagram-Reel (Video 9:16, unter 90 s)', 'vereinsplugin' ), 'typ' => 'video', 'meta' => '_jbf_video_reel', 'w' => 1080, 'h' => 1920, 'kanaele' => array( 'instagram' ), 'pflicht' => false ),
 		'beitragsbild' => array( 'titel' => __( 'Beitragsbild für die Website (Querformat 16:9)', 'vereinsplugin' ), 'typ' => 'bild', 'meta' => '_thumbnail_id', 'w' => 1200, 'h' => 675, 'kanaele' => array( 'website' ), 'pflicht' => false,
 			'hinweis' => __( 'Erscheint auf der Veranstaltungsseite und in Übersichten.', 'vereinsplugin' ) ),
@@ -106,6 +106,56 @@ function vp_ev_material_fuer( $post_id ) {
 		}
 	}
 	return $out;
+}
+
+/* -------------------------------------------------------------------------
+ * Bilder je Termin (Veranstaltungsreihen)
+ * Meta _vp_ev_tbilder = [ beginn 'Y-m-dTH:i' => [ material-id => attachment-id ] ].
+ * Schlüssel ist der Beginn (bleibt stabil, wenn Termine dazukommen oder
+ * wegfallen). Der Canva-Link gilt je Format für alle Termine – ein Design
+ * mit einer Seite je Termin.
+ * ---------------------------------------------------------------------- */
+
+function vp_ev_tbilder( $post_id ) {
+	$b = get_post_meta( $post_id, '_vp_ev_tbilder', true );
+	return is_array( $b ) ? $b : array();
+}
+
+function vp_ev_tbild( $post_id, $beginn, $mid ) {
+	return (int) ( vp_ev_tbilder( $post_id )[ (string) $beginn ][ $mid ] ?? 0 );
+}
+
+function vp_ev_tbild_setzen( $post_id, $beginn, $mid, $att ) {
+	$b = vp_ev_tbilder( $post_id );
+	if ( $att ) {
+		$b[ (string) $beginn ][ $mid ] = (int) $att;
+	} else {
+		unset( $b[ (string) $beginn ][ $mid ] );
+		if ( empty( $b[ (string) $beginn ] ) ) {
+			unset( $b[ (string) $beginn ] );
+		}
+	}
+	update_post_meta( $post_id, '_vp_ev_tbilder', $b );
+}
+
+/** Material, das je Termin gebraucht wird (nur bei Reihen). */
+function vp_ev_material_je_termin( $post_id ) {
+	if ( ! vp_ev_ist_reihe( $post_id ) ) {
+		return array();
+	}
+	return array_filter( vp_ev_material_fuer( $post_id ), static function ( $m ) {
+		return ! empty( $m['je_termin'] );
+	} );
+}
+
+/** Ist ein Termin-Beginn ein Termin dieser Veranstaltung? */
+function vp_ev_ist_termin( $post_id, $beginn ) {
+	foreach ( vp_ev_termine( $post_id ) as $t ) {
+		if ( (string) $t['beginn'] === (string) $beginn ) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /** Status je Kanal: [ kanal => [ am, von, link, text ] ] */
@@ -221,6 +271,19 @@ function vp_ev_fortschritt( $post_id ) {
 		}
 		$mg++;
 		$mf += vp_ev_material_fertig( $post_id, $m ) ? 1 : 0;
+	}
+	// Bilder je Termin (Reihen): Pflichtbilder zählen für jeden Termin.
+	$je = vp_ev_material_je_termin( $post_id );
+	if ( $je ) {
+		foreach ( vp_ev_termine( $post_id ) as $t ) {
+			foreach ( $je as $mid => $m ) {
+				if ( empty( $m['pflicht'] ) ) {
+					continue;
+				}
+				$mg++;
+				$mf += vp_ev_tbild( $post_id, $t['beginn'], $mid ) ? 1 : 0;
+			}
+		}
 	}
 	$k  = vp_ev_gewaehlt( $post_id );
 	$st = vp_ev_kanal_status( $post_id );
@@ -426,6 +489,11 @@ function vp_ev_aktionen() {
 				$err = __( 'Keine Datei gewählt.', 'vereinsplugin' );
 				break;
 			}
+			$tkey = sanitize_text_field( (string) ( $p['termin'] ?? '' ) );
+			if ( '' !== $tkey && ( empty( $m['je_termin'] ) || ! vp_ev_ist_termin( $id, $tkey ) ) ) {
+				$err = __( 'Diesen Termin gibt es nicht mehr – bitte Seite neu laden.', 'vereinsplugin' );
+				break;
+			}
 			require_once ABSPATH . 'wp-admin/includes/file.php';
 			require_once ABSPATH . 'wp-admin/includes/media.php';
 			require_once ABSPATH . 'wp-admin/includes/image.php';
@@ -434,16 +502,26 @@ function vp_ev_aktionen() {
 				$err = $att->get_error_message();
 				break;
 			}
-			update_post_meta( $id, $m['meta'], (int) $att );
+			if ( '' !== $tkey ) {
+				vp_ev_tbild_setzen( $id, $tkey, $mid, (int) $att );
+				$praefix = substr( str_replace( array( 'T', ':' ), array( '_', '' ), $tkey ), 0, 15 ) . '-';
+			} else {
+				update_post_meta( $id, $m['meta'], (int) $att );
+				$praefix = '';
+			}
 			$datei = get_attached_file( $att );
-			$nc    = vp_ev_nc_ablegen( $id, $datei, $mid . '-' . basename( (string) $datei ) );
+			$nc    = vp_ev_nc_ablegen( $id, $datei, $praefix . $mid . '-' . basename( (string) $datei ) );
 			$msg   = __( 'Datei hochgeladen.', 'vereinsplugin' ) . ( $nc ? ' ' . __( 'Kopie liegt im Nextcloud-Ordner.', 'vereinsplugin' ) : '' );
 			break;
 
 		case 'datei_weg':
 			$mid = sanitize_key( (string) ( $p['material'] ?? '' ) );
 			$m   = vp_ev_material()[ $mid ] ?? null;
-			if ( $m ) {
+			$tkey = sanitize_text_field( (string) ( $p['termin'] ?? '' ) );
+			if ( $m && '' !== $tkey ) {
+				vp_ev_tbild_setzen( $id, $tkey, $mid, 0 );
+				$msg = __( 'Bild des Termins entfernt (bleibt in der Mediathek).', 'vereinsplugin' );
+			} elseif ( $m ) {
 				delete_post_meta( $id, $m['meta'] );
 				$msg = __( 'Datei entfernt (bleibt in der Mediathek).', 'vereinsplugin' );
 			}
@@ -465,6 +543,13 @@ function vp_ev_aktionen() {
 				$att = in_array( $m['typ'], array( 'bild', 'video', 'datei' ), true ) ? (int) get_post_meta( $id, $m['meta'], true ) : 0;
 				if ( $att && ( $f = get_attached_file( $att ) ) ) {
 					vp_ev_nc_ablegen( $id, $f, $mid . '-' . basename( $f ) );
+				}
+			}
+			foreach ( vp_ev_tbilder( $id ) as $tkey => $bilder ) {
+				foreach ( (array) $bilder as $mid => $att ) {
+					if ( $att && ( $f = get_attached_file( (int) $att ) ) ) {
+						vp_ev_nc_ablegen( $id, $f, substr( str_replace( array( 'T', ':' ), array( '_', '' ), $tkey ), 0, 15 ) . '-' . $mid . '-' . basename( $f ) );
+					}
 				}
 			}
 			$msg = __( 'Nextcloud-Ordner angelegt.', 'vereinsplugin' );
@@ -639,6 +724,21 @@ function vp_ev_versanddaten( $id, $termin = null ) {
 		$zeile            = '📅 ' . vp_ev_termin_text( $t, $id );
 		$d['date_start']  = $t['beginn'];
 		$d['location']    = '' !== trim( (string) $t['ort'] ) ? $t['ort'] : $d['location'];
+		// Bilder dieses Termins statt der allgemeinen (falls hochgeladen).
+		foreach ( array( 'social' => 'image_social', 'story' => 'image_story', 'fb_event' => 'image_fb_event' ) as $mid => $feld ) {
+			$att = vp_ev_tbild( $id, $t['beginn'], $mid );
+			if ( ! $att || ! ( $pfad = get_attached_file( $att ) ) ) {
+				continue;
+			}
+			$d[ $feld . '_path' ] = $pfad;
+			$d[ $feld . '_url' ]  = wp_get_attachment_url( $att );
+			if ( 'social' === $mid ) {
+				$d['image_press_path'] = $pfad;
+				if ( file_exists( $pfad ) ) {
+					$d['image_social_base64'] = base64_encode( file_get_contents( $pfad ) );
+				}
+			}
+		}
 		foreach ( $felder as $f ) {
 			if ( '' !== trim( (string) ( $d[ $f ] ?? '' ) ) ) {
 				$d[ $f ] = $zeile . "\n\n" . $d[ $f ];
@@ -958,8 +1058,31 @@ function vp_ev_editor( $id ) {
 		} );
 		$extra = array_diff_key( $material, $haupt );
 		echo '<form method="post" class="vp-form" id="vp-ev-material">' . vp_ev_kopf( 'material', $id ) . '</form>'; // phpcs:ignore
+		$je_termin = vp_ev_material_je_termin( $id );
+		if ( $je_termin ) {
+			echo '<h4 style="margin:10px 0 0">' . esc_html__( 'Allgemein (ganze Reihe)', 'vereinsplugin' ) . '</h4>'
+				. '<p class="vp-muted" style="margin:2px 0 0">' . esc_html__( 'Texte, Reel, Plakat und Bilder für die Werbung der ganzen Reihe. Die allgemeinen Bilder springen auch ein, wo einem Termin noch ein eigenes Bild fehlt.', 'vereinsplugin' ) . '</p>';
+		}
 		foreach ( $haupt as $mid => $m ) {
 			echo vp_ev_material_zeile( $id, $mid, $m ); // phpcs:ignore
+		}
+		if ( $je_termin ) {
+			echo '<h4 style="margin:16px 0 0">' . esc_html__( 'Bilder je Termin', 'vereinsplugin' ) . '</h4>'
+				. '<p class="vp-muted" style="margin:2px 0 6px">' . esc_html__( 'Jeder Termin bekommt eigene Bilder (Datum drauf). Tipp: in Canva ein Design je Format mit einer Seite pro Termin – der Canva-Link oben gilt für alle Termine.', 'vereinsplugin' ) . '</p>';
+			foreach ( vp_ev_termine( $id ) as $t ) {
+				$fertig = 0;
+				foreach ( $je_termin as $mid => $m ) {
+					$fertig += vp_ev_tbild( $id, $t['beginn'], $mid ) ? 1 : 0;
+				}
+				$vorbei = strtotime( str_replace( 'T', ' ', $t['beginn'] ) ) < current_time( 'timestamp' ) - DAY_IN_SECONDS;
+				echo '<details' . ( $vorbei || $fertig === count( $je_termin ) ? '' : ' open' ) . ' style="margin:4px 0;border-top:1px solid rgba(127,127,127,.2);padding-top:4px"><summary><strong>' . esc_html( vp_ev_termin_text( $t, $id ) ) . '</strong> '
+					. '<span class="vp-badge" style="background:' . ( $fertig === count( $je_termin ) ? '#dcfce7' : '#fef3c7' ) . '">' . (int) $fertig . ' / ' . count( $je_termin ) . '</span>'
+					. ( $vorbei ? ' <span class="vp-muted">(' . esc_html__( 'vorbei', 'vereinsplugin' ) . ')</span>' : '' ) . '</summary>';
+				foreach ( $je_termin as $mid => $m ) {
+					echo vp_ev_material_zeile( $id, $mid, $m, (string) $t['beginn'] ); // phpcs:ignore
+				}
+				echo '</details>';
+			}
 		}
 		if ( $extra ) {
 			echo '<details style="margin:8px 0"><summary>' . esc_html__( 'Eigene Texte je Kanal (optional, sonst gilt der gemeinsame Text)', 'vereinsplugin' ) . '</summary>';
@@ -1170,9 +1293,11 @@ function vp_ev_kanal_hinweis( $k, $id ) {
 }
 
 /** Eine Zeile der Material-Checkliste. */
-function vp_ev_material_zeile( $id, $mid, array $m ) {
-	$fertig = vp_ev_material_fertig( $id, $m );
-	$wert   = (string) get_post_meta( $id, $m['meta'], true );
+function vp_ev_material_zeile( $id, $mid, array $m, $tkey = null ) {
+	$je     = null !== $tkey;
+	$wert   = $je ? (string) ( vp_ev_tbild( $id, $tkey, $mid ) ?: '' ) : (string) get_post_meta( $id, $m['meta'], true );
+	$fertig = '' !== trim( $wert );
+	$tfeld  = $je ? '<input type="hidden" name="termin" value="' . esc_attr( $tkey ) . '">' : '';
 	$kan    = vp_ev_kanaele();
 	$fuer   = array_map( static function ( $k ) use ( $kan ) {
 		return $kan[ $k ] ?? $k;
@@ -1200,19 +1325,24 @@ function vp_ev_material_zeile( $id, $mid, array $m ) {
 			if ( ! empty( $meta['width'] ) && ! empty( $m['w'] ) && abs( $meta['width'] / max( 1, $meta['height'] ) - $m['w'] / $m['h'] ) > 0.03 ) {
 				$h .= '<span class="vp-note vp-note-warn" style="margin:0">' . esc_html( sprintf( __( 'Format %1$d × %2$d passt nicht zu %3$d × %4$d – wird evtl. beschnitten.', 'vereinsplugin' ), $meta['width'], $meta['height'], $m['w'], $m['h'] ) ) . '</span>';
 			}
-			$h .= '<form method="post" style="display:inline">' . vp_ev_kopf( 'datei_weg', $id ) . '<input type="hidden" name="material" value="' . esc_attr( $mid ) . '"><button class="vp-btn" title="' . esc_attr__( 'Entfernen', 'vereinsplugin' ) . '">✕</button></form></div>';
+			$h .= '<form method="post" style="display:inline">' . vp_ev_kopf( 'datei_weg', $id ) . $tfeld . '<input type="hidden" name="material" value="' . esc_attr( $mid ) . '"><button class="vp-btn" title="' . esc_attr__( 'Entfernen', 'vereinsplugin' ) . '">✕</button></form></div>';
 		}
 		$accept = 'video' === $m['typ'] ? 'video/*' : ( 'datei' === $m['typ'] ? 'application/pdf,image/*' : 'image/*' );
-		$h     .= '<form method="post" enctype="multipart/form-data" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px">' . vp_ev_kopf( 'datei', $id )
+		$h     .= '<form method="post" enctype="multipart/form-data" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px">' . vp_ev_kopf( 'datei', $id ) . $tfeld
 			. '<input type="hidden" name="material" value="' . esc_attr( $mid ) . '"><input type="file" name="datei" accept="' . esc_attr( $accept ) . '" required style="max-width:220px">'
 			. '<button class="vp-btn">' . esc_html( $att ? __( 'Ersetzen', 'vereinsplugin' ) : __( 'Hochladen', 'vereinsplugin' ) ) . '</button>';
 		if ( ! empty( $m['w'] ) && 'video' !== $m['typ'] ) {
 			$h .= ' <a class="vp-btn" href="' . esc_url( vp_ev_canva_link( $m['w'], $m['h'] ) ) . '" target="_blank" rel="noopener">🎨 ' . esc_html__( 'In Canva gestalten', 'vereinsplugin' ) . '</a>';
 		}
 		$h .= '</form>';
-		if ( 'video' !== $m['typ'] ) {
+		if ( 'video' !== $m['typ'] && $je ) {
 			$canva = (string) get_post_meta( $id, '_vp_ev_canva_' . $mid, true );
-			$h    .= '<label style="display:block;margin-top:6px;font-size:.9em">' . esc_html__( 'Canva-Link zum Design (zum Wiederfinden)', 'vereinsplugin' )
+			if ( $canva ) {
+				$h .= '<a href="' . esc_url( $canva ) . '" target="_blank" rel="noopener">' . esc_html__( 'Gemeinsames Canva-Design öffnen (Seite dieses Termins)', 'vereinsplugin' ) . '</a>';
+			}
+		} elseif ( 'video' !== $m['typ'] ) {
+			$canva = (string) get_post_meta( $id, '_vp_ev_canva_' . $mid, true );
+			$h    .= '<label style="display:block;margin-top:6px;font-size:.9em">' . esc_html( ! empty( $m['je_termin'] ) && vp_ev_ist_reihe( $id ) ? __( 'Canva-Link zum Design (gilt für alle Termine – eine Seite je Termin)', 'vereinsplugin' ) : __( 'Canva-Link zum Design (zum Wiederfinden)', 'vereinsplugin' ) )
 				. ' <input form="vp-ev-material" type="url" name="canva[' . esc_attr( $mid ) . ']" value="' . esc_attr( $canva ) . '" placeholder="https://www.canva.com/design/…" style="width:100%"></label>';
 			if ( $canva ) {
 				$h .= '<a href="' . esc_url( $canva ) . '" target="_blank" rel="noopener">' . esc_html__( 'Design in Canva öffnen', 'vereinsplugin' ) . '</a>';
