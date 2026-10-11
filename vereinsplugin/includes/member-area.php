@@ -259,7 +259,7 @@ function vp_member_sections() {
 			'label'  => __( 'Veranstaltungen', 'vereinsplugin' ),
 			'group'  => 'vorstand_sonstige',
 			'cap'    => 'jbf_edit_events',
-			'render' => 'vp_render_backend_links_events',
+			'render' => function_exists( 'vp_render_veranstaltungen_section' ) ? 'vp_render_veranstaltungen_section' : 'vp_render_backend_links_events',
 		),
 		'formulare' => array(
 			'label'  => __( 'Formulare', 'vereinsplugin' ),

@@ -51,7 +51,16 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
   ein Kontoauszug später, warnt der Import vor einer Lücke. Bei der Bank nur
   **vorgemerkte** Umsätze (Sparkasse, Spalte „Info“) werden nicht importiert.
 - **Veranstaltungs-Publisher** – Veranstaltungen an Mastodon, Bluesky, Telegram,
-  Presse, Signal u. a. verteilen (Frontend-UI folgt in Stage 2).
+  Presse, Signal u. a. verteilen. Im Mitgliederbereich unter
+  **Veranstaltungen** in drei Schritten: (1) Daten (Titel, Beginn, Ort,
+  Beschreibung, Website-Seite, Kanäle), (2) **Material-Checkliste** – je
+  gewähltem Kanal die nötigen Texte und Bildformate (Feed 1080×1350, Story
+  1080×1920, Facebook-Veranstaltung 1200×628, Plakat A3 …) mit Upload,
+  Formatprüfung, „In Canva gestalten“ im passenden Format, Canva-Link und
+  Ablage in einem Nextcloud-Ordner je Veranstaltung, (3) **Kanal-Checkliste** –
+  automatische Kanäle einzeln oder gesammelt senden (Vorstand), manuelle
+  Kanäle (WhatsApp, Facebook-Veranstaltung, Website, Newsletter, Aushang)
+  abhaken, mit Link und Versandprotokoll.
 
 ## Installation
 
