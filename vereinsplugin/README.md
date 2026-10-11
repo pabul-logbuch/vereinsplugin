@@ -77,6 +77,15 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
   angehängt) oder jeder Termin einzeln – mit eigener Kanal-Checkliste und
   eigenem Versand, Text beginnt mit dem Termin. Mitglieder-Kalender und
   Veranstaltungsseite zeigen alle Termine.
+  **Alles im Mitgliederbereich, ohne WP-Backend:** (4) **Zeitplan** –
+  zeitversetzte Kampagne mit Schritten relativ zum (ersten) Termin, Vorlage
+  −14/−3/−1/+2 Tage, einplanen und stoppen (Vorstand), Versandprotokoll je
+  Schritt. **Löschen** in den Papierkorb (stoppt eingeplante Schritte), dort
+  wiederherstellen oder endgültig löschen. Kurzbeschreibung und
+  Beitragsbild für die Website, Freigabe- und Kampagnen-Status in der
+  Liste, Instagram-Reel-Status. Administrator:innen pflegen unter
+  „Zugänge für Social Media und Presse“ die Zugangsdaten (Tokens werden nicht
+  angezeigt; leer lassen = unverändert).
 
 ## Installation
 

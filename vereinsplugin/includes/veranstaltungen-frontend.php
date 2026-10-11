@@ -11,6 +11,12 @@
  *   3. Kanal-Checkliste: automatische Kanäle einzeln senden (nur Vorstand,
  *      Recht jbf_send_external), manuelle Kanäle abhaken.
  *
+ *   4. Zeitplan (optional): zeitversetzte Kampagne – Schritte relativ zum
+ *      (ersten) Termin, per WP-Cron einplanen und stoppen.
+ * Dazu: Löschen (Papierkorb, Wiederherstellen, endgültig löschen) und für
+ * Administrator:innen die Zugänge zu Social Media und Presse – das
+ * WP-Backend wird für Veranstaltungen nicht mehr gebraucht.
+ *
  * Datenbasis bleibt der Beitragstyp „veranstaltung“ mit den _jbf_*-Feldern
  * des Veranstaltungs-Publishers – Versand, Kampagnen und Backend-Editor
  * funktionieren unverändert weiter.
@@ -57,6 +63,8 @@ function vp_ev_material() {
 		'story'     => array( 'titel' => __( 'Bild Instagram-Story (9:16)', 'vereinsplugin' ), 'typ' => 'bild', 'meta' => '_jbf_img_story', 'w' => 1080, 'h' => 1920, 'kanaele' => array( 'instagram' ), 'pflicht' => false ),
 		'fb_event'  => array( 'titel' => __( 'Bild Facebook-Veranstaltung (Querformat)', 'vereinsplugin' ), 'typ' => 'bild', 'meta' => '_jbf_img_fb_event', 'w' => 1200, 'h' => 628, 'kanaele' => array( 'facebook_event' ), 'pflicht' => true ),
 		'reel'      => array( 'titel' => __( 'Instagram-Reel (Video 9:16, unter 90 s)', 'vereinsplugin' ), 'typ' => 'video', 'meta' => '_jbf_video_reel', 'w' => 1080, 'h' => 1920, 'kanaele' => array( 'instagram' ), 'pflicht' => false ),
+		'beitragsbild' => array( 'titel' => __( 'Beitragsbild für die Website (Querformat 16:9)', 'vereinsplugin' ), 'typ' => 'bild', 'meta' => '_thumbnail_id', 'w' => 1200, 'h' => 675, 'kanaele' => array( 'website' ), 'pflicht' => false,
+			'hinweis' => __( 'Erscheint auf der Veranstaltungsseite und in Übersichten.', 'vereinsplugin' ) ),
 		'plakat'    => array( 'titel' => __( 'Plakat / Flyer (A3, PDF oder Bild)', 'vereinsplugin' ), 'typ' => 'datei', 'meta' => '_vp_ev_plakat', 'w' => 3508, 'h' => 4961, 'kanaele' => array( 'aushang', 'newsletter' ), 'pflicht' => true,
 			'hinweis' => __( 'Canva-Vorlage in A3 (297 × 420 mm, 300 dpi).', 'vereinsplugin' ) ),
 		'presse_ue' => array( 'titel' => __( 'Presse: Überschrift', 'vereinsplugin' ), 'typ' => 'text', 'meta' => '_jbf_press_headline', 'kanaele' => array( 'press' ), 'pflicht' => false,
@@ -324,6 +332,25 @@ function vp_ev_aktionen() {
 		exit;
 	}
 
+	if ( 'zugaenge' === $aktion ) {
+		if ( current_user_can( 'manage_options' ) && class_exists( 'Jbf_Settings' ) ) {
+			$alt   = Jbf_Settings::get();
+			$neu   = array_map( 'strval', (array) wp_unslash( $_POST['jbf'] ?? array() ) );
+			$daten = array();
+			foreach ( $alt as $k => $v ) {
+				$daten[ $k ] = array_key_exists( $k, $neu ) ? $neu[ $k ] : $v;
+				// Geheime Felder: leer gelassen = bisheriger Wert bleibt.
+				if ( in_array( $k, vp_ev_geheime_felder(), true ) && '' === trim( $daten[ $k ] ) && empty( $_POST['jbf_leeren'][ $k ] ) ) {
+					$daten[ $k ] = $v;
+				}
+			}
+			update_option( Jbf_Settings::OPTION_KEY, Jbf_Settings::sanitize( $daten ) );
+			$msg = __( 'Zugänge gespeichert.', 'vereinsplugin' );
+		}
+		wp_safe_redirect( add_query_arg( 'vp_ev_msg', rawurlencode( $msg ), $back ) );
+		exit;
+	}
+
 	if ( 'neu' === $aktion ) {
 		if ( ! current_user_can( 'jbf_edit_events' ) ) {
 			wp_die( esc_html__( 'Keine Berechtigung.', 'vereinsplugin' ) );
@@ -346,6 +373,7 @@ function vp_ev_aktionen() {
 				'post_type'    => 'veranstaltung',
 				'post_title'   => $titel,
 				'post_content' => wp_kses_post( (string) ( $p['beschreibung'] ?? '' ) ),
+				'post_excerpt' => sanitize_textarea_field( (string) ( $p['kurz'] ?? '' ) ),
 				'post_status'  => ! empty( $p['sichtbar'] ) ? 'publish' : 'draft',
 			);
 			if ( $id ) {
@@ -494,6 +522,87 @@ function vp_ev_aktionen() {
 			}
 			break;
 
+		case 'loeschen':
+			if ( ! current_user_can( 'delete_post', $id ) ) {
+				$err = __( 'Keine Berechtigung zum Löschen.', 'vereinsplugin' );
+				break;
+			}
+			if ( class_exists( 'Jbf_Campaign' ) ) {
+				Jbf_Campaign::unschedule_all( $id );
+			}
+			$titel = get_the_title( $id );
+			wp_trash_post( $id );
+			$back = remove_query_arg( 'vp_ev', $back );
+			$msg  = sprintf( __( '„%s“ liegt im Papierkorb (unten in der Liste wiederherstellbar).', 'vereinsplugin' ), $titel );
+			break;
+
+		case 'wiederherstellen':
+			if ( 'trash' !== get_post_status( $id ) || ! current_user_can( 'delete_post', $id ) ) {
+				$err = __( 'Keine Berechtigung.', 'vereinsplugin' );
+				break;
+			}
+			wp_untrash_post( $id );
+			$back = add_query_arg( 'vp_ev', $id, remove_query_arg( 'vp_ev', $back ) );
+			$msg  = __( 'Wiederhergestellt – als Entwurf. Zum Veröffentlichen „Auf der Website veröffentlichen“ anhaken und speichern.', 'vereinsplugin' );
+			break;
+
+		case 'endgueltig':
+			if ( 'trash' !== get_post_status( $id ) || ! current_user_can( 'delete_post', $id ) ) {
+				$err = __( 'Keine Berechtigung.', 'vereinsplugin' );
+				break;
+			}
+			$titel = get_the_title( $id );
+			wp_delete_post( $id, true );
+			$back = remove_query_arg( 'vp_ev', $back );
+			$msg  = sprintf( __( '„%s“ endgültig gelöscht. Hochgeladene Bilder bleiben in der Mediathek und im Nextcloud-Ordner.', 'vereinsplugin' ), $titel );
+			break;
+
+		case 'kampagne':
+			if ( ! class_exists( 'Jbf_Campaign' ) ) {
+				break;
+			}
+			$zeilen = array();
+			foreach ( (array) ( $_POST['jbf_campaign'] ?? array() ) as $i => $z ) {
+				if ( ! empty( $z['weg'] ) ) {
+					$z['label'] = '';
+				}
+				$zeilen[ $i ] = $z;
+			}
+			if ( ! empty( $p['vorlage'] ) ) {
+				$auto = array_values( array_intersect( vp_ev_gewaehlt( $id ), vp_ev_auto_kanaele() ) );
+				foreach ( Jbf_Campaign::template_steps() as $t ) {
+					$zeilen[] = $t + array( 'channels' => $auto, 'text_override' => '' );
+				}
+			}
+			$_POST['jbf_campaign'] = $zeilen; // save_from_request() liest $_POST
+			Jbf_Campaign::save_from_request( $id );
+			update_post_meta( $id, '_jbf_timing_mode', Jbf_Campaign::get_steps( $id ) ? 'staggered' : 'simultaneous' );
+			$msg = __( 'Zeitplan gespeichert. Geplante Schritte wurden angehalten – bitte neu einplanen.', 'vereinsplugin' );
+			break;
+
+		case 'kampagne_einplanen':
+		case 'kampagne_stoppen':
+			if ( ! class_exists( 'Jbf_Roles' ) || ! Jbf_Roles::can_send_external() || ! class_exists( 'Jbf_Campaign' ) ) {
+				$err = __( 'Nur der Vorstand darf Kampagnen einplanen.', 'vereinsplugin' );
+				break;
+			}
+			if ( 'kampagne_stoppen' === $aktion ) {
+				Jbf_Campaign::unschedule_all( $id );
+				$msg = __( 'Kampagne gestoppt – die Schritte sind wieder offen.', 'vereinsplugin' );
+				break;
+			}
+			$ok = $fehl = array();
+			foreach ( Jbf_Campaign::schedule_all( $id ) as $r ) {
+				if ( $r['ok'] ) {
+					$ok[] = $r['label'] . ': ' . $r['message'];
+				} else {
+					$fehl[] = $r['label'] . ': ' . $r['message'];
+				}
+			}
+			$msg = $ok ? implode( ' · ', $ok ) : ( $fehl ? '' : __( 'Keine offenen Schritte.', 'vereinsplugin' ) );
+			$err = implode( ' · ', $fehl );
+			break;
+
 		case 'freigabe':
 			update_post_meta( $id, '_jbf_review_status', 'ready' );
 			update_post_meta( $id, '_jbf_submitted_by', get_current_user_id() );
@@ -569,7 +678,7 @@ function vp_render_veranstaltungen_section() {
 	if ( 'neu' === $ev ) {
 		return $out . vp_ev_editor( 0 );
 	}
-	if ( (int) $ev && 'veranstaltung' === get_post_type( (int) $ev ) ) {
+	if ( (int) $ev && 'veranstaltung' === get_post_type( (int) $ev ) && 'trash' !== get_post_status( (int) $ev ) ) {
 		return $out . vp_ev_editor( (int) $ev );
 	}
 	return $out . vp_ev_liste();
@@ -599,7 +708,7 @@ function vp_ev_liste() {
 			'<tr><td><a href="%s"><strong>%s</strong></a>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
 			esc_url( vp_ev_url( array( 'vp_ev' => $p->ID ) ) ),
 			esc_html( get_the_title( $p ) ),
-			'publish' !== $p->post_status ? ' <span class="vp-badge">' . esc_html__( 'Entwurf', 'vereinsplugin' ) . '</span>' : '',
+			vp_ev_status_badges( $p ),
 			esc_html( vp_ev_ist_reihe( $p->ID ) ? sprintf( __( 'Reihe · %1$d Termine ab %2$s', 'vereinsplugin' ), count( vp_ev_termine( $p->ID ) ), vp_ev_datum( $p->ID ) ) : vp_ev_datum( $p->ID ) ),
 			$balken( $mf, $mg ), // phpcs:ignore
 			$balken( $kf, $kg ) // phpcs:ignore
@@ -613,10 +722,130 @@ function vp_ev_liste() {
 		echo '<details class="vp-card"><summary><strong>' . esc_html__( 'Einstellungen', 'vereinsplugin' ) . '</strong></summary><form method="post" class="vp-form">' . vp_ev_kopf( 'einstellungen' ); // phpcs:ignore
 		echo '<label>' . esc_html__( 'Nextcloud-Basisordner für Veranstaltungsmaterial', 'vereinsplugin' ) . '<input type="text" name="nc_basis" value="' . esc_attr( vp_ev_nc_basis() ) . '"></label>';
 		echo '<p class="vp-muted">' . esc_html__( 'Liegt im Nextcloud-Konto der Belegablage. Diesen Ordner einmal in Nextcloud mit der Gruppe teilen, die das Material bearbeitet – dann sehen alle die Unterordner je Veranstaltung.', 'vereinsplugin' ) . '</p>';
-		echo '<p class="vp-muted"><a href="' . esc_url( admin_url( 'admin.php?page=jufobleibt-event-publisher-settings' ) ) . '">' . esc_html__( 'Zugänge für Social Media und Presse (WP-Backend)', 'vereinsplugin' ) . '</a></p>';
 		echo '<p><button class="vp-btn">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button></p></form></details>';
 	}
+	if ( current_user_can( 'manage_options' ) && class_exists( 'Jbf_Settings' ) ) {
+		echo vp_ev_zugaenge_form(); // phpcs:ignore
+	}
+	echo vp_ev_papierkorb(); // phpcs:ignore
 	return ob_get_clean();
+}
+
+/** Badges in der Liste: Entwurf, Freigabe, Kampagne. */
+function vp_ev_status_badges( $p ) {
+	$h = '';
+	if ( 'publish' !== $p->post_status ) {
+		$h .= ' <span class="vp-badge">' . esc_html__( 'Entwurf', 'vereinsplugin' ) . '</span>';
+	}
+	if ( 'ready' === get_post_meta( $p->ID, '_jbf_review_status', true ) ) {
+		$h .= ' <span class="vp-badge" style="background:#fef3c7">' . esc_html__( 'Freigabe angefragt', 'vereinsplugin' ) . '</span>';
+	}
+	if ( class_exists( 'Jbf_Campaign' ) ) {
+		$geplant = count( array_filter( Jbf_Campaign::get_steps( $p->ID ), static function ( $st ) {
+			return 'scheduled' === ( $st['status'] ?? '' );
+		} ) );
+		if ( $geplant ) {
+			$h .= ' <span class="vp-badge" style="background:#e0f2fe">' . esc_html( sprintf( _n( '%d Schritt eingeplant', '%d Schritte eingeplant', $geplant, 'vereinsplugin' ), $geplant ) ) . '</span>';
+		}
+	}
+	return $h;
+}
+
+/** Felder der Zugänge, die nicht im Klartext angezeigt werden. */
+function vp_ev_geheime_felder() {
+	return array( 'mastodon_token', 'bluesky_app_password', 'telegram_bot_token', 'facebook_page_token', 'instagram_token', 'twitter_api_secret', 'twitter_access_token', 'twitter_access_secret' );
+}
+
+/** Zugänge für Social Media und Presse (nur Administrator:innen). */
+function vp_ev_zugaenge_form() {
+	$cfg     = Jbf_Settings::get();
+	$gruppen = array(
+		__( 'Allgemein', 'vereinsplugin' ) => array(
+			'hashtag' => array( __( 'Fester Hashtag', 'vereinsplugin' ), __( 'Wird an Social-Kurztexte angehängt, falls nicht enthalten.', 'vereinsplugin' ) ),
+		),
+		'Mastodon' => array(
+			'mastodon_instance' => array( __( 'Instanz-URL', 'vereinsplugin' ), 'z. B. https://mastodon.social' ),
+			'mastodon_token'    => array( __( 'Access Token', 'vereinsplugin' ), __( 'Einstellungen → Entwicklung → Neue Anwendung, Scope „write“.', 'vereinsplugin' ) ),
+		),
+		'Bluesky' => array(
+			'bluesky_handle'       => array( __( 'Handle', 'vereinsplugin' ), 'z. B. verein.bsky.social' ),
+			'bluesky_app_password' => array( __( 'App-Passwort', 'vereinsplugin' ), __( 'Einstellungen → App-Passwörter, nicht das Hauptpasswort.', 'vereinsplugin' ) ),
+		),
+		'Telegram' => array(
+			'telegram_bot_token' => array( __( 'Bot-Token', 'vereinsplugin' ), __( 'Von @BotFather.', 'vereinsplugin' ) ),
+			'telegram_chat_id'   => array( __( 'Kanal-/Chat-ID', 'vereinsplugin' ), __( 'Bot muss Admin im Kanal sein, z. B. @euerkanal oder -100…', 'vereinsplugin' ) ),
+		),
+		__( 'Facebook-Seite', 'vereinsplugin' ) => array(
+			'facebook_page_id'    => array( 'Page ID', '' ),
+			'facebook_page_token' => array( __( 'Page Access Token (langlebig)', 'vereinsplugin' ), __( 'Über den Graph API Explorer von Meta.', 'vereinsplugin' ) ),
+		),
+		'Instagram' => array(
+			'instagram_account_id' => array( __( 'Business Account ID', 'vereinsplugin' ), __( 'Muss mit der Facebook-Seite verknüpft sein.', 'vereinsplugin' ) ),
+			'instagram_token'      => array( __( 'Access Token', 'vereinsplugin' ), __( 'Meist derselbe wie Facebook, mit Instagram-Rechten.', 'vereinsplugin' ) ),
+		),
+		'X / Twitter' => array(
+			'twitter_api_key'       => array( 'API Key', '' ),
+			'twitter_api_secret'    => array( 'API Secret', '' ),
+			'twitter_access_token'  => array( 'Access Token', __( 'User-Context-Token mit Schreibrechten.', 'vereinsplugin' ) ),
+			'twitter_access_secret' => array( 'Access Token Secret', '' ),
+		),
+		__( 'Signal (über signal-cli-rest-api)', 'vereinsplugin' ) => array(
+			'signal_webhook_url' => array( __( 'REST-API-Endpunkt', 'vereinsplugin' ), 'z. B. https://euer-server:8080' ),
+			'signal_number'      => array( __( 'Registrierte Nummer', 'vereinsplugin' ), '' ),
+			'signal_group_id'    => array( __( 'Gruppen-ID', 'vereinsplugin' ), __( 'Aus „listGroups“.', 'vereinsplugin' ) ),
+		),
+		__( 'Presseverteiler', 'vereinsplugin' ) => array(
+			'press_from_name'       => array( __( 'Absendername', 'vereinsplugin' ), '' ),
+			'press_from_email'      => array( __( 'Absender-E-Mail', 'vereinsplugin' ), __( 'Für zuverlässigen Versand ein SMTP-Plugin nutzen.', 'vereinsplugin' ) ),
+			'press_recipients'      => array( __( 'Empfänger (eine Adresse pro Zeile)', 'vereinsplugin' ), '', 'textarea' ),
+			'press_contact_default' => array( __( 'Standard-Kontakt für Presseanfragen', 'vereinsplugin' ), __( 'Gilt für jede Veranstaltung, wenn dort kein eigener Kontakt steht.', 'vereinsplugin' ), 'textarea' ),
+		),
+	);
+	$geheim = vp_ev_geheime_felder();
+	$h      = '<details class="vp-card"><summary><strong>' . esc_html__( 'Zugänge für Social Media und Presse', 'vereinsplugin' ) . '</strong> <span class="vp-muted">(' . esc_html__( 'nur Administrator:innen', 'vereinsplugin' ) . ')</span></summary>';
+	$h     .= '<form method="post" class="vp-form" autocomplete="off">' . vp_ev_kopf( 'zugaenge' );
+	foreach ( $gruppen as $titel => $felder ) {
+		$h .= '<h4 style="margin:14px 0 4px">' . esc_html( $titel ) . '</h4><div class="vp-form-grid">';
+		foreach ( $felder as $k => $f ) {
+			$wert = (string) ( $cfg[ $k ] ?? '' );
+			$h   .= '<label' . ( isset( $f[2] ) ? ' class="vp-col-2"' : '' ) . '>' . esc_html( $f[0] );
+			if ( isset( $f[2] ) ) {
+				$h .= '<textarea name="jbf[' . esc_attr( $k ) . ']" rows="4">' . esc_textarea( $wert ) . '</textarea>';
+			} elseif ( in_array( $k, $geheim, true ) ) {
+				$h .= '<input type="password" name="jbf[' . esc_attr( $k ) . ']" value="" placeholder="' . esc_attr( '' !== $wert ? __( '•••••• gespeichert – leer lassen = unverändert', 'vereinsplugin' ) : '' ) . '" autocomplete="new-password">';
+				if ( '' !== $wert ) {
+					$h .= '<span style="font-weight:normal;font-size:.85em"><input type="checkbox" name="jbf_leeren[' . esc_attr( $k ) . ']" value="1"> ' . esc_html__( 'löschen', 'vereinsplugin' ) . '</span>';
+				}
+			} else {
+				$h .= '<input type="text" name="jbf[' . esc_attr( $k ) . ']" value="' . esc_attr( $wert ) . '">';
+			}
+			if ( '' !== $f[1] ) {
+				$h .= '<span class="vp-muted" style="font-weight:normal">' . esc_html( $f[1] ) . '</span>';
+			}
+			$h .= '</label>';
+		}
+		$h .= '</div>';
+	}
+	return $h . '<p><button class="vp-btn vp-btn-primary">' . esc_html__( 'Zugänge speichern', 'vereinsplugin' ) . '</button></p></form></details>';
+}
+
+/** Papierkorb: gelöschte Veranstaltungen wiederherstellen oder endgültig löschen. */
+function vp_ev_papierkorb() {
+	$weg = get_posts( array( 'post_type' => 'veranstaltung', 'post_status' => 'trash', 'numberposts' => 100 ) );
+	$weg = array_filter( $weg, static function ( $p ) {
+		return current_user_can( 'delete_post', $p->ID );
+	} );
+	if ( ! $weg ) {
+		return '';
+	}
+	$h = '<details class="vp-card"><summary><strong>🗑 ' . esc_html( sprintf( __( 'Papierkorb (%d)', 'vereinsplugin' ), count( $weg ) ) ) . '</strong></summary><div class="vp-table-wrap"><table class="vp-table"><tbody>';
+	foreach ( $weg as $p ) {
+		$h .= '<tr><td><strong>' . esc_html( get_the_title( $p ) ) . '</strong><br><span class="vp-muted">' . esc_html( vp_ev_datum( $p->ID ) ) . '</span></td><td style="text-align:right;white-space:nowrap">'
+			. '<form method="post" style="display:inline">' . vp_ev_kopf( 'wiederherstellen', $p->ID ) . '<button class="vp-btn">↺ ' . esc_html__( 'Wiederherstellen', 'vereinsplugin' ) . '</button></form> '
+			. '<form method="post" style="display:inline">' . vp_ev_kopf( 'endgueltig', $p->ID ) . '<button class="vp-btn" onclick="return confirm(\'' . esc_js( __( 'Endgültig löschen? Das lässt sich nicht rückgängig machen.', 'vereinsplugin' ) ) . '\')">' . esc_html__( 'Endgültig löschen', 'vereinsplugin' ) . '</button></form>'
+			. '</td></tr>';
+	}
+	return $h . '</tbody></table></div><p class="vp-muted">' . esc_html__( 'WordPress leert den Papierkorb nach 30 Tagen automatisch.', 'vereinsplugin' ) . '</p></details>';
 }
 
 function vp_ev_editor( $id ) {
@@ -671,6 +900,7 @@ function vp_ev_editor( $id ) {
 	echo '<p><label style="font-weight:normal"><input type="checkbox" name="anhaengen" value="1" ' . checked( ! $id || '1' === (string) get_post_meta( $id, '_vp_ev_termine_anhaengen', true ), true, false ) . '> ' . esc_html__( 'Beim Versand die Liste der kommenden Termine an die Texte anhängen', 'vereinsplugin' ) . '</label><br>'
 		. '<label style="font-weight:normal"><input type="checkbox" name="je_termin" value="1" ' . checked( $id && '1' === (string) get_post_meta( $id, '_vp_ev_je_termin', true ), true, false ) . '> ' . esc_html__( 'Jeden Termin einzeln bewerben (eigene Kanal-Checkliste je Termin, Text beginnt mit dem Termin)', 'vereinsplugin' ) . '</label></p></div>';
 	echo '<label class="vp-col-2">' . esc_html__( 'Beschreibung (Website, Presse-Standardtext)', 'vereinsplugin' ) . '<textarea name="beschreibung" rows="5">' . esc_textarea( $post ? $post->post_content : '' ) . '</textarea></label>';
+	echo '<label class="vp-col-2">' . esc_html__( 'Kurzbeschreibung (optional, für Übersichten auf der Website)', 'vereinsplugin' ) . '<textarea name="kurz" rows="2">' . esc_textarea( $post ? $post->post_excerpt : '' ) . '</textarea></label>';
 	echo '</div>';
 	echo '<p><label><input type="checkbox" name="sichtbar" value="1" ' . checked( ! $post || 'publish' === $post->post_status, true, false ) . '> ' . esc_html__( 'Auf der Website veröffentlichen (Veranstaltungsseite)', 'vereinsplugin' ) . '</label></p>';
 	echo '<fieldset style="border:0;padding:0"><legend><strong>' . esc_html__( 'Über welche Kanäle wird verbreitet?', 'vereinsplugin' ) . '</strong></legend><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:4px 16px;margin-top:6px">';
@@ -757,9 +987,107 @@ function vp_ev_editor( $id ) {
 			echo '</ul></details>';
 		}
 	}
-	echo '<p class="vp-muted" style="margin-top:10px"><a href="' . esc_url( get_edit_post_link( $id, '' ) ) . '">' . esc_html__( 'Erweitert: zeitversetzte Kampagne im WP-Backend', 'vereinsplugin' ) . '</a></p>';
+	$reel = get_post_meta( $id, '_jbf_reel_status', true );
+	if ( is_array( $reel ) && ! empty( $reel['message'] ) ) {
+		echo '<p class="vp-muted">' . esc_html( sprintf( __( 'Instagram-Reel: %1$s (Stand %2$s)', 'vereinsplugin' ), $reel['message'], $reel['checked_at'] ?? '' ) ) . '</p>';
+	}
 	echo '</div>';
+
+	/* ---- 4. Zeitplan ---- */
+	if ( class_exists( 'Jbf_Campaign' ) ) {
+		echo vp_ev_kampagne_karte( $id, $gew ); // phpcs:ignore
+	}
+
+	/* ---- Löschen ---- */
+	if ( current_user_can( 'delete_post', $id ) ) {
+		echo '<form method="post" style="margin:18px 0;text-align:right">' . vp_ev_kopf( 'loeschen', $id ) // phpcs:ignore
+			. '<button class="vp-btn" style="color:#b91c1c" onclick="return confirm(\'' . esc_js( __( 'Veranstaltung löschen? Sie kommt in den Papierkorb und lässt sich dort wiederherstellen. Eingeplante Kampagnen-Schritte werden gestoppt.', 'vereinsplugin' ) ) . '\')">🗑 ' . esc_html__( 'Veranstaltung löschen', 'vereinsplugin' ) . '</button></form>';
+	}
 	return ob_get_clean();
+}
+
+/** Zeitversetzte Kampagne: Schritte relativ zum (ersten) Termin. */
+function vp_ev_kampagne_karte( $id, array $gew ) {
+	$steps  = Jbf_Campaign::get_steps( $id );
+	$auto   = vp_ev_auto_kanaele();
+	$kan    = vp_ev_kanaele();
+	$senden = class_exists( 'Jbf_Roles' ) && Jbf_Roles::can_send_external();
+	$wahl   = array_values( array_intersect( $gew, $auto ) ) ?: $auto;
+	$gesendet = array_filter( $steps, static function ( $st ) {
+		return 'sent' === ( $st['status'] ?? '' );
+	} );
+	$offen = array_filter( $steps, static function ( $st ) {
+		return 'sent' !== ( $st['status'] ?? '' );
+	} );
+	$geplant = array_filter( $offen, static function ( $st ) {
+		return 'scheduled' === ( $st['status'] ?? '' );
+	} );
+	$pending = array_filter( $offen, static function ( $st ) {
+		return 'pending' === ( $st['status'] ?? '' );
+	} );
+	$beginn = (string) get_post_meta( $id, '_jbf_date_start', true );
+
+	$h  = '<details class="vp-card"' . ( $steps ? ' open' : '' ) . '><summary><strong>4 · ' . esc_html__( 'Zeitplan: zeitversetzte Kampagne (optional)', 'vereinsplugin' ) . '</strong>';
+	if ( $geplant ) {
+		$h .= ' <span class="vp-badge" style="background:#e0f2fe">' . esc_html( sprintf( __( '%d eingeplant', 'vereinsplugin' ), count( $geplant ) ) ) . '</span>';
+	}
+	$h .= '</summary>';
+	$h .= '<p class="vp-muted">' . esc_html( sprintf(
+		__( 'Statt alles sofort zu senden, gehen die automatischen Kanäle in Schritten raus – relativ zum Termin %s (bei Reihen: der erste Termin). Tage negativ = vorher, positiv = danach.', 'vereinsplugin' ),
+		$beginn ? vp_ev_datum( $id ) : __( '(noch kein Termin)', 'vereinsplugin' )
+	) ) . '</p>';
+
+	if ( $gesendet ) {
+		$h .= '<h4 style="margin:8px 0 4px">' . esc_html__( 'Bereits versendet', 'vereinsplugin' ) . '</h4><ul>';
+		foreach ( $gesendet as $st ) {
+			$h .= '<li><strong>' . esc_html( $st['label'] ) . '</strong> · ' . esc_html( mysql2date( 'd.m.Y H:i', $st['sent_at'] ) ) . '<ul>';
+			foreach ( (array) ( $st['log'] ?? array() ) as $l ) {
+				$h .= '<li>' . esc_html( ( ! empty( $l['success'] ) ? '✓ ' : '✗ ' ) . ( $kan[ $l['channel'] ] ?? $l['channel'] ) . ( ! empty( $l['message'] ) ? ' · ' . $l['message'] : '' ) ) . '</li>';
+			}
+			$h .= '</ul></li>';
+		}
+		$h .= '</ul>';
+	}
+
+	$h .= '<form method="post" class="vp-form">' . vp_ev_kopf( 'kampagne', $id );
+	$h .= '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Schritt', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Tage', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Uhrzeit', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Kanäle', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Eigener Text (leer = gemeinsamer Text)', 'vereinsplugin' ) . '</th><th></th></tr></thead><tbody>';
+	$zeilen = array_merge( array_values( $offen ), array( array(), array() ) );
+	foreach ( $zeilen as $i => $st ) {
+		$n      = 'jbf_campaign[' . (int) $i . ']';
+		$status = $st['status'] ?? '';
+		$ch     = $st ? (array) ( $st['channels'] ?? array() ) : $wahl;
+		$h     .= '<tr><td><input type="hidden" name="' . $n . '[id]" value="' . esc_attr( $st['id'] ?? '' ) . '"><input type="text" name="' . $n . '[label]" value="' . esc_attr( $st['label'] ?? '' ) . '" placeholder="' . esc_attr__( 'z. B. Ankündigung', 'vereinsplugin' ) . '" style="width:140px">';
+		if ( 'scheduled' === $status && ! empty( $st['scheduled_ts'] ) ) {
+			$h .= '<br><span class="vp-badge" style="background:#e0f2fe">' . esc_html( sprintf( __( 'eingeplant %s', 'vereinsplugin' ), date_i18n( 'd.m.Y H:i', (int) $st['scheduled_ts'] ) ) ) . '</span>';
+		} elseif ( 'error' === $status ) {
+			$h .= '<br><span class="vp-badge" style="background:#fee2e2">' . esc_html__( 'nicht eingeplant – Termin/Zeitpunkt prüfen', 'vereinsplugin' ) . '</span>';
+		}
+		$h .= '</td><td><input type="number" name="' . $n . '[offset_days]" value="' . esc_attr( (string) ( $st['offset_days'] ?? ( $st ? 0 : -7 ) ) ) . '" style="width:70px"></td>';
+		$h .= '<td><input type="time" name="' . $n . '[time]" value="' . esc_attr( $st['time'] ?? '09:00' ) . '"></td><td style="font-size:.9em">';
+		foreach ( $auto as $k ) {
+			$h .= '<label style="display:block;font-weight:normal"><input type="checkbox" name="' . $n . '[channels][]" value="' . esc_attr( $k ) . '" ' . checked( in_array( $k, $ch, true ), true, false ) . '> ' . esc_html( $kan[ $k ] ?? $k ) . '</label>';
+		}
+		$h .= '</td><td><textarea name="' . $n . '[text_override]" rows="3" style="width:100%;min-width:160px">' . esc_textarea( $st['text_override'] ?? '' ) . '</textarea></td>';
+		$h .= '<td>' . ( $st ? '<label style="font-weight:normal;white-space:nowrap"><input type="checkbox" name="' . $n . '[weg]" value="1"> ' . esc_html__( 'entfernen', 'vereinsplugin' ) . '</label>' : '' ) . '</td></tr>';
+	}
+	$h .= '</tbody></table></div>';
+	$h .= '<p class="vp-muted">' . esc_html__( 'Leere Zeilen werden ignoriert. Nach dem Speichern sind alle Schritte wieder offen und müssen neu eingeplant werden.', 'vereinsplugin' ) . '</p>';
+	$h .= '<p style="display:flex;gap:8px;flex-wrap:wrap"><button class="vp-btn vp-btn-primary">' . esc_html__( 'Zeitplan speichern', 'vereinsplugin' ) . '</button>'
+		. '<button class="vp-btn" name="vorlage" value="1">' . esc_html__( '+ Vorlage einfügen (−14, −3, −1, +2 Tage)', 'vereinsplugin' ) . '</button></p></form>';
+
+	if ( $senden && ( $pending || $geplant ) ) {
+		$h .= '<p style="display:flex;gap:8px;flex-wrap:wrap">';
+		if ( $pending ) {
+			$h .= '<form method="post" style="display:inline">' . vp_ev_kopf( 'kampagne_einplanen', $id ) . '<button class="vp-btn vp-btn-primary">🚀 ' . esc_html__( 'Kampagne einplanen', 'vereinsplugin' ) . '</button></form>';
+		}
+		if ( $geplant ) {
+			$h .= '<form method="post" style="display:inline">' . vp_ev_kopf( 'kampagne_stoppen', $id ) . '<button class="vp-btn">' . esc_html__( 'Kampagne stoppen', 'vereinsplugin' ) . '</button></form>';
+		}
+		$h .= '</p>';
+	} elseif ( $pending && ! $senden ) {
+		$h .= '<p class="vp-muted">' . esc_html__( 'Einplanen darf der Vorstand – oben in Schritt 3 „Zur Freigabe einreichen“.', 'vereinsplugin' ) . '</p>';
+	}
+	return $h . '</details>';
 }
 
 /** Kanal-Checkliste (ganze Veranstaltung oder ein Termin der Reihe). */
