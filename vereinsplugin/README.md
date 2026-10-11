@@ -50,6 +50,16 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
   bewusst mit einem Tag Überschneidung, die der Abgleich überspringt. Beginnt
   ein Kontoauszug später, warnt der Import vor einer Lücke. Bei der Bank nur
   **vorgemerkte** Umsätze (Sparkasse, Spalte „Info“) werden nicht importiert.
+  **Schon gebucht:** Steht eine Buchung mit gleichem Betrag auf demselben
+  Geldkonto schon im Journal (z. B. ein eingebuchter Beleg oder von Hand
+  erfasst, ±14 Tage), schlägt der Import vor, die Bankzeile ihr nur
+  **zuzuordnen** – es entsteht keine zweite Buchung, und spätere Importe mit
+  Überschneidung erkennen die Zeile wieder. In der Vorschau lässt sich jede
+  Zeile unter **Verknüpfung** frei wählen: neue Buchung, schon gebuchte
+  Buchung (±45 Tage), Erstattung einer offenen Auslage oder ein beliebiger
+  eingereichter Beleg. Dazu je Zeile **Buchungstext, Rücklage, Budget und
+  Kostenstelle** (bei „schon gebucht“ werden gesetzte Felder an der
+  vorhandenen Buchung ergänzt).
 - **Veranstaltungs-Publisher** – Veranstaltungen an Mastodon, Bluesky, Telegram,
   Presse, Signal u. a. verteilen. Im Mitgliederbereich unter
   **Veranstaltungen** in drei Schritten: (1) Daten (Titel, Beginn, Ort,
@@ -67,6 +77,15 @@ einer** zusätzlichen Dashboard-Seite: der Shortcode-Übersicht.
   angehängt) oder jeder Termin einzeln – mit eigener Kanal-Checkliste und
   eigenem Versand, Text beginnt mit dem Termin. Mitglieder-Kalender und
   Veranstaltungsseite zeigen alle Termine.
+  **Alles im Mitgliederbereich, ohne WP-Backend:** (4) **Zeitplan** –
+  zeitversetzte Kampagne mit Schritten relativ zum (ersten) Termin, Vorlage
+  −14/−3/−1/+2 Tage, einplanen und stoppen (Vorstand), Versandprotokoll je
+  Schritt. **Löschen** in den Papierkorb (stoppt eingeplante Schritte), dort
+  wiederherstellen oder endgültig löschen. Kurzbeschreibung und
+  Beitragsbild für die Website, Freigabe- und Kampagnen-Status in der
+  Liste, Instagram-Reel-Status. Administrator:innen pflegen unter
+  „Zugänge für Social Media und Presse“ die Zugangsdaten (Tokens werden nicht
+  angezeigt; leer lassen = unverändert).
 
 ## Installation
 
