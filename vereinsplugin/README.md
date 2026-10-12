@@ -259,6 +259,21 @@ Weitere Quellen können sich über den Filter `vp_kalender_termine` anhängen.
   Für bestehende Projekte oder nach einer Datumsänderung: „Zeitplan ab heute
   neu verteilen“ im Reiter Bausteine (nur offene Baustein-Einträge).
 
+## Teilen: Formulare und Schichtpläne per Link & QR-Code
+
+Ohne eigene WordPress-Seite mit Shortcode: Jedes Formular hat die Adresse
+`https://eure-seite.de/?vp_formular=<ID>`, jeder Schichtplan
+`https://eure-seite.de/?vp_schichtplan=<ID>`. Das Plugin zeigt dort eine
+schlichte Seite (Vereinsname, Formular bzw. Schichtplan) – auch auf dem Handy.
+Geteilt wird die ID, damit Links und gedruckte QR-Codes beim Umbenennen
+gültig bleiben.
+
+Die **Teilen-Box** (Link kopieren, öffnen, QR-Code, QR als PNG oder SVG
+herunterladen) steht in der Formular-Liste („Link & QR“), oben im
+Formular-Editor, beim Schichtplan (Mitgliederbereich → Schichtpläne, für
+Verwaltende) und im Projekt bei Anmeldung und Schichtplan. Formulare im
+Entwurf sind über den Link nur für Verwaltende sichtbar.
+
 ## Projekte: Teilnehmenden-Szenarien, Förderungen, Sponsoring
 
 - **Berechnung je Posten** (Reiter Finanzen): fester Betrag, **je

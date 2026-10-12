@@ -707,6 +707,9 @@ function vp_projekt_tab_uebersicht( $p, $k ) {
 						}
 						echo '</span>';
 						vp_projekt_loesen_knopf( $p, 'formular_id' );
+						if ( function_exists( 'vp_teilen_box' ) ) {
+							echo '<details><summary class="pp-meta">' . esc_html__( 'Link & QR-Code zur Anmeldung', 'vereinsplugin' ) . '</summary>' . vp_teilen_box( vp_formular_teilen_url( $form ), 'anmeldung-' . ( $form->slug ?: $form->id ), 'entwurf' === $form->status ? __( 'Noch Entwurf – erst veröffentlichen.', 'vereinsplugin' ) : '' ) . '</details>'; // phpcs:ignore
+						}
 					} elseif ( current_user_can( 'vp_manage_formulare' ) ) {
 						vp_projekt_verknuepfen_knopf( $p, 'formular', __( 'Anmeldeformular anlegen', 'vereinsplugin' ) );
 					} else {
@@ -1061,9 +1064,14 @@ function vp_projekt_tab_helfende( $p, $k ) {
 			<a class="pp-btn pp-btn-small" href="<?php echo esc_url( $ansehen ); ?>"><?php esc_html_e( 'Ansehen & eintragen', 'vereinsplugin' ); ?></a>
 			<?php if ( current_user_can( 'wl_manage_wishes' ) ) : ?><a class="pp-btn pp-btn-small" href="<?php echo esc_url( $verwalten ); ?>"><?php esc_html_e( 'Stationen & Schichten bearbeiten', 'vereinsplugin' ); ?></a><?php endif; ?>
 		<?php endif; ?>
-		<span class="pp-meta"><?php echo esc_html( sprintf( __( 'Öffentlich einbinden: [schichtplan event="%s"]', 'vereinsplugin' ), $s['event']->slug ) ); ?></span>
 		<?php vp_projekt_loesen_knopf( $p, 'schicht_event_id' ); ?>
 	</p>
+	<?php if ( function_exists( 'vp_teilen_box' ) ) : ?>
+		<details><summary class="pp-meta"><?php esc_html_e( 'Link & QR-Code zum Eintragen (ohne eigene Seite)', 'vereinsplugin' ); ?></summary>
+			<?php echo vp_teilen_box( vp_schichtplan_teilen_url( $s['event'] ), 'schichtplan-' . $s['event']->slug ); // phpcs:ignore ?>
+			<p class="pp-meta"><?php echo esc_html( sprintf( __( 'Oder auf einer Seite einbinden: [schichtplan event="%s"]', 'vereinsplugin' ), $s['event']->slug ) ); ?></p>
+		</details>
+	<?php endif; ?>
 	<?php if ( ! $s['schichten'] ) : ?>
 		<p class="pp-hint"><?php esc_html_e( 'Der Schichtplan hat noch keine Stationen und Schichten – über „Stationen & Schichten bearbeiten" anlegen.', 'vereinsplugin' ); ?></p>
 	<?php endif; ?>
