@@ -561,22 +561,59 @@ function vp_formular_handle_submit( $f ) {
 	return true;
 }
 
-function vp_formular_notify( $f, $name, $email, $daten ) {
-	$to = $f->benachrichtigung_email ?: ( function_exists( 'vp_board_email' ) ? vp_board_email() : get_option( 'admin_email' ) );
-	$lines = array( sprintf( __( 'Neue Anmeldung für „%s“:', 'vereinsplugin' ), $f->titel ), '' );
+/** Angegebene Daten als Textzeilen „Feld: Wert“ (für die Mails). */
+function vp_formular_daten_zeilen( $f, array $daten ) {
+	$lines = array();
 	foreach ( $f->felder as $feld ) {
-		if ( 'heading' === $feld['type'] || ! isset( $daten[ $feld['key'] ] ) ) {
+		if ( 'heading' === $feld['type'] || ! array_key_exists( $feld['key'], $daten ) ) {
 			continue;
 		}
 		$val = $daten[ $feld['key'] ];
-		$lines[] = $feld['label'] . ': ' . ( is_array( $val ) ? implode( ', ', $val ) : ( $val ?: '–' ) );
+		if ( 'checkbox' === $feld['type'] ) {
+			$val = $val ? __( 'ja', 'vereinsplugin' ) : __( 'nein', 'vereinsplugin' );
+		} elseif ( is_array( $val ) ) {
+			$val = implode( ', ', $val );
+		}
+		$val = '' === (string) $val ? '–' : (string) $val;
+		// Mehrzeilige Antworten eingerückt, damit die Zuordnung klar bleibt.
+		$lines[] = $feld['label'] . ': ' . str_replace( "\n", "\n    ", $val );
 	}
-	wp_mail( $to, sprintf( '[%s] %s', get_bloginfo( 'name' ), sprintf( __( 'Neue Anmeldung: %s', 'vereinsplugin' ), $f->titel ) ), implode( "\n", $lines ) );
+	return $lines;
+}
+
+function vp_formular_notify( $f, $name, $email, $daten ) {
+	$to     = $f->benachrichtigung_email ?: ( function_exists( 'vp_board_email' ) ? vp_board_email() : get_option( 'admin_email' ) );
+	$zeilen = vp_formular_daten_zeilen( $f, $daten );
+	$lines  = array_merge( array( sprintf( __( 'Neue Anmeldung für „%s“:', 'vereinsplugin' ), $f->titel ), '' ), $zeilen );
+	$header = is_email( $email ) ? array( 'Reply-To: ' . $email ) : array();
+	wp_mail( $to, sprintf( '[%s] %s', get_bloginfo( 'name' ), sprintf( __( 'Neue Anmeldung: %s', 'vereinsplugin' ), $f->titel ) ), implode( "\n", $lines ), $header );
 
 	if ( $email ) {
-		wp_mail( $email, sprintf( '[%s] %s', get_bloginfo( 'name' ), __( 'Deine Anmeldung ist eingegangen', 'vereinsplugin' ) ),
-			sprintf( __( "Hallo%s,\n\ndeine Anmeldung für „%s“ ist eingegangen.\n\nViele Grüße", 'vereinsplugin' ), $name ? ' ' . $name : '', $f->titel )
+		// Bestätigung mit den eigenen Angaben – Antworten gehen an die
+		// Adresse, die über neue Anmeldungen informiert wird.
+		$text = array(
+			sprintf( __( 'Hallo%s,', 'vereinsplugin' ), $name ? ' ' . $name : '' ),
+			'',
+			sprintf( __( 'deine Anmeldung für „%s“ ist eingegangen.', 'vereinsplugin' ), $f->titel ),
+			'',
+			__( 'Deine Angaben:', 'vereinsplugin' ),
+			'',
 		);
+		$text   = array_merge( $text, $zeilen, array(
+			'',
+			__( 'Falls etwas nicht stimmt oder du dich abmelden möchtest, antworte einfach auf diese Mail.', 'vereinsplugin' ),
+			'',
+			__( 'Viele Grüße', 'vereinsplugin' ),
+			get_bloginfo( 'name' ),
+		) );
+		$antwort = array();
+		foreach ( array_map( 'trim', explode( ',', (string) $to ) ) as $adr ) {
+			if ( is_email( $adr ) ) {
+				$antwort[] = 'Reply-To: ' . $adr;
+				break;
+			}
+		}
+		wp_mail( $email, sprintf( '[%s] %s', get_bloginfo( 'name' ), sprintf( __( 'Deine Anmeldung: %s', 'vereinsplugin' ), $f->titel ) ), implode( "\n", $text ), $antwort );
 	}
 }
 
