@@ -18,7 +18,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'VP_FORMULAR_DB_VERSION', '1' );
+define( 'VP_FORMULAR_DB_VERSION', '2' );
 
 function vp_formular_table()   { global $wpdb; return $wpdb->prefix . 'vp_formulare'; }
 function vp_formular_eintraege_table() { global $wpdb; return $wpdb->prefix . 'vp_formular_eintraege'; }
@@ -47,7 +47,8 @@ function vp_formulare_maybe_upgrade() {
 		erstellt_von BIGINT UNSIGNED DEFAULT NULL,
 		erstellt_am DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		aktualisiert_am DATETIME NULL,
-		PRIMARY KEY (id),
+		ticket_cfg LONGTEXT NULL,
+		PRIMARY KEY  (id),
 		UNIQUE KEY slug (slug),
 		KEY status (status)
 	) {$collate};" );
@@ -61,7 +62,14 @@ function vp_formulare_maybe_upgrade() {
 		user_id BIGINT UNSIGNED DEFAULT NULL,
 		ip_hash VARCHAR(64) NOT NULL DEFAULT '',
 		eingereicht_am DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		PRIMARY KEY (id),
+		zahl_status VARCHAR(12) NOT NULL DEFAULT '',
+		betrag DECIMAL(10,2) DEFAULT NULL,
+		bezahlt_am DATETIME NULL,
+		zahlart VARCHAR(20) NOT NULL DEFAULT '',
+		buchung_id BIGINT UNSIGNED DEFAULT NULL,
+		zugang VARCHAR(32) NOT NULL DEFAULT '',
+		erinnert_am DATETIME NULL,
+		PRIMARY KEY  (id),
 		KEY formular_id (formular_id)
 	) {$collate};" );
 
@@ -83,6 +91,7 @@ function vp_formular_feldtypen() {
 		'select'     => __( 'Auswahl (Dropdown)', 'vereinsplugin' ),
 		'checkboxes' => __( 'Mehrfachauswahl (Kästchen)', 'vereinsplugin' ),
 		'checkbox'   => __( 'Zustimmung (ein Kästchen)', 'vereinsplugin' ),
+		'tickets'    => __( 'Tickets (Vorverkauf: Name | Preis | Kontingent je Zeile)', 'vereinsplugin' ),
 		'heading'    => __( 'Nur Überschrift/Hinweistext (kein Eingabefeld)', 'vereinsplugin' ),
 	);
 }
@@ -132,7 +141,8 @@ function vp_formular_ist_offen( $f ) {
 	if ( $f->schliesst_am && strtotime( $f->schliesst_am ) < time() ) {
 		return false;
 	}
-	if ( $f->max_teilnehmer && vp_formular_anzahl_eintraege( $f->id ) >= (int) $f->max_teilnehmer ) {
+	$belegt = function_exists( 'vp_formular_belegt' ) ? vp_formular_belegt( $f ) : vp_formular_anzahl_eintraege( $f->id );
+	if ( $f->max_teilnehmer && $belegt >= (int) $f->max_teilnehmer ) {
 		return false;
 	}
 	return true;
@@ -197,7 +207,7 @@ function vp_formular_felder_aus_post() {
 		$used_keys[] = $key;
 
 		$opts = array();
-		if ( in_array( $type, array( 'select', 'checkboxes' ), true ) ) {
+		if ( in_array( $type, array( 'select', 'checkboxes', 'tickets' ), true ) ) {
 			$raw = (string) wp_unslash( $options[ $i ] ?? '' );
 			foreach ( preg_split( '/\r\n|\r|\n/', $raw ) as $line ) {
 				$line = trim( sanitize_text_field( $line ) );
@@ -273,6 +283,11 @@ function vp_shortcode_formular( $atts ) {
 	if ( $done ) {
 		echo '<h2>' . esc_html( $f->titel ) . '</h2>';
 		echo '<div class="vp-note">' . wp_kses_post( wpautop( $f->dank_text ?: __( 'Danke, deine Anmeldung ist eingegangen.', 'vereinsplugin' ) ) ) . '</div>';
+		$neu = ! empty( $GLOBALS['vp_formular_letzter_eintrag'] ) && function_exists( 'vp_ticket_eintrag' ) ? vp_ticket_eintrag( (int) $GLOBALS['vp_formular_letzter_eintrag'] ) : null;
+		if ( $neu && '' !== (string) $neu->zugang ) {
+			echo '<p><a class="vp-btn vp-btn-primary" href="' . esc_url( vp_ticket_seite_url( $neu ) ) . '">' . esc_html__( 'Zu deinen Tickets', 'vereinsplugin' ) . '</a></p>';
+			echo '<p class="vp-muted">' . esc_html__( 'Den Link bekommst du auch per Mail – mit den Zahlungsdaten.', 'vereinsplugin' ) . '</p>';
+		}
 		echo '</div>';
 		return ob_get_clean();
 	}
@@ -283,7 +298,7 @@ function vp_shortcode_formular( $atts ) {
 	}
 
 	if ( $f->max_teilnehmer ) {
-		$frei = max( 0, (int) $f->max_teilnehmer - vp_formular_anzahl_eintraege( $f->id ) );
+		$frei = max( 0, (int) $f->max_teilnehmer - ( function_exists( 'vp_formular_belegt' ) ? vp_formular_belegt( $f ) : vp_formular_anzahl_eintraege( $f->id ) ) );
 		echo '<p class="vp-muted">' . esc_html( sprintf(
 			/* translators: 1: free slots, 2: total slots */
 			__( 'Noch %1$d von %2$d Plätzen frei.', 'vereinsplugin' ),
@@ -331,7 +346,7 @@ function vp_shortcode_formular( $atts ) {
 				esc_attr( $ctrl_type )
 			);
 		}
-		vp_formular_render_feld( $feld, $v, $u );
+		vp_formular_render_feld( $feld + array( '_fid' => (int) $f->id ), $v, $u );
 		if ( $conditioned ) {
 			echo '</div>';
 		}
@@ -403,6 +418,11 @@ function vp_formular_render_feld( $feld, $v, $u ) {
 
 	if ( 'heading' === $feld['type'] ) {
 		echo '<div class="vp-col-2"><h3>' . esc_html( $feld['label'] ) . '</h3></div>';
+		return;
+	}
+
+	if ( 'tickets' === $feld['type'] && function_exists( 'vp_ticket_feld_html' ) ) {
+		echo vp_ticket_feld_html( $feld ); // phpcs:ignore WordPress.Security.EscapeOutput -- baut escaped HTML
 		return;
 	}
 
@@ -492,8 +512,9 @@ function vp_formular_handle_submit( $f ) {
 		return new WP_Error( 'closed', __( 'Die Anmeldung ist inzwischen geschlossen.', 'vereinsplugin' ) );
 	}
 
-	$posted = (array) ( $_POST['f'] ?? array() );
-	$daten  = array();
+	$posted  = (array) ( $_POST['f'] ?? array() );
+	$daten   = array();
+	$tickets = null;
 	$name   = '';
 	$email  = '';
 
@@ -513,6 +534,16 @@ function vp_formular_handle_submit( $f ) {
 		}
 		$key = $feld['key'];
 		$raw = $posted[ $key ] ?? ( 'checkboxes' === $feld['type'] ? array() : '' );
+
+		if ( 'tickets' === $feld['type'] && function_exists( 'vp_ticket_aus_post' ) ) {
+			$val = vp_ticket_aus_post( $f, $feld, $raw );
+			if ( is_wp_error( $val ) ) {
+				return $val;
+			}
+			$daten[ $key ] = $val;
+			$tickets       = array( $feld, $val );
+			continue;
+		}
 
 		if ( 'checkboxes' === $feld['type'] ) {
 			$val = array_map( 'sanitize_text_field', array_map( 'wp_unslash', (array) $raw ) );
@@ -557,7 +588,12 @@ function vp_formular_handle_submit( $f ) {
 		'eingereicht_am' => current_time( 'mysql' ),
 	) );
 
-	vp_formular_notify( $f, $name, $email, $daten );
+	$eintrag_id = (int) $wpdb->insert_id;
+	$GLOBALS['vp_formular_letzter_eintrag'] = $eintrag_id;
+	if ( $tickets && $tickets[1] && function_exists( 'vp_tickets_anlegen' ) ) {
+		vp_tickets_anlegen( $f, $eintrag_id, $tickets[0], $tickets[1] );
+	}
+	vp_formular_notify( $f, $name, $email, $daten, $eintrag_id );
 	return true;
 }
 
@@ -571,6 +607,8 @@ function vp_formular_daten_zeilen( $f, array $daten ) {
 		$val = $daten[ $feld['key'] ];
 		if ( 'checkbox' === $feld['type'] ) {
 			$val = $val ? __( 'ja', 'vereinsplugin' ) : __( 'nein', 'vereinsplugin' );
+		} elseif ( 'tickets' === $feld['type'] && function_exists( 'vp_ticket_bestellung_text' ) ) {
+			$val = vp_ticket_bestellung_text( (array) $val );
 		} elseif ( is_array( $val ) ) {
 			$val = implode( ', ', $val );
 		}
@@ -581,7 +619,7 @@ function vp_formular_daten_zeilen( $f, array $daten ) {
 	return $lines;
 }
 
-function vp_formular_notify( $f, $name, $email, $daten ) {
+function vp_formular_notify( $f, $name, $email, $daten, $eintrag_id = 0 ) {
 	$to     = $f->benachrichtigung_email ?: ( function_exists( 'vp_board_email' ) ? vp_board_email() : get_option( 'admin_email' ) );
 	$zeilen = vp_formular_daten_zeilen( $f, $daten );
 	$lines  = array_merge( array( sprintf( __( 'Neue Anmeldung für „%s“:', 'vereinsplugin' ), $f->titel ), '' ), $zeilen );
@@ -594,12 +632,13 @@ function vp_formular_notify( $f, $name, $email, $daten ) {
 		$text = array(
 			sprintf( __( 'Hallo%s,', 'vereinsplugin' ), $name ? ' ' . $name : '' ),
 			'',
-			sprintf( __( 'deine Anmeldung für „%s“ ist eingegangen.', 'vereinsplugin' ), $f->titel ),
+			sprintf( function_exists( 'vp_ticket_formular' ) && vp_ticket_formular( $f ) ? __( 'deine Bestellung für „%s“ ist eingegangen.', 'vereinsplugin' ) : __( 'deine Anmeldung für „%s“ ist eingegangen.', 'vereinsplugin' ), $f->titel ),
 			'',
 			__( 'Deine Angaben:', 'vereinsplugin' ),
 			'',
 		);
-		$text   = array_merge( $text, $zeilen, array(
+		$ticket_zeilen = ( $eintrag_id && function_exists( 'vp_ticket_mail_zeilen' ) && vp_ticket_formular( $f ) ) ? vp_ticket_mail_zeilen( $f, $eintrag_id ) : array();
+		$text   = array_merge( $text, $zeilen, $ticket_zeilen, array(
 			'',
 			__( 'Falls etwas nicht stimmt oder du dich abmelden möchtest, antworte einfach auf diese Mail.', 'vereinsplugin' ),
 			'',
@@ -613,7 +652,7 @@ function vp_formular_notify( $f, $name, $email, $daten ) {
 				break;
 			}
 		}
-		wp_mail( $email, sprintf( '[%s] %s', get_bloginfo( 'name' ), sprintf( __( 'Deine Anmeldung: %s', 'vereinsplugin' ), $f->titel ) ), implode( "\n", $text ), $antwort );
+		wp_mail( $email, sprintf( '[%s] %s', get_bloginfo( 'name' ), sprintf( function_exists( 'vp_ticket_formular' ) && vp_ticket_formular( $f ) ? __( 'Deine Tickets: %s', 'vereinsplugin' ) : __( 'Deine Anmeldung: %s', 'vereinsplugin' ), $f->titel ) ), implode( "\n", $text ), $antwort );
 	}
 }
 
@@ -681,7 +720,13 @@ function vp_render_formulare_section() {
 		$id = (int) $_POST['id'];
 		$wpdb->delete( vp_formular_eintraege_table(), array( 'formular_id' => $id ) );
 		$wpdb->delete( vp_formular_table(), array( 'id' => $id ) );
+		if ( function_exists( 'vp_tickets_table' ) ) {
+			$wpdb->delete( vp_tickets_table(), array( 'formular_id' => $id ) );
+		}
 		$msg = __( 'Formular gelöscht.', 'vereinsplugin' );
+	}
+	if ( isset( $_POST['vp_ticket_aktion'] ) && check_admin_referer( 'vp_formular_edit', 'vp_fe_nonce' ) && function_exists( 'vp_ticket_post_verarbeiten' ) ) {
+		$msg = vp_ticket_post_verarbeiten();
 	}
 	if ( isset( $_POST['vp_formular_rundmail'] ) && check_admin_referer( 'vp_formular_edit', 'vp_fe_nonce' ) && function_exists( 'vp_formular_rundmail_senden' ) ) {
 		$msg = vp_formular_rundmail_senden();
@@ -689,6 +734,9 @@ function vp_render_formulare_section() {
 	if ( isset( $_POST['vp_eintrag_delete'] ) && check_admin_referer( 'vp_formular_edit', 'vp_fe_nonce' ) ) {
 		global $wpdb;
 		$wpdb->delete( vp_formular_eintraege_table(), array( 'id' => (int) $_POST['eintrag_id'] ) );
+		if ( function_exists( 'vp_tickets_table' ) ) {
+			$wpdb->delete( vp_tickets_table(), array( 'eintrag_id' => (int) $_POST['eintrag_id'] ) );
+		}
 		$msg = __( 'Eintrag gelöscht.', 'vereinsplugin' );
 	}
 
@@ -737,6 +785,9 @@ function vp_formular_save_from_post() {
 		'benachrichtigung_email' => sanitize_email( wp_unslash( $_POST['benachrichtigung_email'] ?? '' ) ),
 		'aktualisiert_am'        => current_time( 'mysql' ),
 	);
+	if ( function_exists( 'vp_ticket_cfg_aus_post' ) && isset( $_POST['ticket_frist'] ) ) {
+		$row['ticket_cfg'] = vp_ticket_cfg_aus_post( $id ? vp_formular_get( $id ) : null );
+	}
 
 	if ( $id ) {
 		$wpdb->update( vp_formular_table(), $row, array( 'id' => $id ) );
@@ -888,6 +939,11 @@ function vp_formular_render_editor( $id ) {
 		?>
 		</tbody></table></div>
 
+		<?php
+		if ( function_exists( 'vp_ticket_editor_html' ) ) {
+			echo vp_ticket_editor_html( ! empty( $f->id ) ? $f : null ); // phpcs:ignore
+		}
+		?>
 		<p><button class="vp-btn vp-btn-primary" name="vp_formular_save" value="1"><?php esc_html_e( 'Speichern', 'vereinsplugin' ); ?></button>
 		<?php if ( ! empty( $f->id ) ) : ?>
 			<button class="vp-btn vp-btn-danger" name="vp_formular_delete" value="1" onclick="return confirm('<?php echo esc_js( __( 'Formular samt aller Einträge löschen?', 'vereinsplugin' ) ); ?>')"><?php esc_html_e( 'Löschen', 'vereinsplugin' ); ?></button>
@@ -910,7 +966,14 @@ function vp_formular_render_eintraege( $id ) {
 	$sort      = sanitize_key( wp_unslash( $_GET['fsort'] ?? 'eingereicht' ) );
 	$dir       = 'asc' === ( $_GET['fdir'] ?? '' ) ? 'asc' : 'desc';
 	$auswahl   = $werkzeug ? vp_formular_eintraege_auswahl( $f, $eintraege, $filter, $suche, $sort, $dir ) : $eintraege;
-	$gefiltert = '' !== $suche || array_filter( $filter, 'strlen' );
+	$ticket    = function_exists( 'vp_ticket_formular' ) && vp_ticket_formular( $f );
+	$fzahl     = $ticket ? sanitize_key( wp_unslash( $_GET['fzahl'] ?? '' ) ) : '';
+	if ( '' !== $fzahl ) {
+		$auswahl = array_values( array_filter( $auswahl, static function ( $e ) use ( $fzahl ) {
+			return $fzahl === ( $e->zahl_status ?? '' );
+		} ) );
+	}
+	$gefiltert = '' !== $suche || array_filter( $filter, 'strlen' ) || '' !== $fzahl;
 	$hier      = add_query_arg( array( 'vp_tab' => 'formulare', 'vp_fview' => 'eintraege', 'vp_formular_id' => (int) $f->id ), $base );
 
 	ob_start();
@@ -936,6 +999,10 @@ function vp_formular_render_eintraege( $id ) {
 		}
 	}
 
+	if ( $ticket ) {
+		echo vp_ticket_uebersicht_html( $f, $eintraege ); // phpcs:ignore
+	}
+
 	// Filterleiste: je Auswahlfeld ein Dropdown, dazu Suche.
 	if ( $werkzeug ) {
 		echo '<form method="get" class="vp-card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">';
@@ -951,6 +1018,13 @@ function vp_formular_render_eintraege( $id ) {
 			echo '<label style="font-size:.9em;max-width:220px">' . esc_html( wp_trim_words( $feld['label'], 6 ) ) . '<select name="ff[' . esc_attr( $feld['key'] ) . ']" style="display:block;width:100%"><option value="">' . esc_html__( 'alle', 'vereinsplugin' ) . '</option>';
 			foreach ( vp_formular_feld_werte( $feld, $eintraege ) as $w ) {
 				echo '<option value="' . esc_attr( $w ) . '"' . selected( $filter[ $feld['key'] ] ?? '', $w, false ) . '>' . esc_html( $w ) . '</option>';
+			}
+			echo '</select></label>';
+		}
+		if ( $ticket ) {
+			echo '<label style="font-size:.9em">' . esc_html__( 'Zahlung', 'vereinsplugin' ) . '<select name="fzahl" style="display:block"><option value="">' . esc_html__( 'alle', 'vereinsplugin' ) . '</option>';
+			foreach ( array( 'offen' => __( 'offen', 'vereinsplugin' ), 'bezahlt' => __( 'bezahlt', 'vereinsplugin' ), 'storniert' => __( 'storniert', 'vereinsplugin' ) ) as $k => $l ) {
+				echo '<option value="' . esc_attr( $k ) . '"' . selected( $fzahl, $k, false ) . '>' . esc_html( $l ) . '</option>';
 			}
 			echo '</select></label>';
 		}
@@ -976,6 +1050,9 @@ function vp_formular_render_eintraege( $id ) {
 	foreach ( $felder as $key => $feld ) {
 		echo $kopf( $key, $feld['label'] ); // phpcs:ignore
 	}
+	if ( $ticket ) {
+		echo '<th>' . esc_html__( 'Bestellung', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Zahlung', 'vereinsplugin' ) . '</th>';
+	}
 	echo '<th></th></tr></thead><tbody>';
 	foreach ( $auswahl as $e ) {
 		echo '<tr><td>' . esc_html( mysql2date( 'd.m.Y H:i', $e->eingereicht_am ) ) . '</td>';
@@ -984,13 +1061,16 @@ function vp_formular_render_eintraege( $id ) {
 			$txt = function_exists( 'vp_formular_wert_text' ) ? vp_formular_wert_text( $feld, $val ) : ( is_array( $val ) ? implode( ', ', $val ) : (string) $val );
 			echo '<td>' . esc_html( '' === $txt ? '–' : $txt ) . '</td>';
 		}
+		if ( $ticket ) {
+			echo vp_ticket_spalten_html( $f, $e ); // phpcs:ignore
+		}
 		echo '<td><form method="post" onsubmit="return confirm(\'' . esc_js( __( 'Eintrag löschen?', 'vereinsplugin' ) ) . '\')">'
 			. wp_nonce_field( 'vp_formular_edit', 'vp_fe_nonce', true, false )
 			. '<input type="hidden" name="eintrag_id" value="' . (int) $e->id . '">'
 			. '<button class="vp-btn vp-btn-danger" name="vp_eintrag_delete" value="1">✕</button></form></td></tr>';
 	}
 	if ( ! $auswahl ) {
-		echo '<tr><td colspan="' . ( count( $felder ) + 2 ) . '" class="vp-muted">' . esc_html__( 'Kein Eintrag passt zu diesem Filter.', 'vereinsplugin' ) . '</td></tr>';
+		echo '<tr><td colspan="' . ( count( $felder ) + ( $ticket ? 4 : 2 ) ) . '" class="vp-muted">' . esc_html__( 'Kein Eintrag passt zu diesem Filter.', 'vereinsplugin' ) . '</td></tr>';
 	}
 	echo '</tbody></table></div>';
 	if ( $werkzeug ) {

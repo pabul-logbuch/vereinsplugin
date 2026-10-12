@@ -1136,7 +1136,7 @@ function vp_sync_action_bank_csv( WP_REST_Request $req ) {
 	// ruecklage_id, budget_id, kostenstelle; Zeilen mit skip = true werden
 	// nicht gebucht.
 	$rows = is_array( $b['rows'] ?? null ) ? $b['rows'] : array();
-	$n       = array( 'normal' => 0, 'auslage' => 0, 'beleg' => 0, 'zugeordnet' => 0 );
+	$n       = array( 'normal' => 0, 'auslage' => 0, 'beleg' => 0, 'zugeordnet' => 0, 'ticket' => 0 );
 	$gebucht = array();
 	$alle    = array();
 	$gk      = '';
@@ -1155,7 +1155,7 @@ function vp_sync_action_bank_csv( WP_REST_Request $req ) {
 		$text = isset( $r['text'] ) && '' !== trim( (string) $r['text'] )
 			? sanitize_textarea_field( (string) $r['text'] )
 			: sanitize_textarea_field( trim( (string) ( $r['name'] ?? '' ) . ' — ' . (string) ( $r['zweck'] ?? '' ), ' —' ) );
-		$res  = vp_bank_zeile_buchen( $r, (string) ( $r['geldkonto'] ?? '' ), (int) ( $r['auslage_id'] ?? 0 ), (int) ( $r['beleg_id'] ?? 0 ), $text, (int) ( $r['journal_id'] ?? 0 ) );
+		$res  = vp_bank_zeile_buchen( $r, (string) ( $r['geldkonto'] ?? '' ), (int) ( $r['auslage_id'] ?? 0 ), (int) ( $r['beleg_id'] ?? 0 ), $text, (int) ( $r['journal_id'] ?? 0 ), (int) ( $r['ticket_id'] ?? 0 ) );
 		if ( $res['id'] ) {
 			$n[ $res['art'] ]++;
 			$gebucht[] = $r;
@@ -1169,7 +1169,8 @@ function vp_sync_action_bank_csv( WP_REST_Request $req ) {
 	}
 	return rest_ensure_response( array(
 		'ok'          => true,
-		'imported'    => $n['normal'] + $n['auslage'] + $n['beleg'],
+		'imported'    => $n['normal'] + $n['auslage'] + $n['beleg'] + $n['ticket'],
+		'tickets'     => $n['ticket'],
 		'zugeordnet'  => $n['zugeordnet'],
 		'erstattungen'=> $n['auslage'],
 		'belege'      => $n['beleg'],

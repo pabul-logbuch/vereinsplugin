@@ -196,6 +196,13 @@ function vp_member_sections() {
 
 		/* ---- Vorstand · Kassier:in ---- */
 
+		'zahlungen' => array(
+			'label'  => __( 'Zahlungseingänge prüfen', 'vereinsplugin' ),
+			'group'  => 'vorstand_kasse',
+			'cap'    => 'jb_view_journal',
+			'render' => 'vp_render_zahlungen_pruefen_section',
+			'badge'  => 'vp_ticket_offen_badge',
+		),
 		'auslagen_pruefen' => array(
 			'label'  => __( 'Auslagen prüfen', 'vereinsplugin' ),
 			'group'  => 'vorstand_kasse',

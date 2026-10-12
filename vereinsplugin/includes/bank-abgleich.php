@@ -190,7 +190,7 @@ function vp_bank_abgleich( array $rows, $geldkonto = '' ) {
 	$auslagen = vp_bank_offene_auslagen();
 	$belege   = vp_bank_offene_belege();
 	$k_ausl   = function_exists( 'vp_bh_vorgabe_geldkonto' ) ? vp_bh_vorgabe_geldkonto( 'Auslage' ) : '1600';
-	$vergeben = array( 'j' => array(), 'a' => array(), 'b' => array(), 'g' => array() );
+	$vergeben = array( 'j' => array(), 'a' => array(), 'b' => array(), 'g' => array(), 't' => array() );
 	$zuord    = vp_bank_zuordnungen();
 	$zugeord  = array_flip( array_map( 'intval', array_values( $zuord ) ) );
 
@@ -200,6 +200,7 @@ function vp_bank_abgleich( array $rows, $geldkonto = '' ) {
 		$r['auslage']  = null;
 		$r['beleg']    = null;
 		$r['gebucht']  = null;
+		$r['ticket']   = null;
 		$r['wahl']     = '';
 		$r['kandidaten'] = array();
 		$r['zugeordnet'] = false;
@@ -283,6 +284,20 @@ function vp_bank_abgleich( array $rows, $geldkonto = '' ) {
 		}
 
 		if ( $betrag >= 0 ) {
+			// Ticket-Bestellung (Verwendungszweck TICKET-<Nr>).
+			$t = function_exists( 'vp_ticket_bank_kandidat' ) ? vp_ticket_bank_kandidat( $r ) : null;
+			if ( $t ) {
+				array_unshift( $r['kandidaten'], array( 'v' => 't:' . $t['id'], 'g' => 'ticket', 't' => $t['text'] ) );
+				if ( $t['passt'] && ! isset( $vergeben['t'][ $t['id'] ] ) ) {
+					$r['ticket']               = $t;
+					$r['wahl']                 = 't:' . $t['id'];
+					$vergeben['t'][ $t['id'] ] = true;
+					if ( '' === (string) $r['konto'] && '' !== $t['konto'] ) {
+						$r['konto'] = $t['konto'];
+					}
+					continue;
+				}
+			}
 			vp_bank_gebucht_vorschlagen( $r, $gebuchte, $vergeben );
 			continue;
 		}
@@ -412,10 +427,25 @@ function vp_bank_gebucht_vorschlagen( array &$r, array $gebuchte, array &$vergeb
  *                            Buchung zuordnen
  * @return array{id:int,art:string} art = auslage | beleg | zugeordnet | normal; id 0 = nicht gebucht
  */
-function vp_bank_zeile_buchen( array $r, $geldkonto, $auslage_id = 0, $beleg_id = 0, $beschreibung = null, $journal_id = 0 ) {
+function vp_bank_zeile_buchen( array $r, $geldkonto, $auslage_id = 0, $beleg_id = 0, $beschreibung = null, $journal_id = 0, $ticket_id = 0 ) {
 	global $wpdb;
 	if ( $journal_id > 0 ) {
 		return vp_bank_zeile_zuordnen( $r, $geldkonto, (int) $journal_id );
+	}
+	// Ticket-Bestellung: als Einnahme buchen und die Bestellung als bezahlt markieren.
+	if ( $ticket_id > 0 && function_exists( 'vp_ticket_bank_kandidat' ) && (float) $r['betrag'] > 0 ) {
+		$t = vp_ticket_bank_kandidat( array_merge( $r, array( 'zweck' => 'TICKET-' . (int) $ticket_id ) ) );
+		if ( $t ) {
+			if ( '' === trim( (string) ( $r['konto'] ?? '' ) ) && '' !== $t['konto'] ) {
+				$r['konto'] = $t['konto'];
+			}
+			$res = vp_bank_zeile_buchen( $r, $geldkonto, 0, 0, null === $beschreibung || '' === trim( (string) $beschreibung ) ? $t['buchungstext'] : $beschreibung );
+			if ( $res['id'] ) {
+				vp_ticket_bank_gebucht( (int) $ticket_id, $res['id'], sanitize_text_field( (string) $r['datum'] ) );
+				return array( 'id' => $res['id'], 'art' => 'ticket' );
+			}
+			return $res;
+		}
 	}
 	$betrag = round( (float) $r['betrag'], 2 );
 	$datum  = sanitize_text_field( (string) ( $r['datum'] ?? '' ) );
@@ -542,14 +572,14 @@ function vp_bank_zeile_zuordnen( array $r, $geldkonto, $journal_id ) {
  * Gewählte Verknüpfung ('a:12', 'b:5', 'j:88' oder '') in die Parameter von
  * vp_bank_zeile_buchen() zerlegen.
  *
- * @return array{0:int,1:int,2:int} auslage_id, beleg_id, journal_id
+ * @return array{0:int,1:int,2:int,3:int} auslage_id, beleg_id, journal_id, ticket (Formular-Eintrag)
  */
 function vp_bank_wahl_zerlegen( $wahl ) {
-	$ids = array( 'a' => 0, 'b' => 0, 'j' => 0 );
-	if ( preg_match( '/^([abj]):(\d+)$/', (string) $wahl, $m ) ) {
+	$ids = array( 'a' => 0, 'b' => 0, 'j' => 0, 't' => 0 );
+	if ( preg_match( '/^([abjt]):(\d+)$/', (string) $wahl, $m ) ) {
 		$ids[ $m[1] ] = (int) $m[2];
 	}
-	return array( $ids['a'], $ids['b'], $ids['j'] );
+	return array( $ids['a'], $ids['b'], $ids['j'], $ids['t'] );
 }
 
 /* =========================================================================

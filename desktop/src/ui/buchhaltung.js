@@ -660,7 +660,7 @@ function bankCsvForm(d) {
       if (anz('dublette') || anz('auslage') || anz('beleg') || anz('gebucht')) {
         out.append(el('div', { class: 'note' }, `Abgleich: ${anz('dublette')} schon im Journal (werden übersprungen), ${anz('auslage')} Auslagen-Erstattungen, ${anz('beleg')} passende Belege, ${anz('gebucht')} schon gebuchte Buchungen (werden nur zugeordnet). Unter „Verknüpfung" lässt sich jede Zeile frei zuordnen.`));
       }
-      const gruppen = [['gebucht', 'Schon gebucht – nur zuordnen, nicht neu buchen'], ['auslage', 'Erstattung einer genehmigten Auslage'], ['beleg', 'Eingereichten Beleg anhängen (neue Buchung)']];
+      const gruppen = [['ticket', 'Ticket-Bestellung (Einnahme buchen, als bezahlt markieren)'], ['gebucht', 'Schon gebucht – nur zuordnen, nicht neu buchen'], ['auslage', 'Erstattung einer genehmigten Auslage'], ['beleg', 'Eingereichten Beleg anhängen (neue Buchung)']];
       const t = el('table');
       t.append(el('thead', {}, el('tr', {}, el('th', {}, 'Buchen'), el('th', {}, 'Datum'), el('th', {}, 'Betrag'), el('th', {}, 'Name / Zweck · Verknüpfung'), el('th', {}, 'SKR-Konto'))));
       const tb = el('tbody');
@@ -673,6 +673,7 @@ function bankCsvForm(d) {
         if (!z.dublette && !z.vorgemerkt) {
           if (z.auslage) info.append(el('div', { class: 'muted' }, `Erkannt: ${z.auslage.text} (an: ${z.auslage.grund})`));
           else if (z.beleg) info.append(el('div', { class: 'muted' }, `Erkannt: ${z.beleg.text}`));
+          else if (z.ticket) info.append(el('div', { class: 'muted' }, `Erkannt: ${z.ticket.text}`));
           else if (z.gebucht) info.append(el('div', { class: 'muted' }, `Erkannt: schon gebucht als ${z.gebucht.text}`));
           const wahl = el('select', { style: 'max-width:100%' }, el('option', { value: '' }, 'Neue Buchung'));
           gruppen.forEach(([g, label]) => {
@@ -715,9 +716,10 @@ function bankCsvForm(d) {
             auslage_id: z.wahl.startsWith('a:') ? Number(z.wahl.slice(2)) : 0,
             beleg_id: z.wahl.startsWith('b:') ? Number(z.wahl.slice(2)) : 0,
             journal_id: z.wahl.startsWith('j:') ? Number(z.wahl.slice(2)) : 0,
+            ticket_id: z.wahl.startsWith('t:') ? Number(z.wahl.slice(2)) : 0,
             text: z.text, ruecklage_id: Number(z.ruecklage_id) || 0, budget_id: Number(z.budget_id) || 0, kostenstelle: z.kostenstelle,
           }));
-          await bhAktion('bank-csv', { import: true, rows }, (r) => `${r.imported} Buchung(en) importiert${r.erstattungen ? `, davon ${r.erstattungen} Auslagen-Erstattungen` : ''}${r.belege ? `, ${r.belege} Belege angehängt` : ''}${r.zugeordnet ? `, ${r.zugeordnet} schon gebuchten Buchungen zugeordnet` : ''}.`);
+          await bhAktion('bank-csv', { import: true, rows }, (r) => `${r.imported} Buchung(en) importiert${r.erstattungen ? `, davon ${r.erstattungen} Auslagen-Erstattungen` : ''}${r.belege ? `, ${r.belege} Belege angehängt` : ''}${r.tickets ? `, ${r.tickets} Ticket-Bestellungen als bezahlt markiert` : ''}${r.zugeordnet ? `, ${r.zugeordnet} schon gebuchten Buchungen zugeordnet` : ''}.`);
           showJournal();
         } catch (e) { toast(e.message, true); imp.disabled = false; }
       });
