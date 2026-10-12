@@ -128,6 +128,20 @@ function vp_formular_vorlagen() {
 				array( 'label' => __( 'Bemerkung', 'vereinsplugin' ), 'type' => 'textarea' ),
 			),
 		),
+		'tickets' => array(
+			'name'  => __( 'Ticket-Vorverkauf', 'vereinsplugin' ),
+			'kurz'  => __( 'Ticketarten mit Preis und Kontingent, Überweisung mit GiroCode, QR-Tickets, Einlass-Scan', 'vereinsplugin' ),
+			'titel' => __( 'Tickets: ', 'vereinsplugin' ),
+			'text'  => __( 'Sichere dir deine Tickets im Vorverkauf. Nach der Bestellung bekommst du die Tickets und die Zahlungsdaten per Mail.', 'vereinsplugin' ),
+			'dank'  => __( 'Danke für deine Bestellung!', 'vereinsplugin' ),
+			'felder' => array(
+				array( 'label' => __( 'Name', 'vereinsplugin' ), 'type' => 'text', 'required' => 1 ),
+				array( 'label' => __( 'E-Mail', 'vereinsplugin' ), 'type' => 'email', 'required' => 1 ),
+				array( 'label' => __( 'Tickets', 'vereinsplugin' ), 'type' => 'tickets', 'required' => 1, 'options' => array( __( 'Normal | 12 | 100', 'vereinsplugin' ), __( 'Ermäßigt | 8 | 50', 'vereinsplugin' ), __( 'Soli | 20', 'vereinsplugin' ) ) ),
+				array( 'label' => __( 'Hinweis: Tickets für einen festen Termin sind vom Widerruf ausgenommen. Bei Absage der Veranstaltung erstatten wir den Preis.', 'vereinsplugin' ), 'type' => 'heading' ),
+				$nl,
+			),
+		),
 		'kontakt' => array(
 			'name'  => __( 'Kontakt / Anfrage', 'vereinsplugin' ),
 			'kurz'  => __( 'Name, E-Mail, Thema, Nachricht', 'vereinsplugin' ),
@@ -220,6 +234,9 @@ function vp_formular_vorlagen_auswahl( $base ) {
 function vp_formular_wert_text( $feld, $val ) {
 	if ( 'checkbox' === $feld['type'] ) {
 		return '' === $val || null === $val ? '' : ( $val ? __( 'ja', 'vereinsplugin' ) : __( 'nein', 'vereinsplugin' ) );
+	}
+	if ( 'tickets' === $feld['type'] && function_exists( 'vp_ticket_bestellung_text' ) ) {
+		return vp_ticket_bestellung_text( (array) $val );
 	}
 	return is_array( $val ) ? implode( ', ', $val ) : (string) $val;
 }

@@ -276,6 +276,43 @@ Weitere Quellen können sich über den Filter `vp_kalender_termine` anhängen.
   Antworten an die sendende Person.
 - **Bestätigungsmail** an die ausfüllende Person enthält ihre Angaben.
 
+## Ticket-Vorverkauf (Formulare)
+
+Ein Formular mit einem Feld vom Typ **Tickets** (oder die Vorlage
+„Ticket-Vorverkauf“) wird zum Vorverkauf. Ticketarten je Zeile
+`Name | Preis | Kontingent`, z. B. `Normal | 12 | 100`, `Ermäßigt | 8 | 50`,
+`Soli | 20` (ohne Kontingent = unbegrenzt); das Teilnehmerlimit gilt dann für
+Tickets insgesamt.
+
+- **Bestellen:** Anzahl je Ticketart, Summe wird live angezeigt. Danach gibt es
+  sofort den Link zu den Tickets und eine Mail mit Bestellnummer, Betrag,
+  Bankdaten (IBAN aus den Vereinseinstellungen) und Verwendungszweck
+  `TICKET-<Nr>`. Die **Ticket-Seite** zeigt GiroCode zum Bezahlen und je
+  Ticket einen QR-Code. Tickets gelten sofort – nichts wird automatisch
+  storniert, weil der Bank-Import nur gelegentlich läuft.
+- **Zahlungseingänge prüfen** (Vorstand · Kassier:in, mit Zähler in der
+  Seitenleiste): für den Wochentermin im Online-Banking. Offene Bestellungen
+  mit Verwendungszweck, Betrag und Alter: **✓ eingegangen**, **✉ erinnern**,
+  nach einer Erinnerung **stornieren** (mit Mail an die Person; rot markiert,
+  wenn die Zahlungsfrist des Formulars, mindestens 3 Tage, seit der
+  Erinnerung verstrichen ist). Darunter offene Ausgangsrechnungen zur
+  Kontrolle.
+- **Bank-Import:** erkennt `TICKET-<Nr>` bei Einnahmen, schlägt die Bestellung
+  vor, bucht auf das im Formular eingestellte Konto und markiert sie als
+  bezahlt (auch in der Desktop-App).
+- **Einlass:** QR-Code des Tickets mit der normalen Handy-Kamera scannen. Die
+  Seite zeigt gültig / schon eingelöst / storniert / **noch nicht bezahlt**
+  (dann „bar kassiert & einlassen“ oder „trotzdem einlassen“). Berechtigt sind
+  Formular-Verwaltende oder wer die **Einlass-PIN** kennt (steht bei den
+  Einträgen, gilt 12 Stunden auf dem Gerät). Ohne QR: Einlass-Liste mit Suche
+  nach Name, Bestellnummer oder Code.
+- **Einträge:** Übersicht (verkauft je Art/Kontingent, bezahlt/offen/bar,
+  eingelassen), Filter nach Zahlung, je Bestellung ✓ überwiesen / ✓ bar /
+  Ticket-Mail erneut / stornieren, Zahlungserinnerung an alle offenen.
+
+Bar kassierte Beträge landen in der Barkasse und werden beim Kassenabschluss
+mitgebucht.
+
 ## Teilen: Formulare und Schichtpläne per Link & QR-Code
 
 Ohne eigene WordPress-Seite mit Shortcode: Jedes Formular hat die Adresse
