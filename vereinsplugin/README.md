@@ -301,17 +301,16 @@ Tickets insgesamt.
   vor, bucht auf das im Formular eingestellte Konto und markiert sie als
   bezahlt (auch in der Desktop-App).
 - **Einlass:** QR-Code des Tickets mit der normalen Handy-Kamera scannen. Die
-  Seite zeigt gültig / schon eingelöst / storniert / **noch nicht bezahlt**
-  (dann „bar kassiert & einlassen“ oder „trotzdem einlassen“). Berechtigt sind
+  Seite zeigt gültig / schon eingelöst / storniert / **Zahlung noch nicht
+  verbucht** (dann nach Ermessen „trotzdem einlassen“). Berechtigt sind
   Formular-Verwaltende oder wer die **Einlass-PIN** kennt (steht bei den
   Einträgen, gilt 12 Stunden auf dem Gerät). Ohne QR: Einlass-Liste mit Suche
   nach Name, Bestellnummer oder Code.
-- **Einträge:** Übersicht (verkauft je Art/Kontingent, bezahlt/offen/bar,
-  eingelassen), Filter nach Zahlung, je Bestellung ✓ überwiesen / ✓ bar /
+- **Einträge:** Übersicht (verkauft je Art/Kontingent, bezahlt/offen,
+  eingelassen), Filter nach Zahlung, je Bestellung ✓ überwiesen /
   Ticket-Mail erneut / stornieren, Zahlungserinnerung an alle offenen.
 
-Bar kassierte Beträge landen in der Barkasse und werden beim Kassenabschluss
-mitgebucht.
+Bezahlt wird nur per Überweisung – keine Barzahlung am Einlass.
 
 ## Teilen: Formulare und Schichtpläne per Link & QR-Code
 

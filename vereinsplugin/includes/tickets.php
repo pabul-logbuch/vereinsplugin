@@ -11,12 +11,12 @@
  *     mit GiroCode und Verwendungszweck TICKET-<Nr>, je Ticket ein QR-Code.
  *     Tickets gelten sofort – der Bank-Import läuft nur gelegentlich, darum
  *     wird nichts automatisch storniert.
- *   - Bezahlt markieren: von Hand in den Einträgen (Überweisung gesehen / bar),
+ *   - Bezahlt markieren: von Hand („Zahlungseingänge prüfen“ / Einträge),
  *     und der Bank-Import erkennt TICKET-<Nr>, setzt „bezahlt“ und bucht die
  *     Einnahme auf das eingestellte Konto.
  *   - Einlass: QR mit der normalen Handy-Kamera scannen → ?vp_einlass=<code>.
- *     Zeigt gültig / schon eingelöst / noch offen (an der Abendkasse
- *     kassieren). Berechtigt: Formular-Verwaltung oder wer die Einlass-PIN
+ *     Zeigt gültig / schon eingelöst / Zahlung noch nicht verbucht (dann
+ *     nach Ermessen trotzdem einlassen). Bezahlt wird nur per Überweisung. Berechtigt: Formular-Verwaltung oder wer die Einlass-PIN
  *     des Formulars kennt (Helfende ohne Konto).
  *
  * Tabellen: vp_tickets (je Ticket ein Code); in vp_formular_eintraege
@@ -283,7 +283,7 @@ function vp_ticket_empfaenger() {
 /**
  * Zahlstatus einer Bestellung setzen.
  * @param string $status bezahlt | offen | storniert
- * @param string $zahlart ueberweisung | bar | bank
+ * @param string $zahlart ueberweisung | bank
  */
 function vp_ticket_zahlung_setzen( $eintrag_id, $status, $zahlart = '', $datum = '', $buchung_id = 0 ) {
 	global $wpdb;
@@ -349,8 +349,7 @@ function vp_ticket_post_verarbeiten() {
 	}
 	switch ( $aktion ) {
 		case 'ueberweisung':
-		case 'bar':
-			vp_ticket_zahlung_setzen( $e->id, 'bezahlt', $aktion );
+			vp_ticket_zahlung_setzen( $e->id, 'bezahlt', 'ueberweisung' );
 			return sprintf( __( '%s als bezahlt markiert.', 'vereinsplugin' ), vp_ticket_bestellnr( $e->id ) );
 		case 'offen':
 			vp_ticket_zahlung_setzen( $e->id, 'offen' );
@@ -408,14 +407,11 @@ function vp_ticket_uebersicht_html( $f, array $eintraege ) {
 	$feld     = vp_ticket_feld( $f );
 	$verkauft = vp_ticket_verkauft( $f->id );
 	$cfg      = vp_ticket_cfg( $f );
-	$geld     = array( 'bezahlt' => 0.0, 'offen' => 0.0, 'bar' => 0.0 );
+	$geld     = array( 'bezahlt' => 0.0, 'offen' => 0.0 );
 	$offen_n  = 0;
 	foreach ( $eintraege as $e ) {
 		if ( 'bezahlt' === ( $e->zahl_status ?? '' ) ) {
 			$geld['bezahlt'] += (float) $e->betrag;
-			if ( 'bar' === $e->zahlart ) {
-				$geld['bar'] += (float) $e->betrag;
-			}
 		} elseif ( 'offen' === ( $e->zahl_status ?? '' ) ) {
 			$geld['offen'] += (float) $e->betrag;
 			$offen_n++;
@@ -427,12 +423,9 @@ function vp_ticket_uebersicht_html( $f, array $eintraege ) {
 		$h .= '<div><strong>' . (int) ( $verkauft['je'][ $a['name'] ] ?? 0 ) . ( null !== $a['kontingent'] ? ' / ' . (int) $a['kontingent'] : '' ) . '</strong><br><span class="vp-muted">' . esc_html( $a['name'] ) . '</span></div>';
 	}
 	$h .= '<div><strong>' . (int) $verkauft['gesamt'] . ( $f->max_teilnehmer ? ' / ' . (int) $f->max_teilnehmer : '' ) . '</strong><br><span class="vp-muted">' . esc_html__( 'Tickets gesamt', 'vereinsplugin' ) . '</span></div>';
-	$h .= '<div><strong>' . esc_html( vp_ticket_eur( $geld['bezahlt'] ) ) . '</strong><br><span class="vp-muted">' . esc_html( sprintf( __( 'bezahlt (davon bar %s)', 'vereinsplugin' ), vp_ticket_eur( $geld['bar'] ) ) ) . '</span></div>';
+	$h .= '<div><strong>' . esc_html( vp_ticket_eur( $geld['bezahlt'] ) ) . '</strong><br><span class="vp-muted">' . esc_html__( 'bezahlt', 'vereinsplugin' ) . '</span></div>';
 	$h .= '<div><strong>' . esc_html( vp_ticket_eur( $geld['offen'] ) ) . '</strong><br><span class="vp-muted">' . esc_html( sprintf( _n( 'offen (%d Bestellung)', 'offen (%d Bestellungen)', $offen_n, 'vereinsplugin' ), $offen_n ) ) . '</span></div>';
 	$h .= '<div><strong>' . $drin . ' / ' . (int) $verkauft['gesamt'] . '</strong><br><span class="vp-muted">' . esc_html__( 'eingelassen', 'vereinsplugin' ) . '</span></div></div>';
-	if ( $geld['bar'] ) {
-		$h .= '<p class="vp-muted">' . esc_html__( 'Bar kassierte Beträge landen in der Barkasse – beim Kassenabschluss mit buchen.', 'vereinsplugin' ) . '</p>';
-	}
 	// Einlass
 	$einlass = add_query_arg( array( 'vp_einlass' => 'liste', 'f' => (int) $f->id ), home_url( '/' ) );
 	$h      .= '<details style="margin-top:8px"><summary><strong>' . esc_html__( 'Einlass', 'vereinsplugin' ) . '</strong> · PIN <code>' . esc_html( $cfg['pin'] ?: '–' ) . '</code></summary>';
@@ -458,12 +451,12 @@ function vp_ticket_spalten_html( $f, $e ) {
 	$h  = '<td style="white-space:nowrap"><strong>' . esc_html( vp_ticket_bestellnr( $e->id ) ) . '</strong><br><span class="vp-muted">' . esc_html( vp_ticket_eur( $e->betrag ) ) . '</span><br><a href="' . esc_url( vp_ticket_seite_url( $e ) ) . '" target="_blank" rel="noopener">' . esc_html__( 'Tickets', 'vereinsplugin' ) . '</a></td>';
 	$h .= '<td>' . vp_ticket_status_badge( $e->zahl_status );
 	if ( 'bezahlt' === $e->zahl_status ) {
-		$art = array( 'ueberweisung' => __( 'Überweisung', 'vereinsplugin' ), 'bar' => __( 'bar', 'vereinsplugin' ), 'bank' => __( 'Bank-Import', 'vereinsplugin' ), 'frei' => __( 'kostenlos', 'vereinsplugin' ) )[ $e->zahlart ] ?? $e->zahlart;
+		$art = array( 'ueberweisung' => __( 'Überweisung', 'vereinsplugin' ), 'bank' => __( 'Bank-Import', 'vereinsplugin' ), 'frei' => __( 'kostenlos', 'vereinsplugin' ) )[ $e->zahlart ] ?? $e->zahlart;
 		$h  .= '<br><span class="vp-muted">' . esc_html( $art . ( $e->bezahlt_am ? ' · ' . mysql2date( 'd.m.Y', $e->bezahlt_am ) : '' ) . ( $e->buchung_id ? ' · ' . __( 'gebucht', 'vereinsplugin' ) : '' ) ) . '</span>';
 	}
 	$h .= '<div style="margin-top:4px">';
 	if ( 'offen' === $e->zahl_status ) {
-		$h .= $knopf( 'ueberweisung', __( '✓ überwiesen', 'vereinsplugin' ) ) . $knopf( 'bar', __( '✓ bar', 'vereinsplugin' ) );
+		$h .= $knopf( 'ueberweisung', __( '✓ überwiesen', 'vereinsplugin' ) );
 	} elseif ( 'bezahlt' === $e->zahl_status && empty( $e->buchung_id ) && 'frei' !== $e->zahlart ) {
 		$h .= $knopf( 'offen', __( '↺ offen', 'vereinsplugin' ) );
 	}
@@ -511,7 +504,7 @@ function vp_ticket_seite_html( $e ) {
 		if ( $iban && function_exists( 'vp_epc_payload' ) ) {
 			$h .= '<p class="vp-muted">' . esc_html__( 'GiroCode mit der Banking-App scannen:', 'vereinsplugin' ) . '</p><div class="vp-girocode-qr" data-epc="' . esc_attr( vp_epc_payload( vp_ticket_empfaenger(), $iban, $e->betrag, vp_ticket_bestellnr( $e->id ) ) ) . '" data-label="GiroCode" style="width:200px;height:200px;background:#fff;padding:6px;border-radius:8px"></div>';
 		}
-		$h .= '<p class="vp-muted">' . esc_html__( 'Deine Tickets gelten schon jetzt. Falls die Zahlung bis zur Veranstaltung noch nicht bei uns verbucht ist, kannst du am Einlass auch bar zahlen.', 'vereinsplugin' ) . '</p>';
+		$h .= '<p class="vp-muted">' . esc_html__( 'Deine Tickets gelten schon jetzt. Bitte überweise rechtzeitig vor der Veranstaltung – eine Barzahlung am Einlass ist nicht möglich.', 'vereinsplugin' ) . '</p>';
 	}
 	$h .= '</div><style>.vp-ticket-qr svg{display:block;width:100%;height:100%}</style><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">';
 	foreach ( vp_tickets_von_eintrag( $e->id ) as $i => $t ) {
@@ -582,9 +575,6 @@ function vp_einlass_html() {
 		$wer = is_user_logged_in() ? wp_get_current_user()->display_name : __( 'Einlass (PIN)', 'vereinsplugin' );
 		if ( $tk ) {
 			switch ( sanitize_key( wp_unslash( $_POST['vp_einlass_aktion'] ) ) ) {
-				case 'bar':
-					vp_ticket_zahlung_setzen( $tk->eintrag_id, 'bezahlt', 'bar' );
-					// fall through: kassiert und eingelassen
 				case 'rein':
 					if ( ! $tk->eingeloest_am ) {
 						$wpdb->update( vp_tickets_table(), array( 'eingeloest_am' => current_time( 'mysql' ), 'eingeloest_von' => $wer ), array( 'id' => $tk->id ) );
@@ -645,7 +635,7 @@ function vp_einlass_ticket_karte( $f, $t, $gross ) {
 		$titel = '✗ ' . sprintf( __( 'Schon eingelöst %1$s (%2$s)', 'vereinsplugin' ), mysql2date( 'd.m. H:i', $t->eingeloest_am ), $t->eingeloest_von );
 	} elseif ( $e && 'offen' === $e->zahl_status ) {
 		$farbe = '#fef3c7';
-		$titel = '! ' . sprintf( __( 'Noch nicht bezahlt: %s für die ganze Bestellung', 'vereinsplugin' ), vp_ticket_eur( $e->betrag ) );
+		$titel = '! ' . sprintf( __( 'Zahlung noch nicht verbucht: %s für die ganze Bestellung', 'vereinsplugin' ), vp_ticket_eur( $e->betrag ) );
 	} else {
 		$farbe = '#dcfce7';
 		$titel = '✓ ' . __( 'Gültig', 'vereinsplugin' );
@@ -656,8 +646,7 @@ function vp_einlass_ticket_karte( $f, $t, $gross ) {
 	$h .= '<form method="post" style="display:flex;gap:8px;flex-wrap:wrap">' . $nonce;
 	if ( 'storniert' !== $t->status && ! $t->eingeloest_am ) {
 		if ( $e && 'offen' === $e->zahl_status ) {
-			$h .= '<button class="vp-btn vp-btn-primary" name="vp_einlass_aktion" value="bar">' . esc_html( sprintf( __( '%s bar kassiert & einlassen', 'vereinsplugin' ), vp_ticket_eur( $e->betrag ) ) ) . '</button>';
-			$h .= '<button class="vp-btn" name="vp_einlass_aktion" value="rein">' . esc_html__( 'trotzdem einlassen (Überweisung kommt)', 'vereinsplugin' ) . '</button>';
+			$h .= '<button class="vp-btn" name="vp_einlass_aktion" value="rein">' . esc_html__( 'trotzdem einlassen (Überweisung ist unterwegs)', 'vereinsplugin' ) . '</button>';
 		} else {
 			$h .= '<button class="vp-btn vp-btn-primary" name="vp_einlass_aktion" value="rein">' . esc_html__( 'Einlassen', 'vereinsplugin' ) . '</button>';
 		}
