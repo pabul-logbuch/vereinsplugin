@@ -890,51 +890,140 @@ function vp_projekt_tab_ablauf( $p ) {
 
 function vp_projekt_tab_todos( $p ) {
 	$todos  = vp_projekt_todos( $p->id );
+	$wer    = isset( $_GET['p_wer'] ) ? sanitize_key( wp_unslash( $_GET['p_wer'] ) ) : 'alle';
+	$ich    = get_current_user_id();
+	$heute  = current_time( 'Y-m-d' );
+	$woche  = gmdate( 'Y-m-d', strtotime( $heute . ' +7 days' ) );
+	$edit   = isset( $_GET['p_todo'] ) ? (int) $_GET['p_todo'] : 0;
+
+	if ( 'meine' === $wer ) {
+		$todos = array_filter( $todos, function ( $t ) use ( $ich ) { return (int) $t->verantwortlich_user_id === $ich; } );
+	} elseif ( 'niemand' === $wer ) {
+		$todos = array_filter( $todos, function ( $t ) { return ! $t->verantwortlich_user_id; } );
+	}
 	$offen  = array_filter( $todos, function ( $t ) { return 'erledigt' !== $t->status; } );
 	$fertig = array_filter( $todos, function ( $t ) { return 'erledigt' === $t->status; } );
-	$heute  = current_time( 'Y-m-d' );
+
+	// Offene nach Dringlichkeit gruppieren.
+	$gruppen = array(
+		'ueber'  => array( __( 'Überfällig', 'vereinsplugin' ), array() ),
+		'woche'  => array( __( 'Diese Woche', 'vereinsplugin' ), array() ),
+		'spaeter' => array( __( 'Später', 'vereinsplugin' ), array() ),
+		'ohne'   => array( __( 'Ohne Frist', 'vereinsplugin' ), array() ),
+	);
+	foreach ( $offen as $t ) {
+		$g = ! $t->faelligkeitsdatum ? 'ohne' : ( $t->faelligkeitsdatum < $heute ? 'ueber' : ( $t->faelligkeitsdatum <= $woche ? 'woche' : 'spaeter' ) );
+		$gruppen[ $g ][1][] = $t;
+	}
 
 	if ( isset( $_GET['pp_set_erzeugt'] ) ) {
 		echo '<div class="pp-front-notice pp-front-notice-success">' . esc_html( sprintf( __( '%1$d ToDo(s) aus dem Set erzeugt, %2$d übersprungen (gab es schon).', 'vereinsplugin' ), (int) $_GET['pp_set_erzeugt'], (int) ( $_GET['pp_set_uebersprungen'] ?? 0 ) ) ) . '</div>';
 	}
 
-	$zeile = function ( $t ) use ( $p, $heute ) {
-		echo '<li class="' . ( 'erledigt' === $t->status ? 'is-erledigt' : '' ) . '">';
-		vp_kreis_form( 'vp_projekt_todo', 'pp-inline' );
+	$initialen = function ( $name ) {
+		$teile = preg_split( '/\s+/', trim( (string) $name ) );
+		return mb_strtoupper( mb_substr( $teile[0] ?? '', 0, 1 ) . mb_substr( count( $teile ) > 1 ? end( $teile ) : '', 0, 1 ) );
+	};
+
+	$zeile = function ( $t ) use ( $p, $heute, $edit, $initialen ) {
+		$fertig = 'erledigt' === $t->status;
+		$name   = $t->verantwortlich_user_id ? pp_user_display_name( $t->verantwortlich_user_id ) : '';
+		$frist  = '';
+		if ( $t->faelligkeitsdatum ) {
+			$tage  = (int) round( ( strtotime( $t->faelligkeitsdatum ) - strtotime( $heute ) ) / DAY_IN_SECONDS );
+			$klass = $fertig ? '' : ( $tage < 0 ? ' is-ueber' : ( $tage <= 3 ? ' is-bald' : '' ) );
+			$text  = $fertig ? mysql2date( 'd.m.Y', $t->faelligkeitsdatum )
+				: ( 0 === $tage ? __( 'heute', 'vereinsplugin' ) : ( 1 === $tage ? __( 'morgen', 'vereinsplugin' ) : ( $tage < 0 ? sprintf( _n( 'seit %d Tag überfällig', 'seit %d Tagen überfällig', -$tage, 'vereinsplugin' ), -$tage ) : mysql2date( 'D, d.m.', $t->faelligkeitsdatum ) ) ) );
+			$frist = '<span class="vp-todo-frist' . $klass . '">📅 ' . esc_html( $text ) . '</span>';
+		}
+		echo '<li class="vp-todo' . ( $fertig ? ' is-erledigt' : '' ) . '" id="todo-' . (int) $t->id . '">';
+		vp_kreis_form( 'vp_projekt_todo', 'vp-todo-haken' );
 		echo '<input type="hidden" name="projekt_id" value="' . (int) $p->id . '"><input type="hidden" name="aufgabe_id" value="' . (int) $t->id . '"><input type="hidden" name="was" value="toggle">';
-		echo '<button type="submit" class="pp-checkbox" title="' . esc_attr__( 'Status umschalten', 'vereinsplugin' ) . '">' . ( 'erledigt' === $t->status ? '☑' : '☐' ) . '</button></form> ';
-		echo esc_html( $t->titel );
-		$ueber = 'erledigt' !== $t->status && $t->faelligkeitsdatum && $t->faelligkeitsdatum < $heute;
-		echo '<span class="pp-meta' . ( $ueber ? ' pp-ueberfaellig' : '' ) . '">'
-			. esc_html( ( $t->verantwortlich_user_id ? pp_user_display_name( $t->verantwortlich_user_id ) : __( 'noch niemand', 'vereinsplugin' ) ) . ' · ' . ( $t->faelligkeitsdatum ? mysql2date( 'd.m.Y', $t->faelligkeitsdatum ) : __( 'ohne Frist', 'vereinsplugin' ) ) )
-			. ( $t->beschreibung ? ' · ' . esc_html( wp_trim_words( $t->beschreibung, 14 ) ) : '' ) . '</span>';
-		vp_kreis_form( 'vp_projekt_todo', 'pp-inline' );
+		echo '<button type="submit" class="vp-todo-check" title="' . esc_attr( $fertig ? __( 'wieder öffnen', 'vereinsplugin' ) : __( 'erledigt', 'vereinsplugin' ) ) . '" aria-label="' . esc_attr( $fertig ? __( 'wieder öffnen', 'vereinsplugin' ) : __( 'als erledigt markieren', 'vereinsplugin' ) ) . '">' . ( $fertig ? '✓' : '' ) . '</button></form>';
+		echo '<div class="vp-todo-body"><div class="vp-todo-titel">' . esc_html( $t->titel ) . '</div><div class="vp-todo-meta">';
+		echo $name
+			? '<span class="vp-todo-person"><span class="vp-todo-avatar">' . esc_html( $initialen( $name ) ) . '</span>' . esc_html( $name ) . '</span>'
+			: '<span class="vp-todo-person is-leer">' . esc_html__( 'noch niemand', 'vereinsplugin' ) . '</span>';
+		echo $frist; // phpcs:ignore
+		echo '</div>';
+		if ( $t->beschreibung ) {
+			echo '<div class="vp-todo-text">' . esc_html( $t->beschreibung ) . '</div>';
+		}
+		echo '</div><div class="vp-todo-aktionen">';
+		echo '<a class="vp-todo-icon" href="' . esc_url( vp_projekt_url( $p->id, 'todos', array( 'p_todo' => (int) $t->id ) ) . '#todo-' . (int) $t->id ) . '" title="' . esc_attr__( 'bearbeiten', 'vereinsplugin' ) . '">✎</a>';
+		vp_kreis_form( 'vp_projekt_todo', 'vp-todo-haken' );
 		echo '<input type="hidden" name="projekt_id" value="' . (int) $p->id . '"><input type="hidden" name="aufgabe_id" value="' . (int) $t->id . '"><input type="hidden" name="was" value="loeschen">';
-		echo '<button type="submit" class="pp-link-danger" onclick="return confirm(\'' . esc_js( __( 'ToDo löschen?', 'vereinsplugin' ) ) . '\')">' . esc_html__( 'löschen', 'vereinsplugin' ) . '</button></form>';
+		echo '<button type="submit" class="vp-todo-icon is-danger" title="' . esc_attr__( 'löschen', 'vereinsplugin' ) . '" onclick="return confirm(\'' . esc_js( __( 'ToDo löschen?', 'vereinsplugin' ) ) . '\')">🗑</button></form>';
+		echo '</div>';
+		if ( $edit === (int) $t->id ) {
+			echo '<div class="vp-todo-edit">';
+			vp_kreis_form( 'vp_projekt_todo', 'vp-todo-form' );
+			echo '<input type="hidden" name="projekt_id" value="' . (int) $p->id . '"><input type="hidden" name="aufgabe_id" value="' . (int) $t->id . '"><input type="hidden" name="was" value="aendern">';
+			echo '<label class="vp-todo-span">' . esc_html__( 'Was?', 'vereinsplugin' ) . '<input type="text" name="titel" required value="' . esc_attr( $t->titel ) . '"></label>';
+			echo '<label>' . esc_html__( 'Wer?', 'vereinsplugin' ) . '<select name="verantwortlich_user_id">' . vp_kreis_personen_optionen( (int) $t->verantwortlich_user_id, $p->gremium_id, __( 'noch niemand', 'vereinsplugin' ) ) . '</select></label>'; // phpcs:ignore
+			echo '<label>' . esc_html__( 'Bis wann?', 'vereinsplugin' ) . '<input type="date" name="faelligkeitsdatum" value="' . esc_attr( (string) $t->faelligkeitsdatum ) . '"></label>';
+			echo '<label class="vp-todo-span">' . esc_html__( 'Details', 'vereinsplugin' ) . '<textarea name="beschreibung" rows="2">' . esc_textarea( (string) $t->beschreibung ) . '</textarea></label>';
+			echo '<div class="vp-todo-span"><button type="submit" class="pp-btn pp-btn-primary pp-btn-small">' . esc_html__( 'Speichern', 'vereinsplugin' ) . '</button> <a class="pp-btn pp-btn-small" href="' . esc_url( vp_projekt_url( $p->id, 'todos' ) ) . '">' . esc_html__( 'Abbrechen', 'vereinsplugin' ) . '</a></div></form></div>';
+		}
 		echo '</li>';
 	};
-	?>
-	<p class="pp-meta"><?php esc_html_e( 'ToDos sind normale Aufgaben: Sie erscheinen auch unter „Aufgaben", beim Kreis und im Kalender-Abo der verantwortlichen Person.', 'vereinsplugin' ); ?></p>
-	<ul class="pp-list pp-aufgabenliste">
-		<?php foreach ( $offen as $t ) { $zeile( $t ); } ?>
-		<?php if ( ! $offen ) : ?><li class="pp-empty"><?php esc_html_e( 'Keine offenen ToDos.', 'vereinsplugin' ); ?></li><?php endif; ?>
-	</ul>
 
-	<?php vp_kreis_form( 'vp_projekt_todo', 'pp-inline-form' ); ?>
-		<input type="hidden" name="projekt_id" value="<?php echo (int) $p->id; ?>">
-		<input type="hidden" name="was" value="neu">
-		<input type="text" name="titel" required placeholder="<?php esc_attr_e( 'Neues ToDo', 'vereinsplugin' ); ?>">
-		<select name="verantwortlich_user_id"><?php echo vp_kreis_personen_optionen( 0, $p->gremium_id, __( 'Wer?', 'vereinsplugin' ) ); // phpcs:ignore ?></select>
-		<input type="date" name="faelligkeitsdatum" title="<?php esc_attr_e( 'Bis wann?', 'vereinsplugin' ); ?>">
-		<input type="text" name="beschreibung" placeholder="<?php esc_attr_e( 'Details (optional)', 'vereinsplugin' ); ?>">
-		<button type="submit" class="pp-btn pp-btn-small"><?php esc_html_e( 'Hinzufügen', 'vereinsplugin' ); ?></button>
-	</form>
+	$alle_n   = count( $offen ) + count( $fertig );
+	$quote    = $alle_n ? (int) round( 100 * count( $fertig ) / $alle_n ) : 0;
+	$ueber_n  = count( $gruppen['ueber'][1] );
+	?>
+	<div class="vp-todo-kopf">
+		<div class="vp-todo-stand">
+			<strong><?php echo esc_html( sprintf( __( '%1$d von %2$d erledigt', 'vereinsplugin' ), count( $fertig ), $alle_n ) ); ?></strong>
+			<?php if ( $ueber_n ) : ?><span class="vp-todo-frist is-ueber"><?php echo esc_html( sprintf( _n( '%d überfällig', '%d überfällig', $ueber_n, 'vereinsplugin' ), $ueber_n ) ); ?></span><?php endif; ?>
+			<div class="vp-todo-balken"><span style="width:<?php echo (int) $quote; ?>%"></span></div>
+		</div>
+		<nav class="vp-todo-filter">
+			<?php foreach ( array( 'alle' => __( 'Alle', 'vereinsplugin' ), 'meine' => __( 'Meine', 'vereinsplugin' ), 'niemand' => __( 'Ohne Zuständige', 'vereinsplugin' ) ) as $k => $l ) : ?>
+				<a class="<?php echo $k === $wer ? 'is-active' : ''; ?>" href="<?php echo esc_url( vp_projekt_url( $p->id, 'todos', 'alle' === $k ? array() : array( 'p_wer' => $k ) ) ); ?>"><?php echo esc_html( $l ); ?></a>
+			<?php endforeach; ?>
+		</nav>
+	</div>
+
+	<details class="vp-todo-neu" <?php echo $offen ? '' : 'open'; ?>>
+		<summary><?php esc_html_e( '+ Neues ToDo', 'vereinsplugin' ); ?></summary>
+		<?php vp_kreis_form( 'vp_projekt_todo', 'vp-todo-form' ); ?>
+			<input type="hidden" name="projekt_id" value="<?php echo (int) $p->id; ?>">
+			<input type="hidden" name="was" value="neu">
+			<label class="vp-todo-span"><?php esc_html_e( 'Was ist zu tun?', 'vereinsplugin' ); ?><input type="text" name="titel" required placeholder="<?php esc_attr_e( 'z. B. Getränke bestellen', 'vereinsplugin' ); ?>"></label>
+			<label><?php esc_html_e( 'Wer?', 'vereinsplugin' ); ?><select name="verantwortlich_user_id"><?php echo vp_kreis_personen_optionen( 0, $p->gremium_id, __( 'noch niemand', 'vereinsplugin' ) ); // phpcs:ignore ?></select></label>
+			<label><?php esc_html_e( 'Bis wann?', 'vereinsplugin' ); ?><input type="date" name="faelligkeitsdatum"></label>
+			<label class="vp-todo-span"><?php esc_html_e( 'Details (optional)', 'vereinsplugin' ); ?><input type="text" name="beschreibung"></label>
+			<div class="vp-todo-span"><button type="submit" class="pp-btn pp-btn-primary pp-btn-small"><?php esc_html_e( 'Hinzufügen', 'vereinsplugin' ); ?></button></div>
+		</form>
+	</details>
+
+	<?php foreach ( $gruppen as $key => $g ) :
+		if ( ! $g[1] ) {
+			continue;
+		} ?>
+		<h4 class="vp-todo-gruppe<?php echo 'ueber' === $key ? ' is-ueber' : ''; ?>"><?php echo esc_html( $g[0] ); ?> <span><?php echo count( $g[1] ); ?></span></h4>
+		<ul class="vp-todo-liste"><?php foreach ( $g[1] as $t ) { $zeile( $t ); } ?></ul>
+	<?php endforeach; ?>
+	<?php if ( ! $offen ) : ?>
+		<p class="vp-todo-leer"><?php echo $alle_n ? esc_html__( 'Alles erledigt 🎉', 'vereinsplugin' ) : esc_html__( 'Noch keine ToDos – oben das erste anlegen oder unten ein Aufgaben-Set anwenden.', 'vereinsplugin' ); ?></p>
+	<?php endif; ?>
+
+	<?php if ( $fertig ) : ?>
+		<details class="vp-todo-erledigt">
+			<summary><?php echo esc_html( sprintf( __( 'Erledigt (%d)', 'vereinsplugin' ), count( $fertig ) ) ); ?></summary>
+			<ul class="vp-todo-liste"><?php foreach ( $fertig as $t ) { $zeile( $t ); } ?></ul>
+		</details>
+	<?php endif; ?>
+
+	<p class="pp-meta" style="margin-top:14px"><?php esc_html_e( 'ToDos sind normale Aufgaben: Sie erscheinen auch unter „Aufgaben", beim Kreis und im Kalender-Abo der verantwortlichen Person.', 'vereinsplugin' ); ?></p>
 
 	<?php
 	$sets = function_exists( 'pp_get_aufgaben_sets' ) ? pp_get_aufgaben_sets() : array();
 	if ( $sets ) :
 		?>
-		<h4><?php esc_html_e( 'Aufgaben-Set anwenden', 'vereinsplugin' ); ?></h4>
+		<details class="pp-werkzeug">
+			<summary class="pp-details-summary"><?php esc_html_e( 'Aufgaben-Set anwenden', 'vereinsplugin' ); ?></summary>
 		<?php if ( $p->beginn ) : ?>
 			<p class="pp-meta"><?php esc_html_e( 'Erzeugt alle Aufgaben eines Sets mit Fristen relativ zum Beginn und weist sie den aktuellen Rolleninhaber:innen zu.', 'vereinsplugin' ); ?></p>
 			<?php vp_kreis_form( 'vp_projekt_todo', 'pp-inline-form' ); ?>
@@ -954,12 +1043,6 @@ function vp_projekt_tab_todos( $p ) {
 		<?php else : ?>
 			<p class="pp-meta"><?php esc_html_e( 'Dafür braucht das Projekt einen Beginn (Übersicht → Eckdaten).', 'vereinsplugin' ); ?></p>
 		<?php endif; ?>
-	<?php endif; ?>
-
-	<?php if ( $fertig ) : ?>
-		<details class="pp-werkzeug">
-			<summary class="pp-details-summary"><?php echo esc_html( sprintf( __( 'Erledigt (%d)', 'vereinsplugin' ), count( $fertig ) ) ); ?></summary>
-			<ul class="pp-list pp-aufgabenliste"><?php foreach ( $fertig as $t ) { $zeile( $t ); } ?></ul>
 		</details>
 	<?php endif;
 }
@@ -1571,9 +1654,21 @@ function vp_projekt_handle_todo() {
 			'quelle_termin_id'            => $p->termin_id ?: null,
 			'projekt_id'                  => (int) $p->id,
 		) );
-	} elseif ( in_array( $was, array( 'toggle', 'loeschen' ), true ) ) {
+	} elseif ( in_array( $was, array( 'toggle', 'loeschen', 'aendern' ), true ) ) {
 		$a = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $t WHERE id = %d AND projekt_id = %d", (int) $_POST['aufgabe_id'], $p->id ) );
-		if ( $a && 'toggle' === $was ) {
+		if ( $a && 'aendern' === $was ) {
+			$titel = sanitize_text_field( wp_unslash( $_POST['titel'] ?? '' ) );
+			if ( '' === $titel ) {
+				vp_kreis_fehler( __( 'Das ToDo braucht einen Titel.', 'vereinsplugin' ) );
+			}
+			$wpdb->update( $t, array(
+				'titel'                  => $titel,
+				'beschreibung'           => sanitize_textarea_field( wp_unslash( $_POST['beschreibung'] ?? '' ) ),
+				'verantwortlich_user_id' => (int) ( $_POST['verantwortlich_user_id'] ?? 0 ) ?: null,
+				'faelligkeitsdatum'      => ! empty( $_POST['faelligkeitsdatum'] ) ? sanitize_text_field( wp_unslash( $_POST['faelligkeitsdatum'] ) ) : null,
+			), array( 'id' => (int) $a->id ) );
+			vp_projekt_zurueck( $p, 'todos', array( 'p_todo' => false ) );
+		} elseif ( $a && 'toggle' === $was ) {
 			$wpdb->update( $t, array( 'status' => 'erledigt' === $a->status ? 'offen' : 'erledigt' ), array( 'id' => (int) $a->id ) );
 		} elseif ( $a ) {
 			$wpdb->delete( $t, array( 'id' => (int) $a->id ) );
