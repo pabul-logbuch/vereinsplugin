@@ -683,6 +683,9 @@ function vp_render_formulare_section() {
 		$wpdb->delete( vp_formular_table(), array( 'id' => $id ) );
 		$msg = __( 'Formular gelöscht.', 'vereinsplugin' );
 	}
+	if ( isset( $_POST['vp_formular_rundmail'] ) && check_admin_referer( 'vp_formular_edit', 'vp_fe_nonce' ) && function_exists( 'vp_formular_rundmail_senden' ) ) {
+		$msg = vp_formular_rundmail_senden();
+	}
 	if ( isset( $_POST['vp_eintrag_delete'] ) && check_admin_referer( 'vp_formular_edit', 'vp_fe_nonce' ) ) {
 		global $wpdb;
 		$wpdb->delete( vp_formular_eintraege_table(), array( 'id' => (int) $_POST['eintrag_id'] ) );
@@ -751,7 +754,11 @@ function vp_formular_render_liste() {
 	$formulare = vp_formular_alle();
 
 	ob_start();
-	echo '<p><a class="vp-btn vp-btn-primary" href="' . esc_url( add_query_arg( array( 'vp_tab' => 'formulare', 'vp_fview' => 'bearbeiten' ), $base ) ) . '">' . esc_html__( '+ Neues Formular', 'vereinsplugin' ) . '</a></p>';
+	if ( function_exists( 'vp_formular_vorlagen_auswahl' ) ) {
+		echo vp_formular_vorlagen_auswahl( $base ); // phpcs:ignore
+	} else {
+		echo '<p><a class="vp-btn vp-btn-primary" href="' . esc_url( add_query_arg( array( 'vp_tab' => 'formulare', 'vp_fview' => 'bearbeiten' ), $base ) ) . '">' . esc_html__( '+ Neues Formular', 'vereinsplugin' ) . '</a></p>';
+	}
 
 	if ( ! $formulare ) {
 		echo '<p class="vp-muted">' . esc_html__( 'Noch keine Formulare.', 'vereinsplugin' ) . '</p>';
@@ -791,12 +798,19 @@ function vp_formular_render_liste() {
 function vp_formular_render_editor( $id ) {
 	$f    = $id ? vp_formular_get( $id ) : null;
 	$base = get_permalink() ?: remove_query_arg( array( 'vp_fview', 'vp_formular_id' ) );
+	// Neues Formular aus einer Vorlage: vorbelegt, aber noch nicht gespeichert.
+	if ( ! $f && ! empty( $_GET['vp_vorlage'] ) && function_exists( 'vp_formular_aus_vorlage' ) ) {
+		$f = vp_formular_aus_vorlage( sanitize_key( wp_unslash( $_GET['vp_vorlage'] ) ) );
+	}
 	$felder = $f ? $f->felder : array();
 
 	ob_start();
 	echo '<p><a class="vp-btn" href="' . esc_url( add_query_arg( 'vp_tab', 'formulare', $base ) ) . '">← ' . esc_html__( 'Zur Übersicht', 'vereinsplugin' ) . '</a></p>';
 	?>
-	<?php if ( $f && function_exists( 'vp_teilen_box' ) ) : ?>
+	<?php if ( $f && empty( $f->id ) ) : ?>
+		<div class="vp-note"><?php esc_html_e( 'Aus der Vorlage vorbelegt – Titel ergänzen, Felder anpassen und speichern.', 'vereinsplugin' ); ?></div>
+	<?php endif; ?>
+	<?php if ( ! empty( $f->id ) && function_exists( 'vp_teilen_box' ) ) : ?>
 		<details class="vp-card" <?php echo 'entwurf' !== $f->status ? 'open' : ''; ?>><summary><strong><?php esc_html_e( 'Teilen: Link & QR-Code', 'vereinsplugin' ); ?></strong></summary>
 			<?php echo vp_teilen_box( vp_formular_teilen_url( $f ), 'formular-' . ( $f->slug ?: $f->id ), 'entwurf' === $f->status ? __( 'Noch Entwurf – der Link funktioniert für andere erst nach dem Veröffentlichen (Status unten).', 'vereinsplugin' ) : __( 'Keine eigene Seite nötig – der Link zeigt das Formular direkt.', 'vereinsplugin' ) ); // phpcs:ignore ?>
 		</details>
@@ -875,7 +889,7 @@ function vp_formular_render_editor( $id ) {
 		</tbody></table></div>
 
 		<p><button class="vp-btn vp-btn-primary" name="vp_formular_save" value="1"><?php esc_html_e( 'Speichern', 'vereinsplugin' ); ?></button>
-		<?php if ( $f ) : ?>
+		<?php if ( ! empty( $f->id ) ) : ?>
 			<button class="vp-btn vp-btn-danger" name="vp_formular_delete" value="1" onclick="return confirm('<?php echo esc_js( __( 'Formular samt aller Einträge löschen?', 'vereinsplugin' ) ); ?>')"><?php esc_html_e( 'Löschen', 'vereinsplugin' ); ?></button>
 		<?php endif; ?></p>
 	</form>
@@ -888,8 +902,16 @@ function vp_formular_render_eintraege( $id ) {
 	if ( ! $f ) {
 		return '<div class="vp-note vp-note-error">' . esc_html__( 'Formular nicht gefunden.', 'vereinsplugin' ) . '</div>';
 	}
-	$base = get_permalink() ?: remove_query_arg( array( 'vp_fview', 'vp_formular_id' ) );
+	$base      = get_permalink() ?: remove_query_arg( array( 'vp_fview', 'vp_formular_id' ) );
 	$eintraege = vp_formular_eintraege( $id );
+	$werkzeug  = function_exists( 'vp_formular_eintraege_auswahl' );
+	$filter    = array_map( 'sanitize_text_field', array_map( 'wp_unslash', (array) ( $_GET['ff'] ?? array() ) ) );
+	$suche     = sanitize_text_field( wp_unslash( $_GET['fsuche'] ?? '' ) );
+	$sort      = sanitize_key( wp_unslash( $_GET['fsort'] ?? 'eingereicht' ) );
+	$dir       = 'asc' === ( $_GET['fdir'] ?? '' ) ? 'asc' : 'desc';
+	$auswahl   = $werkzeug ? vp_formular_eintraege_auswahl( $f, $eintraege, $filter, $suche, $sort, $dir ) : $eintraege;
+	$gefiltert = '' !== $suche || array_filter( $filter, 'strlen' );
+	$hier      = add_query_arg( array( 'vp_tab' => 'formulare', 'vp_fview' => 'eintraege', 'vp_formular_id' => (int) $f->id ), $base );
 
 	ob_start();
 	echo '<p><a class="vp-btn" href="' . esc_url( add_query_arg( 'vp_tab', 'formulare', $base ) ) . '">← ' . esc_html__( 'Zur Übersicht', 'vereinsplugin' ) . '</a> ';
@@ -898,36 +920,81 @@ function vp_formular_render_eintraege( $id ) {
 		esc_url( wp_nonce_url( add_query_arg( 'vp_formular_csv', (int) $f->id, home_url( '/' ) ), 'vp_formular_csv_' . $f->id ) ),
 		esc_html__( 'CSV exportieren', 'vereinsplugin' )
 	);
-	echo '<h3>' . esc_html( $f->titel ) . ' – ' . esc_html( sprintf( _n( '%d Eintrag', '%d Einträge', count( $eintraege ), 'vereinsplugin' ), count( $eintraege ) ) ) . '</h3>';
+	echo '<h3>' . esc_html( $f->titel ) . ' – ' . esc_html( $gefiltert
+		? sprintf( __( '%1$d von %2$d Einträgen', 'vereinsplugin' ), count( $auswahl ), count( $eintraege ) )
+		: sprintf( _n( '%d Eintrag', '%d Einträge', count( $eintraege ), 'vereinsplugin' ), count( $eintraege ) ) ) . '</h3>';
 
 	if ( ! $eintraege ) {
 		echo '<p class="vp-muted">' . esc_html__( 'Noch keine Einträge.', 'vereinsplugin' ) . '</p>';
 		return ob_get_clean();
 	}
 
-	$labels = array();
+	$felder = array();
 	foreach ( $f->felder as $feld ) {
 		if ( 'heading' !== $feld['type'] ) {
-			$labels[ $feld['key'] ] = $feld['label'];
+			$felder[ $feld['key'] ] = $feld;
 		}
 	}
 
-	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr><th>' . esc_html__( 'Eingereicht', 'vereinsplugin' ) . '</th>';
-	foreach ( $labels as $l ) {
-		echo '<th>' . esc_html( $l ) . '</th>';
+	// Filterleiste: je Auswahlfeld ein Dropdown, dazu Suche.
+	if ( $werkzeug ) {
+		echo '<form method="get" class="vp-card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">';
+		foreach ( array( 'vp_tab' => 'formulare', 'vp_fview' => 'eintraege', 'vp_formular_id' => (int) $f->id, 'fsort' => $sort, 'fdir' => $dir ) as $k => $v ) {
+			echo '<input type="hidden" name="' . esc_attr( $k ) . '" value="' . esc_attr( $v ) . '">';
+		}
+		foreach ( array( 'page_id', 'p' ) as $keep ) {
+			if ( isset( $_GET[ $keep ] ) ) {
+				echo '<input type="hidden" name="' . esc_attr( $keep ) . '" value="' . esc_attr( sanitize_text_field( wp_unslash( $_GET[ $keep ] ) ) ) . '">';
+			}
+		}
+		foreach ( vp_formular_filterfelder( $f ) as $feld ) {
+			echo '<label style="font-size:.9em;max-width:220px">' . esc_html( wp_trim_words( $feld['label'], 6 ) ) . '<select name="ff[' . esc_attr( $feld['key'] ) . ']" style="display:block;width:100%"><option value="">' . esc_html__( 'alle', 'vereinsplugin' ) . '</option>';
+			foreach ( vp_formular_feld_werte( $feld, $eintraege ) as $w ) {
+				echo '<option value="' . esc_attr( $w ) . '"' . selected( $filter[ $feld['key'] ] ?? '', $w, false ) . '>' . esc_html( $w ) . '</option>';
+			}
+			echo '</select></label>';
+		}
+		echo '<label style="font-size:.9em">' . esc_html__( 'Suche', 'vereinsplugin' ) . '<input type="search" name="fsuche" value="' . esc_attr( $suche ) . '" style="display:block"></label>';
+		echo '<button class="vp-btn vp-btn-primary">' . esc_html__( 'Filtern', 'vereinsplugin' ) . '</button>';
+		if ( $gefiltert ) {
+			echo '<a class="vp-btn" href="' . esc_url( $hier ) . '">' . esc_html__( 'Filter zurücksetzen', 'vereinsplugin' ) . '</a>';
+		}
+		echo '</form>';
+		echo vp_formular_auswertung_html( $f, $auswahl ); // phpcs:ignore
+	}
+
+	// Sortierbare Spaltenköpfe.
+	$kopf = function ( $key, $label ) use ( $werkzeug, $sort, $dir ) {
+		if ( ! $werkzeug ) {
+			return '<th>' . esc_html( $label ) . '</th>';
+		}
+		$neu   = ( $sort === $key && 'asc' === $dir ) ? 'desc' : 'asc';
+		$pfeil = $sort === $key ? ( 'asc' === $dir ? ' ▲' : ' ▼' ) : '';
+		return '<th><a href="' . esc_url( add_query_arg( array( 'fsort' => $key, 'fdir' => $neu ) ) ) . '" style="color:inherit;text-decoration:none;white-space:nowrap" title="' . esc_attr__( 'sortieren', 'vereinsplugin' ) . '">' . esc_html( $label ) . $pfeil . '</a></th>';
+	};
+	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr>' . $kopf( 'eingereicht', __( 'Eingereicht', 'vereinsplugin' ) ); // phpcs:ignore
+	foreach ( $felder as $key => $feld ) {
+		echo $kopf( $key, $feld['label'] ); // phpcs:ignore
 	}
 	echo '<th></th></tr></thead><tbody>';
-	foreach ( $eintraege as $e ) {
+	foreach ( $auswahl as $e ) {
 		echo '<tr><td>' . esc_html( mysql2date( 'd.m.Y H:i', $e->eingereicht_am ) ) . '</td>';
-		foreach ( $labels as $key => $l ) {
+		foreach ( $felder as $key => $feld ) {
 			$val = $e->daten[ $key ] ?? '';
-			echo '<td>' . esc_html( is_array( $val ) ? implode( ', ', $val ) : ( $val ?: '–' ) ) . '</td>';
+			$txt = function_exists( 'vp_formular_wert_text' ) ? vp_formular_wert_text( $feld, $val ) : ( is_array( $val ) ? implode( ', ', $val ) : (string) $val );
+			echo '<td>' . esc_html( '' === $txt ? '–' : $txt ) . '</td>';
 		}
 		echo '<td><form method="post" onsubmit="return confirm(\'' . esc_js( __( 'Eintrag löschen?', 'vereinsplugin' ) ) . '\')">'
 			. wp_nonce_field( 'vp_formular_edit', 'vp_fe_nonce', true, false )
 			. '<input type="hidden" name="eintrag_id" value="' . (int) $e->id . '">'
 			. '<button class="vp-btn vp-btn-danger" name="vp_eintrag_delete" value="1">✕</button></form></td></tr>';
 	}
+	if ( ! $auswahl ) {
+		echo '<tr><td colspan="' . ( count( $felder ) + 2 ) . '" class="vp-muted">' . esc_html__( 'Kein Eintrag passt zu diesem Filter.', 'vereinsplugin' ) . '</td></tr>';
+	}
 	echo '</tbody></table></div>';
+	if ( $werkzeug ) {
+		echo vp_formular_mail_bereich_html( $f, $auswahl, $gefiltert ); // phpcs:ignore
+	}
 	return ob_get_clean();
 }

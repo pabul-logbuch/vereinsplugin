@@ -288,6 +288,7 @@ require_once VP_PATH . 'includes/sepa.php';
 require_once VP_PATH . 'includes/rechnungen.php';
 require_once VP_PATH . 'includes/spenden.php';
 require_once VP_PATH . 'includes/formulare.php';
+require_once VP_PATH . 'includes/formular-werkzeuge.php';
 require_once VP_PATH . 'includes/kreise-verbund.php';
 require_once VP_PATH . 'includes/projekte.php';
 require_once VP_PATH . 'includes/projekt-bausteine.php';

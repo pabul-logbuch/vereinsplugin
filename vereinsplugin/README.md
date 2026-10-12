@@ -259,6 +259,23 @@ Weitere Quellen können sich über den Filter `vp_kalender_termine` anhängen.
   Für bestehende Projekte oder nach einer Datumsänderung: „Zeitplan ab heute
   neu verteilen“ im Reiter Bausteine (nur offene Baustein-Einträge).
 
+## Formulare: Vorlagen, Auswertung, Mail an Ausgewählte
+
+- **Vorlagen** unter „+ Neues Formular“: Anmeldung zu einer Veranstaltung,
+  Umfrage, Feedback, Helfer:innen-Anmeldung, Kurs/Workshop (mit Einverständnis
+  der Erziehungsberechtigten nur bei „unter 18“), Terminumfrage, Kontakt. Die
+  Vorlage füllt Felder, Texte und Bedingungen vor; gespeichert wird erst beim
+  Klick auf „Speichern“. Viele Vorlagen haben eine Newsletter-Zustimmung.
+- **Einträge**: Spaltenköpfe sortieren (Zahlen numerisch), Filter je
+  Auswahlfeld (z. B. „Newsletter = ja“, „Essen = vegan“), Volltextsuche.
+  **Auswertung** der gefilterten Einträge: Anzahl und Anteil je Antwort,
+  Summe und Durchschnitt bei Zahlenfeldern (z. B. Personen gesamt).
+- **Mail an diese Personen** (die gefilterten Einträge): Adressen kopieren,
+  BCC im eigenen Mailprogramm oder Mail von der Website – einzeln, mit
+  {name} und {feld-schluessel} als Platzhalter, doppelte Adressen nur einmal,
+  Antworten an die sendende Person.
+- **Bestätigungsmail** an die ausfüllende Person enthält ihre Angaben.
+
 ## Teilen: Formulare und Schichtpläne per Link & QR-Code
 
 Ohne eigene WordPress-Seite mit Shortcode: Jedes Formular hat die Adresse
