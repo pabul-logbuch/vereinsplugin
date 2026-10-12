@@ -7,8 +7,9 @@
  *   vp_formular_eintraege  – abgeschickte Einträge (Daten als JSON)
  *
  * Bauen/Auswerten: Mitgliederbereich → „Formulare" (Vorstand).
- * Veröffentlichen: [verein_formular id="3"] oder [verein_formular slug="…"]
- * auf einer beliebigen Seite.
+ * Veröffentlichen: Teilen-Link / QR-Code (?vp_formular=<slug>, ohne eigene
+ * Seite, siehe teilen.php) oder [verein_formular id="3"] bzw.
+ * [verein_formular slug="…"] auf einer beliebigen Seite.
  *
  * Felder-Baukasten folgt bewusst demselben Muster wie die Rechnungs-
  * Positionen (siehe rechnungen.php): keine JS-Dynamik, sondern bestehende
@@ -252,7 +253,7 @@ function vp_shortcode_formular( $atts ) {
 	}
 	if ( $f->login_pflicht && ! is_user_logged_in() ) {
 		return '<div class="vp-card vp-note vp-note-warn">' . esc_html__( 'Für dieses Formular ist ein Login nötig.', 'vereinsplugin' )
-			. ' <a class="vp-btn vp-btn-primary" href="' . esc_url( wp_login_url( get_permalink() ) ) . '">' . esc_html__( 'Zum Login', 'vereinsplugin' ) . '</a></div>';
+			. ' <a class="vp-btn vp-btn-primary" href="' . esc_url( wp_login_url( get_permalink() ?: home_url( add_query_arg( array() ) ) ) ) . '">' . esc_html__( 'Zum Login', 'vereinsplugin' ) . '</a></div>';
 	}
 
 	$done  = false;
@@ -728,16 +729,18 @@ function vp_formular_render_liste() {
 
 	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr>'
 		. '<th>' . esc_html__( 'Titel', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Status', 'vereinsplugin' ) . '</th>'
-		. '<th>' . esc_html__( 'Einträge', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Shortcode', 'vereinsplugin' ) . '</th><th></th></tr></thead><tbody>';
+		. '<th>' . esc_html__( 'Einträge', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Teilen', 'vereinsplugin' ) . '</th><th></th></tr></thead><tbody>';
 	foreach ( $formulare as $f ) {
 		$n = vp_formular_anzahl_eintraege( $f->id );
 		printf(
-			'<tr><td><strong>%s</strong></td><td><span class="vp-badge">%s</span></td><td>%s</td><td><code>[verein_formular id="%d"]</code></td>'
+			'<tr><td><strong>%s</strong></td><td><span class="vp-badge">%s</span></td><td>%s</td><td>%s</td>'
 			. '<td><a class="vp-btn" href="%s">%s</a> <a class="vp-btn" href="%s">%s</a></td></tr>',
 			esc_html( $f->titel ),
 			esc_html( $status_label[ $f->status ] ?? $f->status ),
 			$n . ( $f->max_teilnehmer ? ' / ' . (int) $f->max_teilnehmer : '' ),
-			(int) $f->id,
+			function_exists( 'vp_teilen_box' )
+				? '<details><summary class="vp-btn">' . esc_html__( 'Link & QR', 'vereinsplugin' ) . '</summary>' . vp_teilen_box( vp_formular_teilen_url( $f ), 'formular-' . ( $f->slug ?: $f->id ), 'entwurf' === $f->status ? __( 'Noch Entwurf – der Link funktioniert für andere erst nach dem Veröffentlichen.', 'vereinsplugin' ) : '' ) . '<p class="vp-muted">' . esc_html__( 'Oder auf einer Seite einbinden:', 'vereinsplugin' ) . ' <code>[verein_formular id="' . (int) $f->id . '"]</code></p></details>'
+				: '<code>[verein_formular id="' . (int) $f->id . '"]</code>',
 			esc_url( add_query_arg( array( 'vp_tab' => 'formulare', 'vp_fview' => 'bearbeiten', 'vp_formular_id' => $f->id ), $base ) ),
 			esc_html__( 'Bearbeiten', 'vereinsplugin' ),
 			esc_url( add_query_arg( array( 'vp_tab' => 'formulare', 'vp_fview' => 'eintraege', 'vp_formular_id' => $f->id ), $base ) ),
@@ -756,6 +759,11 @@ function vp_formular_render_editor( $id ) {
 	ob_start();
 	echo '<p><a class="vp-btn" href="' . esc_url( add_query_arg( 'vp_tab', 'formulare', $base ) ) . '">← ' . esc_html__( 'Zur Übersicht', 'vereinsplugin' ) . '</a></p>';
 	?>
+	<?php if ( $f && function_exists( 'vp_teilen_box' ) ) : ?>
+		<details class="vp-card" <?php echo 'entwurf' !== $f->status ? 'open' : ''; ?>><summary><strong><?php esc_html_e( 'Teilen: Link & QR-Code', 'vereinsplugin' ); ?></strong></summary>
+			<?php echo vp_teilen_box( vp_formular_teilen_url( $f ), 'formular-' . ( $f->slug ?: $f->id ), 'entwurf' === $f->status ? __( 'Noch Entwurf – der Link funktioniert für andere erst nach dem Veröffentlichen (Status unten).', 'vereinsplugin' ) : __( 'Keine eigene Seite nötig – der Link zeigt das Formular direkt.', 'vereinsplugin' ) ); // phpcs:ignore ?>
+		</details>
+	<?php endif; ?>
 	<form method="post" class="vp-form vp-card">
 		<?php wp_nonce_field( 'vp_formular_edit', 'vp_fe_nonce' ); ?>
 		<input type="hidden" name="id" value="<?php echo (int) ( $f->id ?? 0 ); ?>">

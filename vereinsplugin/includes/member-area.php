@@ -571,10 +571,25 @@ function vp_render_schichtplaene_section() {
 			esc_url( $url_ansehen ),
 			esc_html__( '← Alle Schichtpläne', 'vereinsplugin' )
 		);
+		if ( $can_manage && function_exists( 'vp_teilen_box' ) ) {
+			echo '<details class="vp-card"><summary><strong>' . esc_html__( 'Teilen: Link & QR-Code zum Eintragen', 'vereinsplugin' ) . '</strong></summary>'
+				. vp_teilen_box( vp_schichtplan_teilen_url( $event ), 'schichtplan-' . $event->slug, $event->aktiv ? __( 'Keine eigene Seite nötig – auch ohne Login eintragbar.', 'vereinsplugin' ) : __( 'Der Schichtplan ist nicht aktiv – über den Link sieht man nur einen Hinweis.', 'vereinsplugin' ) ) // phpcs:ignore
+				. '</details>';
+		}
 		echo wl_render_schichtplan( $event->id ); // phpcs:ignore WordPress.Security.EscapeOutput
 	} else {
 		// Übersicht aller aktiven Veranstaltungen (verlinkt jeweils auf ?event=slug).
 		echo do_shortcode( '[schichtplan]' ); // phpcs:ignore WordPress.Security.EscapeOutput
+		if ( $can_manage && function_exists( 'vp_teilen_box' ) && function_exists( 'wl_get_events' ) ) {
+			$events = wl_get_events( true );
+			if ( $events ) {
+				echo '<details class="vp-card"><summary><strong>' . esc_html__( 'Teilen: Links & QR-Codes', 'vereinsplugin' ) . '</strong></summary>';
+				foreach ( $events as $e ) {
+					echo '<h4 style="margin:12px 0 0">' . esc_html( $e->titel ) . '</h4>' . vp_teilen_box( vp_schichtplan_teilen_url( $e ), 'schichtplan-' . $e->slug ); // phpcs:ignore
+				}
+				echo '</details>';
+			}
+		}
 	}
 
 	return ob_get_clean();

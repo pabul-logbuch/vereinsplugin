@@ -163,7 +163,7 @@ function vp_projekt_soll_ist( $p, $posten = null ) {
 	$ist    = vp_projekt_ist_zeilen( $p );
 	$s      = array( 'plan_aus' => 0.0, 'plan_ein' => 0.0, 'ist_aus' => 0.0, 'ist_ein' => 0.0, 'ohne_posten' => 0, 'je_posten' => array(), 'ist' => $ist );
 	foreach ( $posten as $x ) {
-		if ( null !== $x->betrag ) {
+		if ( null !== $x->betrag && ( ! function_exists( 'vp_projekt_posten_zaehlt' ) || vp_projekt_posten_zaehlt( $x, 'erwartet' ) ) ) {
 			if ( (float) $x->betrag < 0 ) {
 				$s['plan_aus'] += abs( (float) $x->betrag );
 			} else {
