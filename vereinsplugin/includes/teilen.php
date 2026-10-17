@@ -130,9 +130,20 @@ function vp_teilen_box( $url, $name = 'qr', $hinweis = '' ) {
 	}
 	$h .= '</div></div>';
 	if ( 1 === $nr ) {
-		$h .= '<style>.vp-teilen .vp-girocode-qr svg{display:block;width:100%;height:100%}</style>' . vp_teilen_js();
+		$h .= '<style>.vp-teilen .vp-girocode-qr svg{display:block;width:100%;height:100%}</style>';
 	}
+	$h .= vp_teilen_js_einmal();
 	return $h;
+}
+
+/** Kopier-/QR-Skript nur einmal je Seite ausgeben (Teilen-Box, Shortcode-Knopf). */
+function vp_teilen_js_einmal() {
+	static $da = false;
+	if ( $da ) {
+		return '';
+	}
+	$da = true;
+	return vp_teilen_js();
 }
 
 function vp_teilen_js() {

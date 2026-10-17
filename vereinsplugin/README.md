@@ -327,6 +327,15 @@ Formular-Editor, beim Schichtplan (Mitgliederbereich → Schichtpläne, für
 Verwaltende) und im Projekt bei Anmeldung und Schichtplan. Formulare im
 Entwurf sind über den Link nur für Verwaltende sichtbar.
 
+### Formulare per Shortcode einbetten
+
+Die Formular-Übersicht zeigt je Formular den Shortcode mit Knopf „Kopieren“,
+z. B. `[verein_formular id="3"]` (auch im Editor unter „Teilen“). Einfach in
+eine Seite oder einen Beitrag einfügen (Block „Shortcode“). Mit
+`titel="nein"` entfällt die Überschrift, falls die Seite schon einen Titel hat.
+Die Styles laden auch, wenn der Shortcode in einem Widget, Page-Builder oder
+Theme-Template steht.
+
 ## Projekte: Teilnehmenden-Szenarien, Förderungen, Sponsoring
 
 - **Berechnung je Posten** (Reiter Finanzen): fester Betrag, **je
