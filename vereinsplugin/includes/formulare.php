@@ -250,8 +250,16 @@ function vp_formular_felder_aus_post() {
 
 add_shortcode( 'verein_formular', 'vp_shortcode_formular' );
 function vp_shortcode_formular( $atts ) {
-	$atts = shortcode_atts( array( 'id' => 0, 'slug' => '' ), $atts );
+	$atts = shortcode_atts( array( 'id' => 0, 'slug' => '', 'titel' => 'ja' ), $atts );
 	$f = $atts['id'] ? vp_formular_get( (int) $atts['id'] ) : vp_formular_get_by_slug( $atts['slug'] );
+	$mit_titel = ! in_array( strtolower( (string) $atts['titel'] ), array( 'nein', 'no', '0', 'false', 'aus' ), true );
+
+	// Styles auch dann laden, wenn der Shortcode nicht im Seiteninhalt steht
+	// (Page-Builder, Widget, Block-Theme-Template) – sonst ungestylt.
+	if ( ! wp_style_is( 'vp-app', 'enqueued' ) && defined( 'VP_PATH' ) ) {
+		$css = VP_PATH . 'assets/app.css';
+		wp_enqueue_style( 'vp-app', VP_URL . 'assets/app.css', array(), is_readable( $css ) ? filemtime( $css ) : VP_VERSION );
+	}
 
 	if ( ! $f ) {
 		return current_user_can( 'vp_manage_formulare' )
@@ -281,7 +289,9 @@ function vp_shortcode_formular( $atts ) {
 	echo '<div class="vp-formular vp-card">';
 
 	if ( $done ) {
-		echo '<h2>' . esc_html( $f->titel ) . '</h2>';
+		if ( $mit_titel ) {
+			echo '<h2>' . esc_html( $f->titel ) . '</h2>';
+		}
 		echo '<div class="vp-note">' . wp_kses_post( wpautop( $f->dank_text ?: __( 'Danke, deine Anmeldung ist eingegangen.', 'vereinsplugin' ) ) ) . '</div>';
 		$neu = ! empty( $GLOBALS['vp_formular_letzter_eintrag'] ) && function_exists( 'vp_ticket_eintrag' ) ? vp_ticket_eintrag( (int) $GLOBALS['vp_formular_letzter_eintrag'] ) : null;
 		if ( $neu && '' !== (string) $neu->zugang ) {
@@ -292,7 +302,9 @@ function vp_shortcode_formular( $atts ) {
 		return ob_get_clean();
 	}
 
-	echo '<h2>' . esc_html( $f->titel ) . '</h2>';
+	if ( $mit_titel ) {
+		echo '<h2>' . esc_html( $f->titel ) . '</h2>';
+	}
 	if ( $f->beschreibung ) {
 		echo '<div class="vp-muted">' . wp_kses_post( wpautop( $f->beschreibung ) ) . '</div>';
 	}
@@ -824,18 +836,19 @@ function vp_formular_render_liste() {
 
 	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr>'
 		. '<th>' . esc_html__( 'Titel', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Status', 'vereinsplugin' ) . '</th>'
-		. '<th>' . esc_html__( 'Einträge', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Teilen', 'vereinsplugin' ) . '</th><th></th></tr></thead><tbody>';
+		. '<th>' . esc_html__( 'Einträge', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Shortcode', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Teilen', 'vereinsplugin' ) . '</th><th></th></tr></thead><tbody>';
 	foreach ( $formulare as $f ) {
 		$n = vp_formular_anzahl_eintraege( $f->id );
 		printf(
-			'<tr><td><strong>%s</strong></td><td><span class="vp-badge">%s</span></td><td>%s</td><td>%s</td>'
+			'<tr><td><strong>%s</strong></td><td><span class="vp-badge">%s</span></td><td>%s</td><td>%s</td><td>%s</td>'
 			. '<td><a class="vp-btn" href="%s">%s</a> <a class="vp-btn" href="%s">%s</a></td></tr>',
 			esc_html( $f->titel ),
 			esc_html( $status_label[ $f->status ] ?? $f->status ),
 			$n . ( $f->max_teilnehmer ? ' / ' . (int) $f->max_teilnehmer : '' ),
+			vp_formular_shortcode_html( $f ),
 			function_exists( 'vp_teilen_box' )
-				? '<details><summary class="vp-btn">' . esc_html__( 'Link & QR', 'vereinsplugin' ) . '</summary>' . vp_teilen_box( vp_formular_teilen_url( $f ), 'formular-' . ( $f->slug ?: $f->id ), 'entwurf' === $f->status ? __( 'Noch Entwurf – der Link funktioniert für andere erst nach dem Veröffentlichen.', 'vereinsplugin' ) : '' ) . '<p class="vp-muted">' . esc_html__( 'Oder auf einer Seite einbinden:', 'vereinsplugin' ) . ' <code>[verein_formular id="' . (int) $f->id . '"]</code></p></details>'
-				: '<code>[verein_formular id="' . (int) $f->id . '"]</code>',
+				? '<details><summary class="vp-btn">' . esc_html__( 'Link & QR', 'vereinsplugin' ) . '</summary>' . vp_teilen_box( vp_formular_teilen_url( $f ), 'formular-' . ( $f->slug ?: $f->id ), 'entwurf' === $f->status ? __( 'Noch Entwurf – der Link funktioniert für andere erst nach dem Veröffentlichen.', 'vereinsplugin' ) : '' ) . '</details>'
+				: '',
 			esc_url( add_query_arg( array( 'vp_tab' => 'formulare', 'vp_fview' => 'bearbeiten', 'vp_formular_id' => $f->id ), $base ) ),
 			esc_html__( 'Bearbeiten', 'vereinsplugin' ),
 			esc_url( add_query_arg( array( 'vp_tab' => 'formulare', 'vp_fview' => 'eintraege', 'vp_formular_id' => $f->id ), $base ) ),
@@ -843,7 +856,21 @@ function vp_formular_render_liste() {
 		);
 	}
 	echo '</tbody></table></div>';
+	echo '<p class="vp-muted">' . esc_html__( 'Shortcode in eine Seite oder einen Beitrag einfügen (Block „Shortcode“), um das Formular dort einzubetten. Mit titel="nein" entfällt die Überschrift, z. B. wenn die Seite schon einen Titel hat.', 'vereinsplugin' ) . '</p>';
 	return ob_get_clean();
+}
+
+/** Shortcode eines Formulars mit Kopieren-Knopf. */
+function vp_formular_shortcode( $f ) {
+	return '[verein_formular id="' . (int) $f->id . '"]';
+}
+
+function vp_formular_shortcode_html( $f ) {
+	$sc = vp_formular_shortcode( $f );
+	$h  = '<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">'
+		. '<code style="white-space:nowrap;user-select:all">' . esc_html( $sc ) . '</code>'
+		. '<button type="button" class="vp-btn" data-vp-kopieren="' . esc_attr( $sc ) . '" title="' . esc_attr__( 'Shortcode kopieren', 'vereinsplugin' ) . '">' . esc_html__( 'Kopieren', 'vereinsplugin' ) . '</button></span>';
+	return $h . ( function_exists( 'vp_teilen_js_einmal' ) ? vp_teilen_js_einmal() : '' );
 }
 
 function vp_formular_render_editor( $id ) {
@@ -864,6 +891,7 @@ function vp_formular_render_editor( $id ) {
 	<?php if ( ! empty( $f->id ) && function_exists( 'vp_teilen_box' ) ) : ?>
 		<details class="vp-card" <?php echo 'entwurf' !== $f->status ? 'open' : ''; ?>><summary><strong><?php esc_html_e( 'Teilen: Link & QR-Code', 'vereinsplugin' ); ?></strong></summary>
 			<?php echo vp_teilen_box( vp_formular_teilen_url( $f ), 'formular-' . ( $f->slug ?: $f->id ), 'entwurf' === $f->status ? __( 'Noch Entwurf – der Link funktioniert für andere erst nach dem Veröffentlichen (Status unten).', 'vereinsplugin' ) : __( 'Keine eigene Seite nötig – der Link zeigt das Formular direkt.', 'vereinsplugin' ) ); // phpcs:ignore ?>
+			<p><strong><?php esc_html_e( 'Auf einer Seite einbetten:', 'vereinsplugin' ); ?></strong> <?php echo vp_formular_shortcode_html( $f ); // phpcs:ignore ?></p>
 		</details>
 	<?php endif; ?>
 	<form method="post" class="vp-form vp-card">
