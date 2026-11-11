@@ -353,23 +353,132 @@ function vp_bh_journal() {
 	if ( $can_edit && $bearbeiten ) {
 		echo vp_bh_bearbeiten_karte( $bearbeiten, $jahr, $methode, $extras, $has_nc ); // phpcs:ignore
 	}
-	$num    = function ( $v ) {
+	echo vp_bh_journal_tabelle( $rows, $methode, $jahr, $can_edit, $has_nc, $markiert ); // phpcs:ignore
+	echo vp_bh_art_js(); // phpcs:ignore
+	return ob_get_clean();
+}
+
+/* -------------------------------------------------------------------------
+ * Journal-Tabelle: Suche, Art-Filter, Spalten ein-/ausblenden, Sortieren
+ *
+ * Alles im Browser (ein Jahr hat überschaubar viele Buchungen): jede Zelle
+ * trägt data-c (Spalte) und data-s (Sortierwert). Gewählte Spalten und
+ * Sortierung merkt sich der Browser (localStorage), je Methode.
+ * ---------------------------------------------------------------------- */
+
+/** Spalten des Journals: key => [Überschrift, standardmäßig sichtbar, rechtsbündig]. */
+function vp_bh_journal_spalten( $methode ) {
+	$sp = array(
+		'beleg_nr' => array( __( 'Beleg-Nr.', 'vereinsplugin' ), true, false ),
+		'datum'    => array( __( 'Datum', 'vereinsplugin' ), true, false ),
+		'art'      => array( __( 'Art', 'vereinsplugin' ), false, false ),
+	);
+	if ( 'euer' === $methode ) {
+		$sp['konto']     = array( __( 'Wofür / Konto', 'vereinsplugin' ), true, false );
+		$sp['geldkonto'] = array( __( 'Geldkonto', 'vereinsplugin' ), false, false );
+	} else {
+		$sp['soll']  = array( __( 'Soll', 'vereinsplugin' ), true, false );
+		$sp['haben'] = array( __( 'Haben', 'vereinsplugin' ), true, false );
+	}
+	$sp['gegenpartei'] = array( __( 'Gegenpartei', 'vereinsplugin' ), true, false );
+	$sp['zweck']       = array( __( 'Zweck / Text', 'vereinsplugin' ), true, false );
+	if ( 'euer' === $methode ) {
+		$sp['einnahme'] = array( __( 'Einnahme', 'vereinsplugin' ), true, true );
+		$sp['ausgabe']  = array( __( 'Ausgabe', 'vereinsplugin' ), true, true );
+	} else {
+		$sp['betrag'] = array( __( 'Betrag', 'vereinsplugin' ), true, true );
+	}
+	$sp['budget']       = array( __( 'Budget', 'vereinsplugin' ), true, false );
+	$sp['ruecklage']    = array( __( 'Rücklage', 'vereinsplugin' ), true, false );
+	$sp['kostenstelle'] = array( __( 'Kostenstelle', 'vereinsplugin' ), true, false );
+	if ( function_exists( 'vp_projekt_ist_table' ) ) {
+		$sp['projekt'] = array( __( 'Projekt', 'vereinsplugin' ), false, false );
+	}
+	if ( function_exists( 'vp_ust_buchung' ) ) {
+		$sp['ust'] = array( __( 'USt / VSt', 'vereinsplugin' ), false, true );
+	}
+	$sp['quelle'] = array( __( 'Quelle', 'vereinsplugin' ), false, false );
+	$sp['beleg']  = array( __( 'Beleg', 'vereinsplugin' ), true, false );
+	return $sp;
+}
+
+/** Projektname je Buchung (über Projekt-Kalkulationsposten). */
+function vp_bh_journal_projekte( array $ids ) {
+	global $wpdb;
+	if ( ! $ids || ! function_exists( 'vp_projekt_ist_table' ) || ! function_exists( 'vp_projekt_table' ) ) {
+		return array();
+	}
+	$ist = vp_projekt_ist_table();
+	if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $ist ) ) !== $ist ) {
+		return array();
+	}
+	$liste = implode( ',', array_map( 'intval', $ids ) );
+	$rows  = $wpdb->get_results( 'SELECT i.quelle_id, p.titel FROM ' . $ist . ' i JOIN ' . vp_projekt_table() . " p ON p.id = i.projekt_id WHERE i.quelle = 'buchung' AND i.quelle_id IN ($liste)" ); // phpcs:ignore
+	$out   = array();
+	foreach ( (array) $rows as $r ) {
+		$out[ (int) $r->quelle_id ] = (string) $r->titel;
+	}
+	return $out;
+}
+
+function vp_bh_journal_tabelle( array $rows, $methode, $jahr, $can_edit, $has_nc, $markiert ) {
+	$spalten = vp_bh_journal_spalten( $methode );
+	$num     = function ( $v ) {
 		return esc_html( number_format( (float) $v, 2, ',', '.' ) );
 	};
+	$namen = array( 'budget' => array(), 'ruecklage' => array() );
+	foreach ( function_exists( 'jb_budgets_get_all' ) ? jb_budgets_get_all() : array() as $bb ) {
+		$bb = (object) $bb;
+		$namen['budget'][ (int) $bb->id ] = (string) $bb->zweck;
+	}
+	foreach ( function_exists( 'jb_ruecklagen_get_all' ) ? jb_ruecklagen_get_all() : array() as $rr ) {
+		$rr = (object) $rr;
+		$namen['ruecklage'][ (int) $rr->id ] = (string) $rr->bezeichnung;
+	}
+	$projekte = isset( $spalten['projekt'] ) ? vp_bh_journal_projekte( array_map( 'intval', array_column( $rows, 'id' ) ) ) : array();
+	$art_text = array(
+		'einnahme'  => __( 'Einnahme', 'vereinsplugin' ),
+		'ausgabe'   => __( 'Ausgabe', 'vereinsplugin' ),
+		'umbuchung' => __( 'Umbuchung', 'vereinsplugin' ),
+		'satz'      => __( 'Buchungssatz', 'vereinsplugin' ),
+	);
+	$kz = 'euer' === $methode ? 'e' : 'd';
+
+	ob_start();
+	// Werkzeugleiste: Suche, Art, Spalten.
+	echo '<div class="vp-card vp-form vp-jt-leiste" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">';
+	echo '<label style="flex:1;min-width:200px;margin:0">' . esc_html__( 'Suchen', 'vereinsplugin' ) . '<input type="search" data-jt-suche placeholder="' . esc_attr__( 'Zweck, Gegenpartei, Konto, Budget, Betrag …', 'vereinsplugin' ) . '" style="display:block;width:100%;box-sizing:border-box"></label>';
+	echo '<label style="margin:0">' . esc_html__( 'Art', 'vereinsplugin' ) . '<select data-jt-art style="display:block"><option value="">' . esc_html__( 'alle', 'vereinsplugin' ) . '</option>';
+	foreach ( array( 'ausgabe', 'einnahme', 'umbuchung' ) as $a ) {
+		echo '<option value="' . esc_attr( $a ) . '">' . esc_html( $art_text[ $a ] ) . '</option>';
+	}
+	echo '</select></label>';
+	echo '<details class="vp-jt-spalten" style="position:relative"><summary class="vp-btn">' . esc_html__( 'Spalten', 'vereinsplugin' ) . '</summary>'
+		. '<div class="vp-card" style="position:absolute;right:0;z-index:20;margin-top:6px;min-width:220px;max-height:60vh;overflow:auto;box-shadow:0 8px 24px rgba(0,0,0,.15)">';
+	foreach ( $spalten as $key => $sp ) {
+		echo '<label style="display:flex;gap:8px;align-items:center;margin:4px 0;color:inherit"><input type="checkbox" data-jt-spalte="' . esc_attr( $key ) . '"' . checked( $sp[1], true, false ) . ' data-standard="' . ( $sp[1] ? 1 : 0 ) . '"> ' . esc_html( $sp[0] ) . '</label>';
+	}
+	echo '<p style="margin:8px 0 0"><button type="button" class="vp-btn" data-jt-standard>' . esc_html__( 'Standard', 'vereinsplugin' ) . '</button></p></div></details>';
+	echo '<span class="vp-muted" data-jt-zaehler style="font-size:.9em;align-self:center"></span>';
+	echo '</div>';
+
 	// Bearbeiten-Spalte vorne, damit der Stift auch auf schmalen Bildschirmen
 	// ohne seitliches Scrollen zu sehen ist.
-	echo '<div class="vp-table-wrap"><table class="vp-table"><thead><tr>' . ( $can_edit ? '<th></th>' : '' ) . '<th>' . esc_html__( 'Beleg-Nr.', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Datum', 'vereinsplugin' ) . '</th>';
-	if ( 'euer' === $methode ) {
-		echo '<th>' . esc_html__( 'Wofür / Konto', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Gegenpartei / Zweck', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Einnahme', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Ausgabe', 'vereinsplugin' ) . '</th>';
-	} else {
-		echo '<th>' . esc_html__( 'Soll', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Haben', 'vereinsplugin' ) . '</th><th style="text-align:right">' . esc_html__( 'Betrag', 'vereinsplugin' ) . '</th><th>' . esc_html__( 'Text', 'vereinsplugin' ) . '</th>';
+	echo '<div class="vp-table-wrap"><table class="vp-table vp-jt" data-jt-key="vp_jt_' . esc_attr( $kz ) . '"><thead><tr>' . ( $can_edit ? '<th></th>' : '' );
+	foreach ( $spalten as $key => $sp ) {
+		$sortierbar = 'beleg' !== $key;
+		echo '<th data-c="' . esc_attr( $key ) . '"' . ( $sp[2] ? ' style="text-align:right"' : '' ) . '>'
+			. ( $sortierbar ? '<button type="button" class="vp-jt-sort" data-jt-sort="' . esc_attr( $key ) . '" title="' . esc_attr__( 'sortieren', 'vereinsplugin' ) . '">' . esc_html( $sp[0] ) . '<span class="vp-jt-pfeil"></span></button>' : esc_html( $sp[0] ) )
+			. '</th>';
 	}
-	echo '<th>' . esc_html__( 'Beleg', 'vereinsplugin' ) . '</th></tr></thead><tbody>';
+	echo '</tr></thead><tbody>';
 
 	foreach ( $rows as $r ) {
 		$rid = (int) $r['id'];
 		$s   = vp_doppik_satz( $r );
 		$v   = vp_bh_euer_sicht( $r );
+		$art = $v ? $v['art'] : 'satz';
+		$z   = array(); // key => [html, sortwert]
 
 		$beleg_cell = '<span class="vp-muted">–</span>';
 		if ( ! empty( $r['beleg_pfad'] ) && $has_nc ) {
@@ -382,47 +491,146 @@ function vp_bh_journal() {
 				. '<button class="vp-btn" name="vp_bh_beleg_up" value="1">↑</button></form>';
 		}
 
-		$edit_cell = '';
-		if ( $can_edit ) {
-			$edit_cell = '<td><a class="vp-btn" title="' . esc_attr__( 'Bearbeiten, Beleg, aufteilen, löschen', 'vereinsplugin' ) . '" href="' . esc_url( vp_bh_url( array( 'vp_bh' => 'journal', 'jahr' => $jahr, 'bearbeiten' => $rid ) ) . '#vp-bearbeiten' ) . '">✎</a></td>';
-		}
+		$z['beleg_nr'] = array( esc_html( $r['beleg_nr'] ?? '' ), (string) ( $r['beleg_nr'] ?? '' ) );
+		$z['datum']    = array( '<span style="white-space:nowrap">' . esc_html( mysql2date( 'd.m.Y', $r['buchung_datum'] ) ) . '</span>', (string) $r['buchung_datum'] );
+		$z['art']      = array( esc_html( $art_text[ $art ] ?? $art ), $art_text[ $art ] ?? $art );
 
-		$text = '<br><span class="vp-muted">' . esc_html( wp_trim_words( (string) $r['beschreibung'], 14 ) ) . '</span>'
-			. ( function_exists( 'vp_ust_buchung_html' ) ? vp_ust_buchung_html( $r ) : '' );
-		echo '<tr id="vp-b-' . $rid . '"' . ( $rid === $markiert ? ' style="background:rgba(250,204,21,.15)"' : '' ) . '>' . $edit_cell . '<td>' . esc_html( $r['beleg_nr'] ?? '' ) . '</td><td>' . esc_html( $r['buchung_datum'] ) . '</td>'; // phpcs:ignore
+		$betrag = $v ? (float) $v['betrag'] : (float) $s['betrag'];
 		if ( 'euer' === $methode ) {
-			if ( $v && 'umbuchung' === $v['art'] ) {
-				echo '<td>' . esc_html__( 'Umbuchung', 'vereinsplugin' ) . '<br><span class="vp-muted">' . esc_html( vp_bh_konto_label( $v['von'] ) . ' → ' . vp_bh_konto_label( $v['nach'] ) ) . '</span></td>';
-				echo '<td>' . esc_html( $r['gegenpartei'] ?? '' ) . $text . '</td>'; // phpcs:ignore
-				echo '<td colspan="2" style="text-align:center" class="vp-muted">⇄ ' . $num( $v['betrag'] ) . ' €</td>'; // phpcs:ignore
+			if ( $v && 'umbuchung' === $art ) {
+				$kt = vp_bh_konto_label( $v['von'] ) . ' → ' . vp_bh_konto_label( $v['nach'] );
+				$z['konto']     = array( esc_html__( 'Umbuchung', 'vereinsplugin' ) . '<br><span class="vp-muted">' . esc_html( $kt ) . '</span>', __( 'Umbuchung', 'vereinsplugin' ) . ' ' . $kt );
+				$z['geldkonto'] = array( esc_html( $kt ), $kt );
+				$z['einnahme']  = array( '<span class="vp-muted">⇄ ' . $num( $betrag ) . ' €</span>', '' );
+				$z['ausgabe']   = array( '', '' );
 			} elseif ( $v ) {
-				$wo = 'einnahme' === $v['art'] ? __( 'auf %s', 'vereinsplugin' ) : __( 'von %s', 'vereinsplugin' );
-				echo '<td>' . esc_html( $v['konto'] && ! in_array( $v['konto'], array( VP_DOPPIK_INTERIM, VP_BH_INTERIM2 ), true ) ? vp_bh_konto_label( $v['konto'] ) : __( '– noch nicht zugeordnet –', 'vereinsplugin' ) )
-					. '<br><span class="vp-muted">' . esc_html( sprintf( $wo, vp_bh_konto_label( $v['geldkonto'] ) ) ) . '</span></td>';
-				echo '<td>' . esc_html( $r['gegenpartei'] ?? '' ) . $text . '</td>'; // phpcs:ignore
-				echo '<td style="text-align:right;color:#166534">' . ( 'einnahme' === $v['art'] ? $num( $v['betrag'] ) . ' €' : '' ) . '</td>'; // phpcs:ignore
-				echo '<td style="text-align:right;color:#b91c1c">' . ( 'ausgabe' === $v['art'] ? $num( $v['betrag'] ) . ' €' : '' ) . '</td>'; // phpcs:ignore
+				$wo  = 'einnahme' === $art ? __( 'auf %s', 'vereinsplugin' ) : __( 'von %s', 'vereinsplugin' );
+				$kt  = $v['konto'] && ! in_array( $v['konto'], array( VP_DOPPIK_INTERIM, VP_BH_INTERIM2 ), true ) ? vp_bh_konto_label( $v['konto'] ) : __( '– noch nicht zugeordnet –', 'vereinsplugin' );
+				$gk  = vp_bh_konto_label( $v['geldkonto'] );
+				$z['konto']     = array( esc_html( $kt ) . '<br><span class="vp-muted">' . esc_html( sprintf( $wo, $gk ) ) . '</span>', $kt );
+				$z['geldkonto'] = array( esc_html( $gk ), $gk );
+				$z['einnahme']  = array( 'einnahme' === $art ? '<span style="color:#166534">' . $num( $betrag ) . ' €</span>' : '', 'einnahme' === $art ? $betrag : '' );
+				$z['ausgabe']   = array( 'ausgabe' === $art ? '<span style="color:#b91c1c">' . $num( $betrag ) . ' €</span>' : '', 'ausgabe' === $art ? $betrag : '' );
 			} else {
-				echo '<td>' . esc_html__( 'Buchungssatz', 'vereinsplugin' ) . '<br><span class="vp-muted">' . esc_html( $s['soll'] . ' an ' . $s['haben'] ) . '</span></td>';
-				echo '<td>' . esc_html( $r['gegenpartei'] ?? '' ) . $text . '</td>'; // phpcs:ignore
-				echo '<td colspan="2" style="text-align:center" class="vp-muted">' . $num( $s['betrag'] ) . ' €</td>'; // phpcs:ignore
+				$kt = $s['soll'] . ' an ' . $s['haben'];
+				$z['konto']     = array( esc_html__( 'Buchungssatz', 'vereinsplugin' ) . '<br><span class="vp-muted">' . esc_html( $kt ) . '</span>', $kt );
+				$z['geldkonto'] = array( '', '' );
+				$z['einnahme']  = array( '<span class="vp-muted">' . $num( $betrag ) . ' €</span>', '' );
+				$z['ausgabe']   = array( '', '' );
 			}
 		} else {
-			echo '<td>' . esc_html( vp_bh_konto_label( $s['soll'] ) ) . '</td><td>' . esc_html( vp_bh_konto_label( $s['haben'] ) ) . '</td>';
-			echo '<td style="text-align:right">' . $num( $s['betrag'] ) . ' €</td>'; // phpcs:ignore
-			echo '<td>' . esc_html( $r['gegenpartei'] ?? '' ) . $text . '</td>'; // phpcs:ignore
+			$z['soll']   = array( esc_html( vp_bh_konto_label( $s['soll'] ) ), vp_bh_konto_label( $s['soll'] ) );
+			$z['haben']  = array( esc_html( vp_bh_konto_label( $s['haben'] ) ), vp_bh_konto_label( $s['haben'] ) );
+			$z['betrag'] = array( $num( $s['betrag'] ) . ' €', (float) $s['betrag'] );
 		}
-		echo '<td>' . $beleg_cell . '</td></tr>'; // phpcs:ignore
+		$zweck          = (string) ( $r['beschreibung'] ?? '' );
+		$z['gegenpartei'] = array( esc_html( $r['gegenpartei'] ?? '' ), (string) ( $r['gegenpartei'] ?? '' ) );
+		$z['zweck']       = array(
+			'<span title="' . esc_attr( $zweck ) . '">' . esc_html( wp_trim_words( $zweck, 14 ) ) . '</span>' . ( function_exists( 'vp_ust_buchung_html' ) ? vp_ust_buchung_html( $r ) : '' ),
+			$zweck,
+		);
+		foreach ( array( 'budget', 'ruecklage' ) as $k ) {
+			$id    = (int) ( $r[ $k . '_id' ] ?? 0 );
+			$name  = $id ? ( $namen[ $k ][ $id ] ?? '#' . $id ) : '';
+			$z[ $k ] = array( '' === $name ? '<span class="vp-muted">–</span>' : esc_html( $name ), $name );
+		}
+		$ks                = (string) ( $r['kostenstelle'] ?? '' );
+		$z['kostenstelle'] = array( '' === $ks ? '<span class="vp-muted">–</span>' : esc_html( $ks ), $ks );
+		if ( isset( $spalten['projekt'] ) ) {
+			$pj           = $projekte[ $rid ] ?? '';
+			$z['projekt'] = array( '' === $pj ? '<span class="vp-muted">–</span>' : esc_html( $pj ), $pj );
+		}
+		if ( isset( $spalten['ust'] ) ) {
+			$u        = vp_ust_buchung( $r );
+			$z['ust'] = $u && (float) $u['steuer'] ? array( $num( $u['steuer'] ) . ' €', (float) $u['steuer'] ) : array( '<span class="vp-muted">–</span>', '' );
+		}
+		$z['quelle'] = array( esc_html( $r['quelle'] ?? '' ), (string) ( $r['quelle'] ?? '' ) );
+		$z['beleg']  = array( $beleg_cell, '' );
+
+		// Suchtext: alles Sichtbare plus Beträge in beiden Schreibweisen.
+		$such = implode( ' ', array_map( function ( $c ) {
+			return wp_strip_all_tags( (string) $c[1] );
+		}, $z ) ) . ' ' . number_format( $betrag, 2, ',', '.' ) . ' ' . number_format( $betrag, 2, '.', '' ) . ' ' . ( $r['beschreibung'] ?? '' );
+
+		echo '<tr id="vp-b-' . $rid . '" data-art="' . esc_attr( $art ) . '" data-ein="' . ( 'einnahme' === $art ? esc_attr( $betrag ) : 0 ) . '" data-aus="' . ( 'ausgabe' === $art ? esc_attr( $betrag ) : 0 ) . '" data-such="' . esc_attr( mb_strtolower( $such ) ) . '"' . ( $rid === $markiert ? ' style="background:rgba(250,204,21,.15)"' : '' ) . '>';
+		if ( $can_edit ) {
+			echo '<td><a class="vp-btn" title="' . esc_attr__( 'Bearbeiten, Beleg, aufteilen, löschen', 'vereinsplugin' ) . '" href="' . esc_url( vp_bh_url( array( 'vp_bh' => 'journal', 'jahr' => $jahr, 'bearbeiten' => $rid ) ) . '#vp-bearbeiten' ) . '">✎</a></td>';
+		}
+		foreach ( $spalten as $key => $sp ) {
+			$c = $z[ $key ] ?? array( '', '' );
+			echo '<td data-c="' . esc_attr( $key ) . '" data-s="' . esc_attr( (string) $c[1] ) . '"' . ( $sp[2] ? ' style="text-align:right;white-space:nowrap"' : '' ) . '>' . $c[0] . '</td>'; // phpcs:ignore
+		}
+		echo '</tr>';
 	}
+	echo '</tbody>';
+	$colspan = count( $spalten ) + ( $can_edit ? 1 : 0 );
 	if ( ! $rows ) {
-		echo '<tr><td colspan="8" class="vp-muted">' . esc_html__( 'Keine Buchungen in diesem Jahr.', 'vereinsplugin' ) . '</td></tr>';
-	} elseif ( 'euer' === $methode ) {
-		$e = vp_bh_euer( $jahr );
-		echo '<tr style="font-weight:700"><td colspan="' . ( $can_edit ? 5 : 4 ) . '">' . esc_html__( 'Summe', 'vereinsplugin' ) . '</td><td style="text-align:right">' . $num( $e['einnahmen'] ) . ' €</td><td style="text-align:right">' . $num( $e['ausgaben'] ) . ' €</td><td></td></tr>'; // phpcs:ignore
+		echo '<tbody><tr><td colspan="' . $colspan . '" class="vp-muted">' . esc_html__( 'Keine Buchungen in diesem Jahr.', 'vereinsplugin' ) . '</td></tr></tbody>';
+	} else {
+		echo '<tbody data-jt-leer hidden><tr><td colspan="' . $colspan . '" class="vp-muted">' . esc_html__( 'Keine Buchung passt zur Suche.', 'vereinsplugin' ) . '</td></tr></tbody>';
+		// Summe: Jahressumme aus der EÜR; bei Suche/Filter die Summe der Treffer.
+		$e = 'euer' === $methode ? vp_bh_euer( $jahr ) : null;
+		echo '<tfoot><tr style="font-weight:700">' . ( $can_edit ? '<td></td>' : '' );
+		foreach ( $spalten as $key => $sp ) {
+			$inhalt = '';
+			if ( 'datum' === $key ) {
+				$inhalt = '<span data-jt-summe-label data-gesamt="' . esc_attr__( 'Summe', 'vereinsplugin' ) . '" data-gefiltert="' . esc_attr__( 'Summe Treffer', 'vereinsplugin' ) . '">' . esc_html__( 'Summe', 'vereinsplugin' ) . '</span>';
+			} elseif ( $e && 'einnahme' === $key ) {
+				$inhalt = '<span data-jt-summe="ein" data-gesamt="' . esc_attr( $num( $e['einnahmen'] ) ) . '">' . $num( $e['einnahmen'] ) . '</span> €';
+			} elseif ( $e && 'ausgabe' === $key ) {
+				$inhalt = '<span data-jt-summe="aus" data-gesamt="' . esc_attr( $num( $e['ausgaben'] ) ) . '">' . $num( $e['ausgaben'] ) . '</span> €';
+			}
+			echo '<td data-c="' . esc_attr( $key ) . '"' . ( $sp[2] ? ' style="text-align:right;white-space:nowrap"' : '' ) . '>' . $inhalt . '</td>'; // phpcs:ignore
+		}
+		echo '</tr></tfoot>';
 	}
-	echo '</tbody></table></div>';
-	echo vp_bh_art_js(); // phpcs:ignore
+	echo '</table></div>';
+	echo vp_bh_journal_js(); // phpcs:ignore
 	return ob_get_clean();
+}
+
+function vp_bh_journal_js() {
+	$treffer = esc_js( __( '%1$d von %2$d Buchungen', 'vereinsplugin' ) );
+	return '<style>'
+		. '.vp-jt-sort{all:unset;cursor:pointer;white-space:nowrap;font:inherit;color:inherit}'
+		. '.vp-jt-sort:hover{text-decoration:underline}.vp-jt-sort:focus-visible{outline:2px solid currentColor;outline-offset:2px}'
+		. '.vp-jt-pfeil{display:inline-block;width:1em;font-size:.8em;opacity:.7}'
+		. '.vp-jt-spalten>summary{list-style:none}.vp-jt-spalten>summary::-webkit-details-marker{display:none}'
+		. '.vp-jt tfoot td{border-top:2px solid var(--vp-border)}'
+		. '</style><script>(function(){'
+		. 'var t=document.querySelector(".vp-jt");if(!t)return;var L=document.querySelector(".vp-jt-leiste"),key=t.getAttribute("data-jt-key");'
+		. 'function lies(k){try{return JSON.parse(localStorage.getItem(key+k)||"null");}catch(e){return null;}}'
+		. 'function merk(k,v){try{localStorage.setItem(key+k,JSON.stringify(v));}catch(e){}}'
+		. 'var body=t.tBodies[0],rows=[].slice.call(body.rows),boxes=[].slice.call(L.querySelectorAll("[data-jt-spalte]"));'
+		// Spalten
+		. 'var sicht=lies("_spalten");if(sicht)boxes.forEach(function(b){var k=b.getAttribute("data-jt-spalte");if(k in sicht)b.checked=!!sicht[k];});'
+		. 'function spalten(){var m={};boxes.forEach(function(b){var k=b.getAttribute("data-jt-spalte");m[k]=b.checked;t.querySelectorAll("[data-c=\""+k+"\"]").forEach(function(c){c.style.display=b.checked?"":"none";});});return m;}'
+		. 'boxes.forEach(function(b){b.addEventListener("change",function(){merk("_spalten",spalten());});});'
+		. 'L.querySelector("[data-jt-standard]").addEventListener("click",function(){boxes.forEach(function(b){b.checked=b.getAttribute("data-standard")==="1";});merk("_spalten",spalten());});'
+		. 'spalten();'
+		// Sortieren
+		. 'var sort=lies("_sort")||{k:"",d:1};'
+		. 'function wert(r,k){var c=r.querySelector("[data-c=\""+k+"\"]");return c?c.getAttribute("data-s"):"";}'
+		. 'function sortieren(){if(!sort.k)return;var arr=rows.slice();arr.sort(function(a,b){var x=wert(a,sort.k),y=wert(b,sort.k);'
+		. 'if(x===""&&y!=="")return 1;if(y===""&&x!=="")return -1;var nx=parseFloat(x),ny=parseFloat(y);'
+		. 'var r=(!isNaN(nx)&&!isNaN(ny)&&/^-?[\d.]+$/.test(x)&&/^-?[\d.]+$/.test(y))?nx-ny:x.localeCompare(y,"de",{numeric:true,sensitivity:"base"});return r*sort.d;});'
+		. 'arr.forEach(function(r){body.appendChild(r);});'
+		. 't.querySelectorAll(".vp-jt-sort").forEach(function(b){var k=b.getAttribute("data-jt-sort");b.querySelector(".vp-jt-pfeil").textContent=k===sort.k?(sort.d>0?" ▲":" ▼"):"";b.closest("th").setAttribute("aria-sort",k===sort.k?(sort.d>0?"ascending":"descending"):"none");});}'
+		. 't.querySelectorAll(".vp-jt-sort").forEach(function(b){b.addEventListener("click",function(){var k=b.getAttribute("data-jt-sort");'
+		. 'if(sort.k===k&&sort.d===-1){sort={k:"",d:1};arr0();}else{sort={k:k,d:sort.k===k?-1:1};sortieren();}merk("_sort",sort);});});'
+		. 'function arr0(){rows.forEach(function(r){body.appendChild(r);});t.querySelectorAll(".vp-jt-pfeil").forEach(function(p){p.textContent="";});}'
+		. 'sortieren();'
+		// Suche + Art
+		. 'var q=L.querySelector("[data-jt-suche]"),art=L.querySelector("[data-jt-art]"),z=L.querySelector("[data-jt-zaehler]"),leer=t.querySelector("[data-jt-leer]");'
+		. 'function fmt(n){return n.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});}'
+		. 'function filtern(){var w=q.value.toLowerCase().trim().split(/\s+/).filter(Boolean),a=art.value,n=0,ein=0,aus=0;'
+		. 'rows.forEach(function(r){var s=r.getAttribute("data-such"),ok=(!a||r.getAttribute("data-art")===a)&&w.every(function(x){return s.indexOf(x)>=0;});r.hidden=!ok;if(ok){n++;ein+=parseFloat(r.getAttribute("data-ein"))||0;aus+=parseFloat(r.getAttribute("data-aus"))||0;}});'
+		. 'var aktiv=w.length||a;z.textContent=aktiv?"' . $treffer . '".replace("%1$d",n).replace("%2$d",rows.length):"";if(leer)leer.hidden=!(aktiv&&!n);'
+		. 't.querySelectorAll("[data-jt-summe]").forEach(function(s){s.textContent=aktiv?fmt(s.getAttribute("data-jt-summe")==="ein"?ein:aus):s.getAttribute("data-gesamt");});'
+		. 't.querySelectorAll("[data-jt-summe-label]").forEach(function(s){s.textContent=s.getAttribute(aktiv?"data-gefiltert":"data-gesamt");});}'
+		. 'q.addEventListener("input",filtern);art.addEventListener("change",filtern);'
+		. 'document.addEventListener("click",function(e){var d=L.querySelector(".vp-jt-spalten");if(d.open&&!d.contains(e.target))d.open=false;});'
+		. '})();</script>';
 }
 
 /** Felder „Rücklage / Budget / Kostenstelle“ einer Buchung (Journal, Auslagen, Belege). */
