@@ -359,6 +359,18 @@ Theme-Template steht.
   je Projekt und Status), Adressen kopieren, BCC im eigenen Mailprogramm oder
   Rundmail von der Website – einzeln an jede:n, mit {name} und {firma}.
 
+## Buchungsjournal: Suchen, Spalten, Sortieren
+
+- **Suche** über Zweck, Gegenpartei, Konto, Budget, Rücklage, Kostenstelle,
+  Beleg-Nr. und Betrag (z. B. „84,20“). Mehrere Wörter grenzen weiter ein.
+- **Art-Filter**: nur Ausgaben, Einnahmen oder Umbuchungen. Die Summenzeile
+  zeigt dann die Summe der Treffer.
+- **Spalten** ein- und ausblenden: neu sind Budget, Rücklage, Kostenstelle,
+  Art, Geldkonto, Projekt, USt/VSt und Quelle. Die Auswahl merkt sich der
+  Browser; „Standard“ setzt sie zurück.
+- **Sortieren** per Klick auf die Spaltenüberschrift (aufsteigend, absteigend,
+  dritter Klick: ursprüngliche Reihenfolge).
+
 ## „Als TOP vorschlagen“ (Themenspeicher)
 
 In Kasse/Budgets, Kreiskassen, Wunschliste, Kreisen (inkl. neuer Kreis /
